@@ -8,12 +8,7 @@
 #include <stdlib.h>
 
 void InterfaceWeb(struct evhttp_request *evRequest, void *arg) {
-	//evhttp_add_header(evRequest->output_headers, "Content-Type", "text/html");
-
 	struct evbuffer *buff = evbuffer_new(); {
-		if (buff == NULL)
-			return; // ???
-
 		evbuffer_add_printf(buff, "<html><head><title>LiveProxies %s interface: Checked proxies</title></head><body>", VERSION);
 
 		sem_wait(&lockCheckedProxies); {
@@ -44,12 +39,7 @@ static void IntBlock3(size_t In, size_t *Out1, size_t *Out2) {
 }
 
 void InterfaceWebUnchecked(struct evhttp_request *evRequest, void *arg) {
-	//evhttp_add_header(evRequest->output_headers, "Content-Type", "text/html");
-
 	struct evbuffer *buff = evbuffer_new(); {
-		if (buff == NULL)
-			return; // ???
-
 		evbuffer_add_printf(buff, "<html><head><title>LiveProxies %s interface: Unchecked proxies</title></head><body>", VERSION);
 
 		sem_wait(&lockUncheckedProxies); {
@@ -89,7 +79,6 @@ void InterfaceWebUnchecked(struct evhttp_request *evRequest, void *arg) {
 					/*timeRaw = uncheckedProxies[x]->requestTimeMs / 1000;
 
 					Log(LOG_LEVEL_DEBUG, "WServer: time_t %d", timeRaw);
-					Dump(&timeRaw, 4, 4);
 
 					timeinfo = localtime(&timeRaw);
 

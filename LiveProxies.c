@@ -217,7 +217,7 @@ void CheckLoop() {
 			for (size_t x = 0; x < sizeUncheckedProxies; x++) {
 				if (CurrentlyChecking > SimultaneousChecks)
 					break;
-				if (!(uncheckedProxies[x]->checking)/* && uncheckedProxies[x]->retries < ACCEPTABLE_SEQUENTIAL_FAILS*/) {
+				if (!(uncheckedProxies[x]->checking)) {
 					uncheckedProxies[x]->checking = true;
 					Log(LOG_LEVEL_DEBUG, "CheckLoop: Proxy %d set checking", x);
 					RequestAsync(uncheckedProxies[x]);

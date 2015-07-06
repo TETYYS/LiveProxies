@@ -104,15 +104,11 @@ void HarvestLoop() {
 					pch[strlen(pch) - 1] = '\0';
 					map = StringToIPv6Map(pch + 1);
 				}
-				else {
+				else
 					map = StringToIPv6Map(pch);
-				}
-				// check if parses with [IPv6]:port
-				// it doesn't
 
-				if (map == NULL) {
+				if (map == NULL)
 					goto next;
-				}
 
 				UNCHECKED_PROXY *up = malloc(sizeof(UNCHECKED_PROXY));
 				up->type = curType;

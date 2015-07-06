@@ -33,13 +33,12 @@ static char *GetCountryByIPv6Map(IPv6Map *In) {
 }
 
 void WServerLanding(struct evhttp_request *evRequest, void *arg) {
-	Log(LOG_LEVEL_DEBUG, "WServer landing at your services!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+	Log(LOG_LEVEL_DEBUG, "WServer landing at your services!");
 	UNCHECKED_PROXY *UProxy = NULL;
 
 	/* Get UProxy pointer */ {
 
 		char *keyRaw = evhttp_find_header(evRequest->input_headers, "LPKey");
-		//evhtp_header_t *headerKey = evhtp_header_find(evRequest->headers_in, "LPKey");
 
 		if (keyRaw == NULL) {
 			Log(LOG_LEVEL_WARNING, "Request IP %s doesn't have LPKey", evRequest->remote_host);
@@ -71,16 +70,9 @@ void WServerLanding(struct evhttp_request *evRequest, void *arg) {
 			// Loose proxy is automatically free'd by EVWrite called timeout
 		}
 		sem_wait(&(UProxy->processing));
-
-		/*assert(UProxy->checking);
-		if (!UProxy->checking) {
-		Log(LOG_LEVEL_ERROR, "SOMEONE BROKE THE SYSTEM!!! (446258)");
-		exit(EXIT_FAILURE); // FUK everything!
-		}*/
 	} /* End get UProxy pointer */
 
 	/* Process headers */ {
-		//bufferevent_get_output(evhttp_connection_get_bufferevent(evRequest));
 		PROXY *proxy;
 
 		if (UProxy->associatedProxy == NULL) {

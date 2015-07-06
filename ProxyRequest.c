@@ -61,12 +61,9 @@ static void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UPr
 	// It should be in WServer now.
 	Log(LOG_LEVEL_DEBUG, "EVWrite");
 	UProxy->requestTimeHttpMs = GetUnixTimestampMilliseconds();
-
-	// bufferevent_free(BuffEvent); // PROBLEM!!!!!!!!!!!!!!!!!! <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 }
 
 static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_PROXY *UProxy) {
-
 	sem_wait(&lockUncheckedProxies); {
 		bool found = false;
 		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
@@ -214,11 +211,7 @@ static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCH
 			Log(LOG_LEVEL_DEBUG, "EVEvent: event timeout / fail %s", ip);
 		} free(ip);
 		Log(LOG_LEVEL_DEBUG, "EVEvent: timeout BuffEvent: %08x event %d", BuffEvent, Event);
-
-		/*if (Event != BEV_EVENT_READING) { // ???
-			bufferevent_disable(BuffEvent, EV_READ | EV_WRITE);
-			bufferevent_free(BuffEvent);
-			}*/
+		
 		REQUEST_FREE_STRUCT *s = malloc(sizeof(REQUEST_FREE_STRUCT));
 		s->BuffEvent = BuffEvent;
 		s->UProxy = UProxy;
@@ -278,13 +271,13 @@ void RequestAsync(UNCHECKED_PROXY *UProxy) {
 
 	Log(LOG_LEVEL_DEBUG, "RequestAsync: new socket");
 
-	//bufferevent_set_timeouts(buffEvent, &timeout, &timeout);
+	bufferevent_set_timeouts(buffEvent, &timeout, &timeout);
 	bufferevent_setcb(buffEvent, NULL, (bufferevent_data_cb)EVWrite, (bufferevent_data_cb)EVEvent, UProxy);
 	bufferevent_enable(buffEvent, EV_READ | EV_WRITE);
 
 	Log(LOG_LEVEL_DEBUG, "RequestAsync: enable READ/WRITE");
 
-	assert(bufferevent_socket_connect(buffEvent, sa, sizeof(struct sockaddr)) == 0); // socket creation should never fail
+	assert(bufferevent_socket_connect(buffEvent, sa, sizeof(struct sockaddr)) == 0); // socket creation should never fail, because IP is always valid (!= dead)
 	UProxy->requestTimeMs = GetUnixTimestampMilliseconds();
 	Log(LOG_LEVEL_DEBUG, "RequestAsync: UProxy request time: %llu", UProxy->requestTimeMs);
 

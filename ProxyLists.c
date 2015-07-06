@@ -51,18 +51,6 @@ bool UProxyAdd(UNCHECKED_PROXY *UProxy) {
 		}
 	} sem_post(&lockUncheckedProxies);
 	Log(LOG_LEVEL_DEBUG, "UProxyAdd: size %d", sizeUncheckedProxies);
-	/*sem_wait(&lockCheckedProxies); {
-		for (uint32_t x = 0; x < sizeCheckedProxies; x++) {
-		if (memcmp(UProxy->ip, checkedProxies[x]->ip, sizeof(IPv6Map)) == 0 &&
-		UProxy->port == uncheckedProxies[x]->port) {
-		char *ip = IPv6MapToString(UProxy->ip); {
-		Log(LOG_LEVEL_WARNING, "Warning: tried to add already added unchecked proxy (1) (%s:%d)", ip, UProxy->port);
-		} free(ip);
-		sem_post(&lockCheckedProxies);
-		return false;
-		}
-		}
-		} sem_post(&lockCheckedProxies);*/ // wtf?
 
 	if (MultiFlag(UProxy->type)) { // matches 0, 1, 2, 4, 8, 16...
 		for (size_t x = 0; x < PROXY_TYPE_COUNT - 1 /* -1 because of type 1 */; x++) {
