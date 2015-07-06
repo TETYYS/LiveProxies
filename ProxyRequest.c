@@ -44,14 +44,12 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 				Log(LOG_LEVEL_DEBUG, "RequestFree: Removing proxy %s...", ip);
 			} free(ip);
 			UProxyRemove(UProxy);
-		}
-		else {
+		} else {
 			UProxy->retries++;
 			UProxy->checking = false;
 			sem_post(&(UProxy->processing));
 		}
-	}
-	else {
+	} else {
 		Log(LOG_LEVEL_DEBUG, "RequestFree: Free'ing proxy and updating parent");
 		UProxyFailUpdateParentInfo(UProxy);
 		UProxyFree(UProxy);
