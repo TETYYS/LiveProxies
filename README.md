@@ -1,0 +1,69 @@
+# LiveProxies
+Latest Version: **0.4.2**
+
+LiveProxies is a [high-performance](#performance) asynchronous proxy checker.
+
+## Features
+ - Utilizes Python scripts to harvest (or scrape) proxy lists
+ - Analyzes proxy output headers and determines proxy anonymity being:
+ - - When proxy reveals correct IP behind the proxy - **transparent**
+ - - When proxy modifies or adds any kind of headers - **anonymous**
+ - - When proxy headers match request headers - **max**
+ - Doesn't require any external web servers for its interface and internal proxy checking page
+ - ...
+
+## Get it running
+If you still haven't installed depencencies:
+```
+apt-get install libevent-dev python2.7-dev libssl-dev libgeoip-dev libpcre3-dev libconfig-dev
+```
+### Compilation: 
+```
+cmake .
+make
+```
+#### Instalation:
+```
+mkdir /etc/liveproxies
+mkdir /etc/liveproxies/scripts
+mv ./liveproxies.conf /etc/liveproxies.conf
+nano /etc/liveproxies.conf
+```
+#### Usage:
+
+Now you probably would want to add scraping scripts to `/etc/liveproxies/scripts`.
+
+See `BlogspotGeneric.py` for example script. **NOTE:** All blogspot websites are different, so script doesn't always match with blog HTML.
+
+After running, you can see your proxy lists at
+ - [ip]:[port]/iface - **Valid proxy list**
+ - [ip]:[port]/ifaceu - **Currently unchecked proxy list**
+
+## Dependencies
+ - libevent >= 2.0.2-alpha
+ - python >= 2.7
+ - [Maxmind's GeoIP]
+ - libconfig
+ - pcre
+ - openssl
+
+## Development
+The program is currently in its very early stages, so any help is appreciated. See TODO list.
+
+## Performance <a name="performance"></a>
+Currently, program doesn't slow down at all at 7000 simultaneous proxy checks, but has memory problems. 85 MB for 7000 simultaneous proxy checks seems high.
+
+## TODO
+ - Implement authentication on interface pages
+ - Test and fix IPv6
+ - Test and fix SOCKS4 / SOCKS5
+ - Provide more information on interface pages, fix formatting
+ - Provide more interactivity on interface pages
+ - Make HTML template system for interface pages
+ - Interface pages needs design **ASAP**! (seriously, they look hideous)
+ - Implement checked proxy checking.
+ - Adapt SSL for interface and proxies
+ - ...
+ 
+
+[Maxmind's GeoIP]:https://github.com/maxmind/geoip-api-c/
