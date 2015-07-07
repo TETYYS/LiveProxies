@@ -54,9 +54,9 @@ The program is currently in its very early stages, so any help is appreciated. S
 Currently, program doesn't slow down at all at 7000 simultaneous proxy checks, but has memory problems. 85 MB for 7000 simultaneous proxy checks seems high.
 
 ## TODO
+ - ~~Test and fix SOCKS4 / SOCKS5~~
  - Implement authentication on interface pages
  - Test and fix IPv6
- - Test and fix SOCKS4 / SOCKS5
  - Provide more information on interface pages, fix formatting
  - Provide more interactivity on interface pages
  - Make HTML template system for interface pages
