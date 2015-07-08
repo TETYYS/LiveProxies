@@ -22,12 +22,19 @@ apt-get install libevent-dev python2.7-dev libssl-dev libgeoip-dev libpcre3-dev 
 cmake .
 make
 ```
-#### Instalation:
+#### Installation:
 ```
 mkdir /etc/liveproxies
 mkdir /etc/liveproxies/scripts
 mv ./liveproxies.conf /etc/liveproxies.conf
 nano /etc/liveproxies.conf
+mkdir /usr/local/share/GeoIP
+wget http://geolite.maxmind.com/download/geoip/database/GeoLiteCountry/GeoIP.dat.gz
+gunzip GeoIP.dat.gz
+mv GeoIP.dat /usr/local/share/GeoIP/
+wget http://geolite.maxmind.com/download/geoip/database/GeoIPv6.dat.gz
+gunzip GeoIPv6.dat.gz
+mv GeoIPv6.dat /usr/local/share/GeoIP/
 ```
 #### Usage:
 
