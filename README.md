@@ -64,12 +64,13 @@ Currently, program doesn't slow down at all at 7000 simultaneous proxy checks, b
  - ~~Test and fix SOCKS4 / SOCKS5~~
  - ~~Fix IPv6~~
  - Implement authentication on interface pages
+ - Adapt SSL for interface and proxies
  - Provide more information on interface pages, fix formatting
  - Provide more interactivity on interface pages
  - Make HTML template system for interface pages
  - Interface pages needs design **ASAP**! (seriously, they look hideous)
  - Implement checked proxy checking.
- - Adapt SSL for interface and proxies
+ 
  - ...
  
 
