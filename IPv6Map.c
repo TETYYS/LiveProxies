@@ -51,14 +51,54 @@ MEM_OUT IPv6Map *StringToIPv6Map(char *In) {
 MEM_OUT char *IPv6MapToString(IPv6Map *In) {
 	char *ret;
 	if (GetIPType(In) == IPV4) {
-		ret = malloc(sizeof(char)* INET_ADDRSTRLEN);
+		ret = malloc(sizeof(char) * INET_ADDRSTRLEN + 1);
 		inet_ntop(AF_INET, &(In->Data[3]), ret, INET_ADDRSTRLEN);
 	}
 	else if (GetIPType(In) == IPV6) {
-		ret = malloc(sizeof(char)* INET6_ADDRSTRLEN);
+		ret = malloc(sizeof(char) * INET6_ADDRSTRLEN + 1);
 		inet_ntop(AF_INET6, In->Data, ret, INET6_ADDRSTRLEN);
 	}
 	return ret;
+}
+
+MEM_OUT char *IPv6MapToString2(IPv6Map *In) {
+	char *ret;
+	if (GetIPType(In) == IPV4) {
+		ret = malloc(sizeof(char) * INET_ADDRSTRLEN + 1);
+		inet_ntop(AF_INET, &(In->Data[3]), ret, INET_ADDRSTRLEN);
+	}
+	else if (GetIPType(In) == IPV6) {
+		ret = malloc(sizeof(char) * (INET6_ADDRSTRLEN + 2) + 1);//calloc((INET6_ADDRSTRLEN + 2) + 1, sizeof(char));
+		memset(ret, 0, sizeof(char)* (INET6_ADDRSTRLEN + 2) + 1);
+		inet_ntop(AF_INET6, In->Data, ret + 1, INET6_ADDRSTRLEN);
+		ret[0] = '[';
+		ret[strlen(ret)] = ']';
+	}
+	return ret;
+}
+
+MEM_OUT struct sockaddr *IPv6MapToRaw(IPv6Map *In, uint16_t Port) {
+	if (GetIPType(In) == IPV4) {
+		struct sockaddr_in *sin = calloc(1, sizeof(struct sockaddr_in)); // change to struct sockaddr if doesn't work
+		*((uint32_t*)(&(sin->sin_addr.s_addr))) = In->Data[3];
+		sin->sin_family = AF_INET;
+		sin->sin_port = htons(Port);
+		return (struct sockaddr*)sin;
+	} else {
+		/*struct sockaddr_in6 *sin = calloc(1, sizeof(struct sockaddr_in6)); // need sockaddr ??
+		//sin->sin6_len = sizeof(sizeof(struct sockaddr_in6));
+		sin->sin6_family = AF_INET6;
+		sin->sin6_port = htons(Port);
+		memcpy(&(sin->sin6_addr.__in6_u), In->Data, IPV6_SIZE);
+		return (struct sockaddr*)sin;*/
+		struct sockaddr_in6 *sin = calloc(1, sizeof(struct sockaddr_in6));
+		char *ip = IPv6MapToString(In); {
+			inet_pton(AF_INET6, ip, &(sin->sin6_addr));
+		} free(ip);
+		sin->sin6_family = AF_INET6;
+		sin->sin6_port = htons(Port);
+		return (struct sockaddr*)sin;
+	}
 }
 
 MEM_OUT IPv6Map *GetIPFromHSock(int hSock) {

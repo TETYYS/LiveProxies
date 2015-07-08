@@ -15,9 +15,15 @@
 #include <assert.h>
 
 static char *GetCountryByIPv6Map(IPv6Map *In) {
-	if (GeoIPDB == NULL)
-		GeoIPDB = GeoIP_open("/usr/local/share/GeoIP/GeoIP.dat", GEOIP_MEMORY_CACHE);
-	assert(GeoIPDB != NULL);
+	if (GetIPType(In) == IPV4) {
+		if (GeoIPDB == NULL)
+			GeoIPDB = GeoIP_open("/usr/local/share/GeoIP/GeoIP.dat", GEOIP_MEMORY_CACHE);
+		assert(GeoIPDB != NULL);
+	} else {
+		if (GeoIPDB6 == NULL)
+			GeoIPDB6 = GeoIP_open("/usr/local/share/GeoIP/GeoIPv6.dat", GEOIP_MEMORY_CACHE);
+		assert(GeoIPDB6 != NULL);
+	}
 
 	char *ret;
 	if (GetIPType(In) == IPV4) {
@@ -26,7 +32,7 @@ static char *GetCountryByIPv6Map(IPv6Map *In) {
 	else {
 		geoipv6_t ip;
 		memcpy(ip.s6_addr, In->Data, IPV6_SIZE);
-		ret = GeoIP_country_name_by_ipnum_v6(GeoIPDB, ip);
+		ret = GeoIP_country_name_by_ipnum_v6(GeoIPDB6, ip);
 	}
 
 	return ret == NULL ? "--" : ret;

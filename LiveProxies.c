@@ -68,6 +68,16 @@ int main() {
 		}
 	}
 
+	if (config_setting_lookup_string(cfgRoot, "HarvestersPath", &HarvestersPath) == CONFIG_FALSE) {
+		Log(LOG_LEVEL_ERROR, "Failed to lookup HarvestersPath, setting to /etc/liveproxies/scripts/...");
+		HarvestersPath = "/etc/liveproxies/scripts/";
+	}
+
+	if (config_setting_lookup_bool(cfgRoot, "DisableIPv6", &DisableIPv6) == CONFIG_FALSE) {
+		Log(LOG_LEVEL_ERROR, "Failed to lookup DisableIPv6, setting to false...");
+		DisableIPv6 = false;
+	}
+
 	char *globalIp;
 	if (config_setting_lookup_string(cfgRoot, "GlobalIp", &globalIp) == CONFIG_FALSE) {
 		Log(LOG_LEVEL_ERROR, "Failed to lookup GlobalIp, exiting...");
@@ -79,13 +89,12 @@ int main() {
 		Log(LOG_LEVEL_ERROR, "Invalid GlobalIp value, exiting...");
 		exit(EXIT_FAILURE);
 	}
-
-	if (config_setting_lookup_string(cfgRoot, "HarvestersPath", &HarvestersPath) == CONFIG_FALSE) {
-		Log(LOG_LEVEL_ERROR, "Failed to lookup HarvestersPath, setting to /etc/liveproxies/scripts/...");
-		HarvestersPath = "/etc/liveproxies/scripts/";
+	if (GetIPType(GlobalIp) == IPV6 && DisableIPv6) {
+		Log(LOG_LEVEL_ERROR, "Got IPv6 address at GlobalIp, but IPv6 is disabled (DisableIPv6 == true), exiting...");
+		exit(EXIT_FAILURE);
 	}
 
-	char *ip = IPv6MapToString(GlobalIp); {
+	char *ip = IPv6MapToString2(GlobalIp); {
 		RequestString = calloc((291 /* :^) */ + strlen(ip) + strlen(VERSION) + 1 + INTEGER_VISIBLE_SIZE(ServerPort)), sizeof(char));
 		sprintf(RequestString,
 			"GET /prxchk HTTP/1.1\n"
@@ -207,25 +216,36 @@ void RequestBase() {
 void CheckLoop() {
 	Log(LOG_LEVEL_DEBUG, "CheckLoop: Start");
 	for (;;) {
-		size_t count;
+		size_t count = 0;
+		UNCHECKED_PROXY **proxiesToCheck = NULL;
 
 		Log(LOG_LEVEL_DEBUG, "CheckLoop: Waiting for UProxy list lock...");
 		sem_wait(&lockUncheckedProxies); {
 			Log(LOG_LEVEL_DEBUG, "CheckLoop: Looping through UProxies...");
-			size_t toRemoveSize = 0;
 
 			for (size_t x = 0; x < sizeUncheckedProxies; x++) {
 				if (CurrentlyChecking > SimultaneousChecks)
 					break;
 				if (!(uncheckedProxies[x]->checking)) {
-					uncheckedProxies[x]->checking = true;
-					Log(LOG_LEVEL_DEBUG, "CheckLoop: Proxy %d set checking", x);
-					RequestAsync(uncheckedProxies[x]);
+					if (proxiesToCheck == NULL)
+						proxiesToCheck = malloc(sizeof(proxiesToCheck));
+					else
+						proxiesToCheck = realloc(proxiesToCheck, (count + 1) * sizeof(proxiesToCheck));
+					proxiesToCheck[count++] = uncheckedProxies[x];
 				}
 				else
 					Log(LOG_LEVEL_DEBUG, "CheckLoop: Proxy %d discard", x);
 			}
 		} sem_post(&lockUncheckedProxies);
+
+		for (size_t x = 0; x < count;x++) {
+			proxiesToCheck[x]->checking = true;
+			Log(LOG_LEVEL_DEBUG, "CheckLoop: Proxy %d set checking", x);
+			RequestAsync(proxiesToCheck[x]);
+		}
+
+		free(proxiesToCheck);
+		count = 0;
 
 		Log(LOG_LEVEL_DEBUG, "CheckLoop: Sleeping... (%d)", CurrentlyChecking);
 		msleep(CheckingInterval);

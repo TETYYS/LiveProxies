@@ -35,9 +35,10 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 
 	InterlockedDecrement(&CurrentlyChecking, 1);
 
-	sem_wait(&lockUncheckedProxies); {
-		sem_wait(&(UProxy->processing)); // locks only on EVWrite called timeout
-	} sem_post(&lockUncheckedProxies);
+	/*sem_wait(&lockUncheckedProxies); {
+	} sem_post(&lockUncheckedProxies);*/
+	sem_wait(&(UProxy->processing)); // locks only on EVWrite called timeout
+	
 	if (UProxy->associatedProxy == NULL) {
 		if (UProxy->retries > AcceptableSequentialFails || UProxy->checkSuccess) {
 			char *ip = IPv6MapToString(UProxy->ip); {
@@ -226,39 +227,20 @@ static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCH
 void RequestAsync(UNCHECKED_PROXY *UProxy) {
 	struct event_base *base;
 	struct bufferevent **bevs;
-	struct sockaddr *sa;
 
-	// getting tired of struct bullshit
-	if (GetIPType(GlobalIp) == IPV6) {
-		struct sockaddr_in6 *sin = calloc(1, sizeof(struct sockaddr));
-		char *ip = IPv6MapToString(UProxy->ip); {
-			inet_pton(AF_INET6, ip, &(sin->sin6_addr));
-		} free(ip);
-		sin->sin6_family = AF_INET6;
-		sin->sin6_port = htons(UProxy->port);
-		sa = (struct sockaddr *)sin;
-	}
-	else {
-		struct sockaddr_in *sin = calloc(1, sizeof(struct sockaddr));
-		char *ip = IPv6MapToString(UProxy->ip); {
-			inet_pton(AF_INET, ip, &(sin->sin_addr));
-		} free(ip);
-		sin->sin_family = AF_INET;
-		sin->sin_port = htons(UProxy->port);
-		sa = (struct sockaddr *)sin;
-	}
+	// getting tired of struct bullshit!!!
+	struct sockaddr *sa = IPv6MapToRaw(UProxy->ip, UProxy->port);
 
 #if DEBUG
 	char *ip = IPv6MapToString(UProxy->ip); {
 		Log(LOG_LEVEL_DEBUG, "RequestAsync: [%s]:%d", ip, UProxy->port);
 		if (GetIPType(UProxy->ip) == IPV4) {
 			char *asd = calloc(1, 64 /* whatever */);
-			inet_ntop(AF_INET, &(((struct sockaddr_in*)sa)->sin_addr), asd, sizeof(struct sockaddr));
+			inet_ntop(AF_INET, &(((struct sockaddr_in*)sa)->sin_addr), asd, INET_ADDRSTRLEN);
 			Log(LOG_LEVEL_DEBUG, "RequestAsync 2: [%s]:%d", asd, ntohs(((struct sockaddr_in*)sa)->sin_port));
-		}
-		else {
+		} else {
 			char *asd = calloc(1, 64 /* whatever */);
-			inet_ntop(AF_INET, &(((struct sockaddr_in6*)sa)->sin6_addr), asd, sizeof(struct sockaddr));
+			inet_ntop(AF_INET6, &(((struct sockaddr_in6*)sa)->sin6_addr), asd, INET6_ADDRSTRLEN);
 			Log(LOG_LEVEL_DEBUG, "RequestAsync 2: [%s]:%d", asd, ntohs(((struct sockaddr_in6*)sa)->sin6_port));
 		}
 	} free(ip);
@@ -275,9 +257,6 @@ void RequestAsync(UNCHECKED_PROXY *UProxy) {
 	bufferevent_setcb(buffEvent, NULL, (bufferevent_data_cb)EVWrite, (bufferevent_data_cb)EVEvent, UProxy);
 	bufferevent_enable(buffEvent, EV_READ | EV_WRITE);
 
-	Log(LOG_LEVEL_DEBUG, "RequestAsync: enable READ/WRITE");
-
-	assert(bufferevent_socket_connect(buffEvent, sa, sizeof(struct sockaddr)) == 0); // socket creation should never fail, because IP is always valid (!= dead)
 	UProxy->requestTimeMs = GetUnixTimestampMilliseconds();
 	Log(LOG_LEVEL_DEBUG, "RequestAsync: UProxy request time: %llu", UProxy->requestTimeMs);
 
@@ -290,4 +269,6 @@ void RequestAsync(UNCHECKED_PROXY *UProxy) {
 
 	UProxy->timeout = event_new(levRequestBase, -1, EV_TIMEOUT, (event_callback_fn)RequestFree, s);
 	event_add(UProxy->timeout, &timeout);
+
+	bufferevent_socket_connect(buffEvent, sa, sizeof(struct sockaddr_in6)); // socket creation should never fail, because IP is always valid (!= dead)
 }

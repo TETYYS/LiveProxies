@@ -42,7 +42,7 @@ bool UProxyAdd(UNCHECKED_PROXY *UProxy) {
 	sem_wait(&lockUncheckedProxies); {
 		for (uint32_t x = 0; x < sizeUncheckedProxies; x++) {
 			if (memcmp(UProxy->hash, uncheckedProxies[x]->hash, 512 / 8) == 0) {
-				char *ip = IPv6MapToString(UProxy->ip); {
+				char *ip = IPv6MapToString2(UProxy->ip); {
 					Log(LOG_LEVEL_WARNING, "Warning: tried to add already added unchecked proxy (%s:%d)", ip, UProxy->port);
 				} free(ip);
 				sem_post(&lockUncheckedProxies);

@@ -110,6 +110,11 @@ void HarvestLoop() {
 				if (map == NULL)
 					goto next;
 
+				if (GetIPType(map) == IPV6 && DisableIPv6) {
+					Log(LOG_LEVEL_WARNING, "Got IPv6 address from harvester %s, but IPv6 is disabled (DisableIPv6 == true)", path);
+					goto next;
+				}
+
 				UNCHECKED_PROXY *up = malloc(sizeof(UNCHECKED_PROXY));
 				up->type = curType;
 				up->checking = false;
@@ -119,7 +124,7 @@ void HarvestLoop() {
 				up->retries = 0;
 				sem_init(&(up->processing), 0, LOCK_UNBLOCKED);
 				up->port = curPort;
-				up->ip = StringToIPv6Map(pch);
+				up->ip = map;
 				GenerateHashForUProxy(up);
 				up->associatedProxy = NULL;
 

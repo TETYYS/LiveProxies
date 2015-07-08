@@ -6,6 +6,7 @@
 #include "GeoIP.h"
 
 GeoIP *GeoIPDB;
+GeoIP *GeoIPDB6;
 pcre *ipv6Regex;
 pcre_extra *ipv6RegexEx;
 pcre *ipv4Regex;

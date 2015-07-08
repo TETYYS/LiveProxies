@@ -14,7 +14,7 @@ void InterfaceWeb(struct evhttp_request *evRequest, void *arg) {
 		sem_wait(&lockCheckedProxies); {
 			evbuffer_add_printf(buff, "<center>Checked proxies: %d, currently checking: %d</center><br />", sizeUncheckedProxies, CurrentlyChecking);
 			for (size_t x = 0; x < sizeCheckedProxies; x++) {
-				char *ip = IPv6MapToString(checkedProxies[x]->ip); {
+				char *ip = IPv6MapToString2(checkedProxies[x]->ip); {
 					evbuffer_add_printf(buff, "Proxy %s:%d, country %s, timeout %d, HTTP timeout %d, anonimity %s<br />",
 						ip,
 						checkedProxies[x]->port,
@@ -60,7 +60,7 @@ void InterfaceWebUnchecked(struct evhttp_request *evRequest, void *arg) {
 						evbuffer_add_reference(buff, "<font color=\"red\">", 17, NULL, NULL);
 				}
 
-				char *ip = IPv6MapToString(uncheckedProxies[x]->ip); {
+				char *ip = IPv6MapToString2(uncheckedProxies[x]->ip); {
 					evbuffer_add_printf(buff, "Proxy %s:%d, type->%s, checking->%d, retries->%d",
 						ip,
 						uncheckedProxies[x]->port,

@@ -19,5 +19,7 @@ typedef struct _IPv6Map {
 
 IPv6Map *StringToIPv6Map(char *In);
 char *IPv6MapToString(IPv6Map *In);
+char *IPv6MapToString2(IPv6Map *In);
 IPV6_TYPE GetIPType(IPv6Map *In);
 IPv6Map *GetIPFromHSock(int hSock);
+struct sockaddr *IPv6MapToRaw(IPv6Map *In, uint16_t Port);
