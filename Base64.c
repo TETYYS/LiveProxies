@@ -4,11 +4,13 @@
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <assert.h>
 #include <stdbool.h>
 #include <string.h>
 
 size_t MEM_OUT Base64Encode(const unsigned char* buffer, size_t length, char** b64text) {
+	// outputs with NUL
 	BIO *bio, *b64;
 	BUF_MEM *bufferPtr;
 
@@ -23,7 +25,8 @@ size_t MEM_OUT Base64Encode(const unsigned char* buffer, size_t length, char** b
 	BIO_set_close(bio, BIO_NOCLOSE);
 	BIO_free_all(bio);
 
-	*b64text = bufferPtr->data;
+	*b64text = realloc(bufferPtr->data, bufferPtr->length + 1); // HACK HACK oops
+	(*b64text)[bufferPtr->length] = 0x00;
 	return bufferPtr->length;
 }
 
@@ -39,7 +42,7 @@ static size_t CalcDecodeLength(const char* b64input) {
 	return (len * 3) / 4 - padding;
 }
 
-int MEM_OUT Base64Decode(char* b64message, unsigned char** buffer, size_t* length) {
+bool MEM_OUT Base64Decode(char* b64message, unsigned char** buffer, size_t* length) {
 	BIO *bio, *b64;
 
 	int decodeLen = CalcDecodeLength(b64message);
@@ -52,8 +55,10 @@ int MEM_OUT Base64Decode(char* b64message, unsigned char** buffer, size_t* lengt
 
 	BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
 	*length = BIO_read(bio, *buffer, strlen(b64message));
-	if (*length != decodeLen)
+	if (*length != decodeLen) {
+		free(*buffer);
 		return false;
+	}
 	BIO_free_all(bio);
 
 	return true;

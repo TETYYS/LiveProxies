@@ -79,7 +79,7 @@ MEM_OUT char *IPv6MapToString2(IPv6Map *In) {
 
 MEM_OUT struct sockaddr *IPv6MapToRaw(IPv6Map *In, uint16_t Port) {
 	if (GetIPType(In) == IPV4) {
-		struct sockaddr_in *sin = calloc(1, sizeof(struct sockaddr_in)); // change to struct sockaddr if doesn't work
+		struct sockaddr_in *sin = calloc(1, sizeof(struct sockaddr_in));
 		*((uint32_t*)(&(sin->sin_addr.s_addr))) = In->Data[3];
 		sin->sin_family = AF_INET;
 		sin->sin_port = htons(Port);
@@ -121,4 +121,13 @@ MEM_OUT IPv6Map *GetIPFromHSock(int hSock) {
 	}
 
 	return ret;
+}
+
+bool IPv6MapCompare(IPv6Map *a, IPv6Map *b) {
+	IPV6_TYPE type;
+	if (GetIPType(a) != GetIPType(b))
+		return false;
+	type = GetIPType(a);
+
+	return memcmp(a->Data, b->Data, type == IPV4 ? IPV4_SIZE : IPV6_SIZE) == 0;
 }

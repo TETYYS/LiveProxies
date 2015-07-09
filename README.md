@@ -1,4 +1,5 @@
-# LiveProxies
+LiveProxies
+===================
 Latest Version: **0.4.2**
 
 LiveProxies is a [high-performance](#performance) asynchronous proxy checker.
@@ -45,6 +46,8 @@ See `BlogspotGeneric.py` for example script. **NOTE:** All blogspot websites are
 After running, you can see your proxy lists at
  - [ip]:[port]/iface - **Valid proxy list**
  - [ip]:[port]/ifaceu - **Currently unchecked proxy list**
+ 
+See [Auth](docs/auth.md) for preparing users for interface pages
 
 ## Dependencies
  - libevent >= 2.0.2-alpha
@@ -61,9 +64,8 @@ The program is currently in its very early stages, so any help is appreciated. S
 Currently, program doesn't slow down at all at 7000 simultaneous proxy checks, but has memory problems. 85 MB for 7000 simultaneous proxy checks seems high.
 
 ## TODO
- - ~~Test and fix SOCKS4 / SOCKS5~~
- - ~~Fix IPv6~~
- - Implement authentication on interface pages
+ - Provide GlobalIp for both IPv4 and IPv6 for accurate proxy anonimity checking
+ - ~~Implement authentication on interface pages~~
  - Adapt SSL for interface and proxies
  - Provide more information on interface pages, fix formatting
  - Provide more interactivity on interface pages

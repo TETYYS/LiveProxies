@@ -13,3 +13,4 @@ uint64_t SimultaneousChecks;
 IPv6Map *GlobalIp;
 char *HarvestersPath;
 bool DisableIPv6;
+uint64_t AuthLoginExpiry;

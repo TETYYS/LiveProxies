@@ -99,12 +99,12 @@ void WServerLanding(struct evhttp_request *evRequest, void *arg) {
 			proxy->anonymity = ANONYMITY_NONE;
 		}
 
-		struct evkeyvalq *headers = evRequest->input_headers;
+		struct evkeyvalq *headers = evhttp_request_get_input_headers(evRequest);
 		struct evkeyval *header;
 		bool anonMax = true;
 
 		for (header = headers->tqh_first; header; header = header->next.tqe_next) {
-			char *val = evhttp_find_header(RequestHeaders, header->key); // fix
+			char *val = evhttp_find_header(RequestHeaders, header->key);
 
 			if ((val == NULL || strcmp(val, header->value) != 0) && strcmp(header->key, "LPKey") != 0)
 				anonMax = false;
@@ -130,7 +130,8 @@ void WServerLanding(struct evhttp_request *evRequest, void *arg) {
 					for (size_t x = 0; x < regexRet; x++) {
 						pcre_get_substring(header->value, subStrVec, regexRet, x, &(foundIpStr));
 						IPv6Map *foundIp = StringToIPv6Map(foundIpStr); {
-							if (foundIp != NULL && memcmp(GlobalIp->Data, foundIp->Data, ipv4 ? IPV4_SIZE : IPV6_SIZE) == 0) {
+							// TODO: TODO list #1
+							if (foundIp != NULL && IPv6MapCompare(GlobalIp, foundIp)) {
 								proxy->anonymity = ANONYMITY_TRANSPARENT;
 								break;
 							}
@@ -180,6 +181,10 @@ void WServerBase() {
 	Log(LOG_LEVEL_DEBUG, "/ifaceu set cb: %d", evhttp_set_cb(evWServerHTTP, "/ifaceu", InterfaceWebUnchecked, NULL));
 	Log(LOG_LEVEL_DEBUG, "/iface set cb: %d", evhttp_set_cb(evWServerHTTP, "/iface", InterfaceWeb, NULL));
 	Log(LOG_LEVEL_DEBUG, "/prxchk set cb %d", evhttp_set_cb(evWServerHTTP, "/prxchk", WServerLanding, NULL));
+
+	AuthWebList = NULL;
+	sem_init(&AuthWebLock, false, LOCK_UNBLOCKED);
+	AuthWebCount = 0;
 
 	struct timeval timeout;
 	timeout.tv_sec = GlobalTimeout / 1000;

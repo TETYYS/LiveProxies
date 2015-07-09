@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "Global.h"
 
 typedef enum _IPV6_TYPE {
@@ -23,3 +24,4 @@ char *IPv6MapToString2(IPv6Map *In);
 IPV6_TYPE GetIPType(IPv6Map *In);
 IPv6Map *GetIPFromHSock(int hSock);
 struct sockaddr *IPv6MapToRaw(IPv6Map *In, uint16_t Port);
+bool IPv6MapCompare(IPv6Map *a, IPv6Map *b);

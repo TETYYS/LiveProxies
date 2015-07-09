@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include <semaphore.h>
 #include <openssl/sha.h>
 #include <event2/event.h>
 
