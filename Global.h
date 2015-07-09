@@ -5,7 +5,7 @@
 #include <math.h>
 #include <unistd.h>
 
-#define VERSION "0.4.2"
+#define VERSION "0.4.5"
 #define CALLBACK
 #define OUT
 #define MEM_OUT
