@@ -10,7 +10,8 @@
 #include <dirent.h>
 #include <openssl/sha.h>
 
-static char *last_strstr(const char *haystack, const char *needle) {
+static char *last_strstr(const char *haystack, const char *needle)
+{
 	if (*needle == '\0')
 		return (char *)haystack;
 
@@ -26,7 +27,8 @@ static char *last_strstr(const char *haystack, const char *needle) {
 	return result;
 }
 
-void HarvestLoop() {
+void HarvestLoop()
+{
 	// holy memory
 
 	Py_Initialize();
@@ -103,15 +105,27 @@ void HarvestLoop() {
 				if (pch[0] == '[' && pch[strlen(pch) - 1] == ']') {
 					pch[strlen(pch) - 1] = '\0';
 					map = StringToIPv6Map(pch + 1);
-				}
-				else
+				} else
 					map = StringToIPv6Map(pch);
 
 				if (map == NULL)
 					goto next;
 
-				if (GetIPType(map) == IPV6 && DisableIPv6) {
+				IP_TYPE type = GetIPType(map);
+
+				if (type == IPV6 && DisableIPv6) {
 					Log(LOG_LEVEL_WARNING, "Got IPv6 address from harvester %s, but IPv6 is disabled (DisableIPv6 == true)", path);
+					free(map);
+					goto next;
+				}
+				if (GlobalIp4 == NULL && type == IPV4) {
+					Log(LOG_LEVEL_WARNING, "Got IPv4 address from harvester %s, but no IPv4 is provided (GlobalIp4)", path);
+					free(map);
+					goto next;
+				}
+				if (GlobalIp6 == NULL && type == IPV6) {
+					Log(LOG_LEVEL_WARNING, "Got IPv6 address from harvester %s, but no IPv6 is provided (GlobalIp6)", path);
+					free(map);
 					goto next;
 				}
 
@@ -122,22 +136,20 @@ void HarvestLoop() {
 				up->requestTimeHttpMs = 0;
 				up->checkSuccess = false;
 				up->retries = 0;
-				sem_init(&(up->processing), 0, LOCK_UNBLOCKED);
+				up->timeout = NULL;
+				pthread_mutex_init(&(up->processing), NULL);
 				up->port = curPort;
 				up->ip = map;
 				GenerateHashForUProxy(up);
 				up->associatedProxy = NULL;
 
-				if (!UProxyAdd(up)) {
-					total++;
-					free(up);
-				}
-				else {
-					total++;
+				if (!UProxyAdd(up))
+					UProxyFree(up);
+				else
 					added++;
-				}
+				total++;
 
-			next:
+next:
 				pch = strtok_r(NULL, "\n", &tokSave);
 			}
 			printf("Added %d (%d new) proxies from %s\n", total, added, path);
@@ -152,7 +164,7 @@ freepath:
 		closedir(d);
 		if (sizeUncheckedProxies == 0)
 			printf("Warning: no proxies to check, all threads will be inactive\n");
-	end:
+end:
 		msleep(HARVEST_TIMEOUT);
 	}
 }

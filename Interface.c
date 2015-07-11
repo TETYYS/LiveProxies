@@ -9,7 +9,8 @@
 #include <event2/buffer.h>
 #include <stdlib.h>
 
-bool AuthVerify(struct evhttp_request *evRequest) {
+bool AuthVerify(struct evhttp_request *evRequest)
+{
 	if (AuthLocalList == NULL)
 		return true; // Pass through all users if auth list is empty
 
@@ -46,7 +47,7 @@ bool AuthVerify(struct evhttp_request *evRequest) {
 				username = authStr;
 			}
 
-			sem_wait(&AuthLocalLock); {
+			pthread_mutex_lock(&AuthLocalLock); {
 				for (size_t x = 0; x < AuthLocalCount; x++) {
 					if (strcmp(AuthLocalList[x]->username, username) != 0)
 						continue;
@@ -72,7 +73,7 @@ bool AuthVerify(struct evhttp_request *evRequest) {
 					if (strcmp(AuthLocalList[x]->password, pbkdf2) == 0) {
 						free(pbkdf2);
 
-						sem_wait(&AuthWebLock); {
+						pthread_mutex_lock(&AuthWebLock); {
 							char *sIp;
 							uint16_t port;
 							evhttp_connection_get_peer(evhttp_request_get_connection(evRequest), &sIp, &port);
@@ -81,9 +82,11 @@ bool AuthVerify(struct evhttp_request *evRequest) {
 								IPv6Map *ip = StringToIPv6Map(sIp); {
 									if (IPv6MapCompare(ip, AuthWebList[x]->ip)) {
 										free(ip);
+										free(authStr);
+
 										if (AuthWebList[x]->expiry >(GetUnixTimestampMilliseconds() / 1000)) {
-											sem_post(&AuthLocalLock);
-											sem_post(&AuthWebLock);
+											pthread_mutex_unlock(&AuthLocalLock);
+											pthread_mutex_unlock(&AuthWebLock);
 											return true;
 										} else {
 											free(AuthWebList[x]->username);
@@ -92,8 +95,8 @@ bool AuthVerify(struct evhttp_request *evRequest) {
 											free(AuthWebList[x]);
 											AuthWebList[x] = AuthWebList[AuthWebCount];
 
-											sem_post(&AuthLocalLock);
-											sem_post(&AuthWebLock);
+											pthread_mutex_unlock(&AuthLocalLock);
+											pthread_mutex_unlock(&AuthWebLock);
 											return false; // Auth expired
 										}
 									}
@@ -119,15 +122,14 @@ bool AuthVerify(struct evhttp_request *evRequest) {
 								sprintf(cookieFormat, "LPAuth=%s", AuthWebList[AuthWebCount - 1]->rndVerify);
 								evhttp_add_header(evhttp_request_get_output_headers(evRequest), "Set-Cookie", cookieFormat);
 							} free(cookieFormat);
-						} sem_post(&AuthWebLock);
+						} pthread_mutex_unlock(&AuthWebLock);
 
-						sem_post(&AuthLocalLock);
+						pthread_mutex_unlock(&AuthLocalLock);
 						return true;
-					}
-					else
+					} else
 						free(pbkdf2);
 				}
-			} sem_post(&AuthLocalLock);
+			} pthread_mutex_unlock(&AuthLocalLock);
 
 			free(authStr);
 		} /* End authorize by login */
@@ -152,7 +154,7 @@ bool AuthVerify(struct evhttp_request *evRequest) {
 				if (nextCookie != NULL)
 					nextCookie = 0x00; // Are we allowed to modify inputted headers by evhttp???
 
-				sem_wait(&AuthWebLock); {
+				pthread_mutex_lock(&AuthWebLock); {
 					for (size_t x = 0; x < AuthWebCount; x++) {
 						if (strcmp(AuthWebList[x]->rndVerify, lpAuth) == 0) {
 							if (AuthWebList[x]->expiry >(GetUnixTimestampMilliseconds() / 1000))
@@ -167,7 +169,7 @@ bool AuthVerify(struct evhttp_request *evRequest) {
 							}
 						}
 					}
-				} sem_post(&AuthWebLock);
+				} pthread_mutex_unlock(&AuthWebLock);
 			}
 		} /* End authorize by cookie */
 	}
@@ -175,7 +177,8 @@ bool AuthVerify(struct evhttp_request *evRequest) {
 	return false;
 }
 
-void InterfaceWeb(struct evhttp_request *evRequest, void *arg) {
+void InterfaceWeb(struct evhttp_request *evRequest, void *arg)
+{
 	if (!AuthVerify(evRequest)) {
 		evhttp_add_header(evhttp_request_get_output_headers(evRequest), "WWW-Authenticate", "Basic realm=\""HTTP_AUTHORIZATION_REALM"\"");
 		struct evbuffer *buff = evbuffer_new(); {
@@ -187,7 +190,7 @@ void InterfaceWeb(struct evhttp_request *evRequest, void *arg) {
 	struct evbuffer *buff = evbuffer_new(); {
 		evbuffer_add_printf(buff, "<html><head><title>LiveProxies %s interface: Checked proxies</title></head><body>", VERSION);
 
-		sem_wait(&lockCheckedProxies); {
+		pthread_mutex_lock(&lockCheckedProxies); {
 			evbuffer_add_printf(buff, "<center>Checked proxies: %d, currently checking: %d</center><br />", sizeUncheckedProxies, CurrentlyChecking);
 			for (size_t x = 0; x < sizeCheckedProxies; x++) {
 				char *ip = IPv6MapToString2(checkedProxies[x]->ip); {
@@ -201,7 +204,7 @@ void InterfaceWeb(struct evhttp_request *evRequest, void *arg) {
 						(checkedProxies[x]->anonymity == ANONYMITY_ANONYMOUS ? "anonymous" : "max")));
 				} free(ip);
 			}
-		} sem_post(&lockCheckedProxies);
+		} pthread_mutex_unlock(&lockCheckedProxies);
 
 		evbuffer_add_reference(buff, "</body></html>\n", 15, NULL, NULL);
 
@@ -209,12 +212,14 @@ void InterfaceWeb(struct evhttp_request *evRequest, void *arg) {
 	} evbuffer_free(buff);
 }
 
-static void IntBlock3(size_t In, size_t *Out1, size_t *Out2) {
+static void IntBlock3(size_t In, size_t *Out1, size_t *Out2)
+{
 	*Out1 = In / 3;
 	*Out2 = (In / 3) * 2;
 }
 
-void InterfaceWebUnchecked(struct evhttp_request *evRequest, void *arg) {
+void InterfaceWebUnchecked(struct evhttp_request *evRequest, void *arg)
+{
 	if (!AuthVerify(evRequest)) {
 		evhttp_add_header(evhttp_request_get_output_headers(evRequest), "WWW-Authenticate", "Basic realm=\""HTTP_AUTHORIZATION_REALM"\"");
 		struct evbuffer *buff = evbuffer_new(); {
@@ -226,23 +231,17 @@ void InterfaceWebUnchecked(struct evhttp_request *evRequest, void *arg) {
 	struct evbuffer *buff = evbuffer_new(); {
 		evbuffer_add_printf(buff, "<html><head><title>LiveProxies %s interface: Unchecked proxies</title></head><body>", VERSION);
 
-		sem_wait(&lockUncheckedProxies); {
+		pthread_mutex_lock(&lockUncheckedProxies); {
 			evbuffer_add_printf(buff, "<center>Unchecked proxies: %d, currently checking: %d</center><br />", sizeUncheckedProxies, CurrentlyChecking);
 			for (size_t x = 0; x < sizeUncheckedProxies; x++) {
-				int lockVal;
-				sem_getvalue(&(uncheckedProxies[x]->processing), &lockVal);
-				if (lockVal == LOCK_BLOCKED)
+				size_t block[2];
+				IntBlock3(AcceptableSequentialFails, &(block[0]), &(block[1]));
+				if (uncheckedProxies[x]->retries < block[0])
 					evbuffer_add_reference(buff, "<font color=\"green\">", 20, NULL, NULL);
-				else {
-					size_t block[2];
-					IntBlock3(AcceptableSequentialFails, &(block[0]), &(block[1]));
-					if (uncheckedProxies[x]->retries < block[0])
-						evbuffer_add_reference(buff, "<font color=\"green\">", 20, NULL, NULL);
-					else if (uncheckedProxies[x]->retries > block[0] && uncheckedProxies[x]->retries < block[1])
-						evbuffer_add_reference(buff, "<font color=\"yellow\">", 20, NULL, NULL);
-					else
-						evbuffer_add_reference(buff, "<font color=\"red\">", 17, NULL, NULL);
-				}
+				else if (uncheckedProxies[x]->retries > block[0] && uncheckedProxies[x]->retries < block[1])
+					evbuffer_add_reference(buff, "<font color=\"yellow\">", 20, NULL, NULL);
+				else
+					evbuffer_add_reference(buff, "<font color=\"red\">", 17, NULL, NULL);
 
 				char *ip = IPv6MapToString2(uncheckedProxies[x]->ip); {
 					evbuffer_add_printf(buff, "Proxy %s:%d, type->%s, checking->%d, retries->%d",
@@ -281,12 +280,9 @@ void InterfaceWebUnchecked(struct evhttp_request *evRequest, void *arg) {
 					evbuffer_add_printf(buff, ", requestTimeHttp: %s", timeBuff);*
 					}*/
 
-				if (lockVal == LOCK_BLOCKED)
-					evbuffer_add_reference(buff, " <b>PROCESSING</b>", 18, NULL, NULL);
-
 				evbuffer_add_reference(buff, "</font><br />", 13, NULL, NULL);
 			}
-		} sem_post(&lockUncheckedProxies);
+		} pthread_mutex_unlock(&lockUncheckedProxies);
 
 		evbuffer_add_reference(buff, "</body></html>\n", 15, NULL, NULL);
 

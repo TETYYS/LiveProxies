@@ -14,8 +14,6 @@
 #define InterlockedIncrement(a, b) __sync_add_and_fetch(a, b)
 #define InterlockedDecrement(a, b) __sync_sub_and_fetch(a, b)
 #define msleep(a) usleep(a*1000)
-#define LOCK_UNBLOCKED 1
-#define LOCK_BLOCKED 0
 
 #define arrlen(a) sizeof(a)/sizeof(a[0])
 

@@ -22,12 +22,31 @@ typedef struct _REQUEST_FREE_STRUCT {
 	bool freeBufferEvent;
 } REQUEST_FREE_STRUCT;
 
-static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In) {
+static char *GetHost(IP_TYPE Preffered)
+{
+	if (Host4 != NULL && Host6 != NULL)
+		return Preffered == IPV4 ? Host4 : Host6;
+	if (Host4 == NULL)
+		return Host6;
+	else
+		return Host4;
+}
+
+static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
+{
 	UNCHECKED_PROXY *UProxy = In->UProxy;
 	struct bufferevent *BuffEvent = In->BuffEvent;
 	if (In->freeBufferEvent)
 		bufferevent_free(BuffEvent);
 	free(In);
+
+	if (UProxy->timeout != NULL) {
+		pthread_mutex_lock(&lockRequestBase); {
+			event_del(UProxy->timeout);
+		} pthread_mutex_unlock(&lockRequestBase);
+		event_free(UProxy->timeout);
+		UProxy->timeout = NULL;
+	}
 
 	char *ip = IPv6MapToString(UProxy->ip); {
 		Log(LOG_LEVEL_DEBUG, "RequestFree -> %s", ip);
@@ -35,10 +54,8 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 
 	InterlockedDecrement(&CurrentlyChecking, 1);
 
-	/*sem_wait(&lockUncheckedProxies); {
-	} sem_post(&lockUncheckedProxies);*/
-	sem_wait(&(UProxy->processing)); // locks only on EVWrite called timeout
-	
+	pthread_mutex_lock(&(UProxy->processing)); // locks only on EVWrite called timeout
+
 	if (UProxy->associatedProxy == NULL) {
 		if (UProxy->retries > AcceptableSequentialFails || UProxy->checkSuccess) {
 			char *ip = IPv6MapToString(UProxy->ip); {
@@ -48,7 +65,7 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 		} else {
 			UProxy->retries++;
 			UProxy->checking = false;
-			sem_post(&(UProxy->processing));
+			pthread_mutex_unlock(&(UProxy->processing));
 		}
 	} else {
 		Log(LOG_LEVEL_DEBUG, "RequestFree: Free'ing proxy and updating parent");
@@ -57,15 +74,17 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 	}
 }
 
-static void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy) {
+static void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
+{
 	// Pass!
 	// It should be in WServer now.
 	Log(LOG_LEVEL_DEBUG, "EVWrite");
 	UProxy->requestTimeHttpMs = GetUnixTimestampMilliseconds();
 }
 
-static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_PROXY *UProxy) {
-	sem_wait(&lockUncheckedProxies); {
+static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_PROXY *UProxy)
+{
+	pthread_mutex_lock(&lockUncheckedProxies); {
 		bool found = false;
 		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
 			if (uncheckedProxies[x] == UProxy) {
@@ -74,10 +93,10 @@ static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCH
 			}
 		}
 		if (!found) {
-			sem_post(&lockUncheckedProxies);
+			pthread_mutex_unlock(&lockUncheckedProxies);
 			return;
 		}
-	} sem_post(&lockUncheckedProxies);
+	} pthread_mutex_unlock(&lockUncheckedProxies);
 
 	if (Event == BEV_EVENT_CONNECTED) {
 		char *ip = IPv6MapToString(UProxy->ip); {
@@ -86,14 +105,24 @@ static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCH
 		char *key;
 		char *reqString;
 		size_t key64Len = Base64Encode(UProxy->hash, 512 / 8, &key); {
-			size_t baseLen = strlen(RequestString);
+			IP_TYPE type = GetIPType(UProxy->ip);
+			size_t rawOrigLen = strlen(RequestString);
+			size_t baseLen = (rawOrigLen - 2 /* %s for Host header */) + (strlen(GetHost(type)));
 
-			reqString = calloc(baseLen + key64Len + 1 /* null */ + 2 /* \n\n */, 1);
-			memcpy(reqString, RequestString, baseLen);
+			reqString = malloc((sizeof(char)* (baseLen + key64Len + 2 /* \n\n */)) + 1 /* NUL */);
+			memcpy(reqString, RequestString, (sizeof(char)* rawOrigLen) + 1);
+			char *reqStringFormat = malloc((sizeof(char)* rawOrigLen) + 1); {
+				memcpy(reqStringFormat, reqString, (sizeof(char)* rawOrigLen) + 1);
+				//Log(LOG_LEVEL_WARNING, "reqStringFormat:\n%s\n", reqStringFormat);
+				//Log(LOG_LEVEL_WARNING, "reqString:\n%s\n<--%s", reqString, ipv4 ? Host4 : Host6);
+				sprintf(reqString, reqStringFormat, GetHost(type));
+				//Log(LOG_LEVEL_WARNING, "EXEC reqString:\n%s\n<--%s", reqString, ipv4 ? Host4 : Host6);
+			} free(reqStringFormat);
 			memcpy(reqString + baseLen, key, key64Len * sizeof(char));
 			reqString[baseLen + key64Len] = '\n';
 			reqString[baseLen + key64Len + 1] = '\n';
 			reqString[baseLen + key64Len + 2] = 0x00;
+			//Log(LOG_LEVEL_WARNING, "FINAL reqString:\n%s\n<--%s", reqString, key);
 		} free(key);
 
 		struct evbuffer *evBuff = evbuffer_new(); {
@@ -103,38 +132,37 @@ static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCH
 				bufferevent_write(BuffEvent, (void*)reqString, strlen(reqString) * sizeof(char));
 				free(reqString);
 			}
-			if ((UProxy->type == PROXY_TYPE_SOCKS4 | UProxy->type == PROXY_TYPE_SOCKS4A) && GetIPType(GlobalIp) == IPV6) {
-				// ????
-				REQUEST_FREE_STRUCT *s = malloc(sizeof(REQUEST_FREE_STRUCT));
-				s->BuffEvent = BuffEvent;
-				s->UProxy = UProxy;
-				s->freeBufferEvent = true;
-				RequestFree(0, 0, s);
-				return;
-			}
-			if (UProxy->type == PROXY_TYPE_SOCKS4 || UProxy->type == PROXY_TYPE_SOCKS4A) {
-				/*
-				field 1: SOCKS version number, 1 byte, must be 0x04 for this version
-				field 2: command code, 1 byte:
-				0x01 = establish a TCP/IP stream connection
-				0x02 = establish a TCP/IP port binding
-				field 3: network byte order port number, 2 bytes
-				field 4: network byte order IP address, 4 bytes
-				field 5: the user ID string, variable length, terminated with a null (0x00)
-				*/
-				char buff[1 + 1 + sizeof(uint16_t)+IPV4_SIZE + 1 /* ? */];
-				buff[0] = 0x04;
-				buff[1] = 0x01; // CONNECT
-				*((uint16_t*)(&(buff[2]))) = htons(ServerPort);
-				*((uint32_t*)(&(buff[4]))) = htonl(GlobalIp->Data[3]);
-				buff[8] = 0x00;
+			if ((UProxy->type == PROXY_TYPE_SOCKS4 | UProxy->type == PROXY_TYPE_SOCKS4A)) {
+				if (GlobalIp4 == NULL) {
+					// ????
+					REQUEST_FREE_STRUCT *s = malloc(sizeof(REQUEST_FREE_STRUCT));
+					s->BuffEvent = BuffEvent;
+					s->UProxy = UProxy;
+					s->freeBufferEvent = true;
+					RequestFree(0, 0, s);
+					return;
+				} else {
+					/*
+					field 1: SOCKS version number, 1 byte, must be 0x04 for this version
+					field 2: command code, 1 byte:
+					0x01 = establish a TCP/IP stream connection
+					0x02 = establish a TCP/IP port binding
+					field 3: network byte order port number, 2 bytes
+					field 4: network byte order IP address, 4 bytes
+					field 5: the user ID string, variable length, terminated with a null (0x00)
+					*/
+					char buff[1 + 1 + sizeof(uint16_t)+IPV4_SIZE + 1 /* ? */];
+					buff[0] = 0x04;
+					buff[1] = 0x01; // CONNECT
+					*((uint16_t*)(&(buff[2]))) = htons(ServerPort);
+					*((uint32_t*)(&(buff[4]))) = htonl(GlobalIp4->Data[3]);
+					buff[8] = 0x00;
 
-				bufferevent_setwatermark(BuffEvent, EV_WRITE, 9 + (strlen(reqString) * sizeof(char)), 0);
-				evbuffer_add_reference(evBuff, buff, 9, (evbuffer_ref_cleanup_cb)free, buff);
-				evbuffer_add_reference(evBuff, reqString, strlen(reqString) * sizeof(char), (evbuffer_ref_cleanup_cb)free, reqString);
-				bufferevent_write_buffer(BuffEvent, evBuff);
-
-				// some servers are not happy with two blocks of data?
+					bufferevent_setwatermark(BuffEvent, EV_WRITE, 9 + (strlen(reqString) * sizeof(char)), 0);
+					evbuffer_add_reference(evBuff, buff, 9, (evbuffer_ref_cleanup_cb)free, buff);
+					evbuffer_add_reference(evBuff, reqString, strlen(reqString) * sizeof(char), (evbuffer_ref_cleanup_cb)free, reqString);
+					bufferevent_write_buffer(BuffEvent, evBuff);
+				}
 			}
 			if (UProxy->type == PROXY_TYPE_SOCKS5) {
 				/*
@@ -167,8 +195,11 @@ static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCH
 				o  DST.ADDR       desired destination address // network octet order? nope
 				o  DST.PORT desired destination port in network octet order
 				*/
+
+				// No need to check for matching IP types from local server and proxy server because harvester filters them
+
 				char *buff;
-				IPV6_TYPE type = GetIPType(GlobalIp);
+				IP_TYPE type = GetIPType(UProxy->ip);
 				if (type == IPV4)
 					buff = malloc(7 + IPV4_SIZE + sizeof(uint16_t));
 				else
@@ -182,11 +213,11 @@ static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCH
 				buff[5] = 0x00; // RESERVED
 				buff[6] = type == IPV4 ? 0x01 : 0x04; // who was 0x02?
 				if (type == IPV4)
-					(*(uint32_t*)(&(buff[7]))) = GlobalIp->Data[3];
+					(*(uint32_t*)(&(buff[7]))) = GlobalIp4->Data[3];
 				else {
 					for (size_t x = 0; x < 4; x++) {
 						uint32_t block;
-						block = GlobalIp->Data[x];
+						block = GlobalIp6->Data[x];
 						memcpy(&(buff[7 + (x * 4)]), &block, IPV6_SIZE);
 					}
 					// if IPv6 is 16 bytes, then why sockaddr structure specifies 14???
@@ -201,22 +232,19 @@ static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCH
 			}
 		} evbuffer_free(evBuff);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
-	}
-	else if (Event & BEV_EVENT_ERROR) {
+	} else if (Event & BEV_EVENT_ERROR) {
 		bufferevent_setcb(BuffEvent, NULL, NULL, NULL, NULL);
-		event_del(UProxy->timeout);
-		event_free(UProxy->timeout);
-		UProxy->timeout = NULL;
-
+#if DEBUG
 		char *ip = IPv6MapToString(UProxy->ip); {
 			Log(LOG_LEVEL_DEBUG, "EVEvent: event timeout / fail %s", ip);
 		} free(ip);
 		Log(LOG_LEVEL_DEBUG, "EVEvent: timeout BuffEvent: %08x event %d", BuffEvent, Event);
-		
+#endif
+
 		REQUEST_FREE_STRUCT *s = malloc(sizeof(REQUEST_FREE_STRUCT));
 		s->BuffEvent = BuffEvent;
 		s->UProxy = UProxy;
-		s->freeBufferEvent = false;
+		s->freeBufferEvent = true;
 		ip = IPv6MapToString(UProxy->ip); {
 			Log(LOG_LEVEL_DEBUG, "RequestFree call struct for %s", ip);
 		} free(ip);
@@ -224,7 +252,8 @@ static void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCH
 	}
 }
 
-void RequestAsync(UNCHECKED_PROXY *UProxy) {
+void RequestAsync(UNCHECKED_PROXY *UProxy)
+{
 	struct event_base *base;
 	struct bufferevent **bevs;
 
@@ -235,18 +264,27 @@ void RequestAsync(UNCHECKED_PROXY *UProxy) {
 	char *ip = IPv6MapToString(UProxy->ip); {
 		Log(LOG_LEVEL_DEBUG, "RequestAsync: [%s]:%d", ip, UProxy->port);
 		if (GetIPType(UProxy->ip) == IPV4) {
-			char *asd = calloc(1, 64 /* whatever */);
-			inet_ntop(AF_INET, &(((struct sockaddr_in*)sa)->sin_addr), asd, INET_ADDRSTRLEN);
-			Log(LOG_LEVEL_DEBUG, "RequestAsync 2: [%s]:%d", asd, ntohs(((struct sockaddr_in*)sa)->sin_port));
+			char *asd = calloc(1, 64 /* whatever */); {
+				inet_ntop(AF_INET, &(((struct sockaddr_in*)sa)->sin_addr), asd, INET_ADDRSTRLEN);
+				Log(LOG_LEVEL_DEBUG, "RequestAsync 2: [%s]:%d", asd, ntohs(((struct sockaddr_in*)sa)->sin_port));
+			} free(asd);
 		} else {
-			char *asd = calloc(1, 64 /* whatever */);
-			inet_ntop(AF_INET6, &(((struct sockaddr_in6*)sa)->sin6_addr), asd, INET6_ADDRSTRLEN);
-			Log(LOG_LEVEL_DEBUG, "RequestAsync 2: [%s]:%d", asd, ntohs(((struct sockaddr_in6*)sa)->sin6_port));
+			char *asd = calloc(1, 64 /* whatever */); {
+				inet_ntop(AF_INET6, &(((struct sockaddr_in6*)sa)->sin6_addr), asd, INET6_ADDRSTRLEN);
+				Log(LOG_LEVEL_DEBUG, "RequestAsync 2: [%s]:%d", asd, ntohs(((struct sockaddr_in6*)sa)->sin6_port));
+			} free(asd);
 		}
 	} free(ip);
 #endif
 
-	struct bufferevent *buffEvent = bufferevent_socket_new(levRequestBase, -1, BEV_OPT_CLOSE_ON_FREE);
+	struct bufferevent *buffEvent;
+
+	
+
+	pthread_mutex_lock(&lockRequestBase); {
+		
+		buffEvent = bufferevent_socket_new(levRequestBase, -1, BEV_OPT_CLOSE_ON_FREE);
+	} pthread_mutex_unlock(&lockRequestBase);
 	struct timeval timeout;
 	timeout.tv_sec = GlobalTimeout / 1000;
 	timeout.tv_usec = (GlobalTimeout % 1000) * 1000;
@@ -268,7 +306,10 @@ void RequestAsync(UNCHECKED_PROXY *UProxy) {
 	s->freeBufferEvent = true;
 
 	UProxy->timeout = event_new(levRequestBase, -1, EV_TIMEOUT, (event_callback_fn)RequestFree, s);
-	event_add(UProxy->timeout, &timeout);
+	pthread_mutex_lock(&lockRequestBase); {
+		event_add(UProxy->timeout, &timeout);
+	} pthread_mutex_unlock(&lockRequestBase);
 
 	bufferevent_socket_connect(buffEvent, sa, sizeof(struct sockaddr_in6)); // socket creation should never fail, because IP is always valid (!= dead)
+	free(sa);
 }

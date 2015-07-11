@@ -2,24 +2,26 @@
 #include "Global.h"
 #include "Logger.h"
 #include "IPv6Map.h"
+#include "ProxyRequest.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
-#include <semaphore.h>
+#include <pthread.h>
 #include <openssl/sha.h>
 #include <event2/event.h>
 
-static bool MultiFlag(char Flag) {
+static bool MultiFlag(char Flag)
+{
 	return (Flag & (Flag - 1)) != 0 && Flag != 1;
 }
 
-bool ProxyAdd(PROXY *Proxy) {
-	sem_wait(&lockCheckedProxies); {
+bool ProxyAdd(PROXY *Proxy)
+{
+	pthread_mutex_lock(&lockCheckedProxies); {
 		for (uint32_t x = 0; x < sizeCheckedProxies; x++) {
-			if (memcmp(Proxy->ip->Data, checkedProxies[x]->ip->Data, IPV6_SIZE) == 0 &&
-				Proxy->port == checkedProxies[x]->port) {
+			if (memcmp(Proxy->ip->Data, checkedProxies[x]->ip->Data, IPV6_SIZE) == 0 && Proxy->port == checkedProxies[x]->port) {
 				checkedProxies[x]->type |= Proxy->type;
 				checkedProxies[x]->anonymity = Proxy->anonymity;
 				checkedProxies[x]->failedChecks = Proxy->failedChecks;
@@ -28,29 +30,31 @@ bool ProxyAdd(PROXY *Proxy) {
 				checkedProxies[x]->retries = Proxy->retries;
 				checkedProxies[x]->successfulChecks = Proxy->successfulChecks;
 				checkedProxies[x]->timeoutMs = Proxy->timeoutMs;
-				sem_post(&lockCheckedProxies);
+				free(Proxy);
+				pthread_mutex_unlock(&lockCheckedProxies);
 				return false;
 			}
 		}
 		InterlockedIncrement(&sizeCheckedProxies, 1); // interlocked not needed?
 		checkedProxies = (PROXY**)realloc(checkedProxies, sizeCheckedProxies * sizeof(checkedProxies));
 		checkedProxies[sizeCheckedProxies - 1] = Proxy;
-	} sem_post(&lockCheckedProxies);
+	} pthread_mutex_unlock(&lockCheckedProxies);
 	return true;
 }
 
-bool UProxyAdd(UNCHECKED_PROXY *UProxy) {
-	sem_wait(&lockUncheckedProxies); {
+bool UProxyAdd(UNCHECKED_PROXY *UProxy)
+{
+	pthread_mutex_lock(&lockUncheckedProxies); {
 		for (uint32_t x = 0; x < sizeUncheckedProxies; x++) {
 			if (memcmp(UProxy->hash, uncheckedProxies[x]->hash, 512 / 8) == 0) {
 				char *ip = IPv6MapToString2(UProxy->ip); {
 					Log(LOG_LEVEL_WARNING, "Warning: tried to add already added unchecked proxy (%s:%d)", ip, UProxy->port);
 				} free(ip);
-				sem_post(&lockUncheckedProxies);
+				pthread_mutex_unlock(&lockUncheckedProxies);
 				return false;
 			}
 		}
-	} sem_post(&lockUncheckedProxies);
+	} pthread_mutex_unlock(&lockUncheckedProxies);
 	Log(LOG_LEVEL_DEBUG, "UProxyAdd: size %d", sizeUncheckedProxies);
 
 	if (MultiFlag(UProxy->type)) { // matches 0, 1, 2, 4, 8, 16...
@@ -62,21 +66,21 @@ bool UProxyAdd(UNCHECKED_PROXY *UProxy) {
 				UProxyAdd(newProxy);
 			}
 		}
-	}
-	else {
-		sem_wait(&lockUncheckedProxies); {
+	} else {
+		pthread_mutex_lock(&lockUncheckedProxies); {
 			sizeUncheckedProxies++;
 			uncheckedProxies = (UNCHECKED_PROXY**)realloc(uncheckedProxies, sizeof(uncheckedProxies)* sizeUncheckedProxies);
 			uncheckedProxies[sizeUncheckedProxies - 1] = UProxy;
-		} sem_post(&lockUncheckedProxies);
+		} pthread_mutex_unlock(&lockUncheckedProxies);
 	}
 	return true;
 }
 
-bool UProxyRemove(UNCHECKED_PROXY *UProxy) {
+bool UProxyRemove(UNCHECKED_PROXY *UProxy)
+{
 	bool found = false;
 
-	sem_wait(&lockUncheckedProxies); {
+	pthread_mutex_lock(&lockUncheckedProxies); {
 		for (uint32_t x = 0; x < sizeUncheckedProxies; x++) {
 			if (UProxy == uncheckedProxies[x]) {
 				UProxyFree(uncheckedProxies[x]);
@@ -87,15 +91,16 @@ bool UProxyRemove(UNCHECKED_PROXY *UProxy) {
 				break;
 			}
 		}
-	} sem_post(&lockUncheckedProxies);
+	} pthread_mutex_unlock(&lockUncheckedProxies);
 	Log(LOG_LEVEL_DEBUG, "UProxyRemove: size %d", sizeUncheckedProxies);
 	return found;
 }
 
-bool ProxyRemove(PROXY *Proxy) {
+bool ProxyRemove(PROXY *Proxy)
+{
 	bool found = false;
 
-	sem_wait(&lockCheckedProxies); {
+	pthread_mutex_lock(&lockCheckedProxies); {
 		for (uint32_t x = 0; x < sizeCheckedProxies; x++) {
 			if (Proxy == checkedProxies[x]) {
 				ProxyFree(checkedProxies[x]);
@@ -106,11 +111,12 @@ bool ProxyRemove(PROXY *Proxy) {
 				break;
 			}
 		}
-	} sem_post(&lockCheckedProxies);
+	} pthread_mutex_unlock(&lockCheckedProxies);
 	return found;
 }
 
-UNCHECKED_PROXY *UProxyFromProxy(PROXY *In) {
+UNCHECKED_PROXY *UProxyFromProxy(PROXY *In)
+{
 	Log(LOG_LEVEL_DEBUG, "UProxyFromProxy: In: %16x", In);
 	UNCHECKED_PROXY *ret = malloc(sizeof(UNCHECKED_PROXY));
 	Log(LOG_LEVEL_DEBUG, "UProxyFromProxy: UProxy: %16x", ret);
@@ -119,7 +125,7 @@ UNCHECKED_PROXY *UProxyFromProxy(PROXY *In) {
 
 	memcpy(ret->ip->Data, In->ip->Data, IPV6_SIZE);
 	ret->port = In->port;
-	sem_init(&(ret->processing), 0, LOCK_UNBLOCKED);
+	pthread_mutex_init(&(ret->processing), NULL);
 	ret->requestTimeMs = ret->requestTimeHttpMs = 0;
 	ret->checking = false;
 	ret->type = In->type;
@@ -132,32 +138,38 @@ UNCHECKED_PROXY *UProxyFromProxy(PROXY *In) {
 	return ret;
 }
 
-void GenerateHashForUProxy(UNCHECKED_PROXY *In) {
-	size_t dataSize = IPV6_SIZE + sizeof(uint16_t) + sizeof(In->type) + sizeof(hashSalt);
+void GenerateHashForUProxy(UNCHECKED_PROXY *In)
+{
+	size_t dataSize = IPV6_SIZE + sizeof(uint16_t)+sizeof(In->type) + sizeof(hashSalt);
 
-	char *data = malloc(dataSize);
-	memcpy(data, In->ip->Data, IPV6_SIZE);
-	memcpy(data + IPV6_SIZE, &(In->port), sizeof(uint16_t));
-	memcpy(data + IPV6_SIZE + sizeof(uint16_t), &(In->type), sizeof(In->type));
-	memcpy(data + IPV6_SIZE + sizeof(uint16_t) + sizeof(In->type), hashSalt, sizeof(hashSalt));
+	char *data = malloc(dataSize); {
+		memcpy(data, In->ip->Data, IPV6_SIZE);
+		memcpy(data + IPV6_SIZE, &(In->port), sizeof(uint16_t));
+		memcpy(data + IPV6_SIZE + sizeof(uint16_t), &(In->type), sizeof(In->type));
+		memcpy(data + IPV6_SIZE + sizeof(uint16_t)+sizeof(In->type), hashSalt, sizeof(hashSalt));
 
-	SHA512(data, dataSize, In->hash);
+		SHA512(data, dataSize, In->hash);
+	} free(data);
 
 	// 👌
 }
 
-void UProxyFree(UNCHECKED_PROXY *In) {
+void UProxyFree(UNCHECKED_PROXY *In)
+{
 	if (In->timeout != NULL) {
-		event_del(In->timeout);
+		pthread_mutex_lock(&lockRequestBase); {
+			event_del(In->timeout);
+		} pthread_mutex_unlock(&lockRequestBase);
 		event_free(In->timeout);
 	}
 
-	sem_destroy(&(In->processing));
+	pthread_mutex_destroy(&(In->processing));
 	free(In->ip);
 	free(In);
 }
 
-void ProxyFree(PROXY *In) {
+void ProxyFree(PROXY *In)
+{
 	free(In->ip);
 	free(In);
 }

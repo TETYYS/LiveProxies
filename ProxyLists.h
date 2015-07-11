@@ -3,7 +3,7 @@
 #include "IPv6Map.h"
 #include "Global.h"
 #include <stdint.h>
-#include <semaphore.h>
+#include <pthread.h>
 #include <stdbool.h>
 
 uint8_t hashSalt[64];
@@ -51,7 +51,7 @@ typedef struct _UNCHECKED_PROXY {
 	bool checkSuccess;
 
 	// This one blocks EVWrite called timeout event in case WServer is processing UProxy while EVWrite timeout event tries to free it
-	sem_t processing;
+	pthread_mutex_t processing;
 
 	struct event *timeout;
 
@@ -63,11 +63,11 @@ typedef struct _UNCHECKED_PROXY {
 
 UNCHECKED_PROXY	**uncheckedProxies;
 uint32_t		sizeUncheckedProxies;
-sem_t			lockUncheckedProxies;
+pthread_mutex_t	lockUncheckedProxies;
 
 PROXY	 		**checkedProxies;
 uint32_t		sizeCheckedProxies;
-sem_t			lockCheckedProxies;
+pthread_mutex_t	lockCheckedProxies;
 
 bool ProxyAdd(PROXY *Proxy);
 bool UProxyAdd(UNCHECKED_PROXY *UProxy);

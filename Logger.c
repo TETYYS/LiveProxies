@@ -4,7 +4,8 @@
 
 #define DEBUG 0
 
-void Log(LOG_LEVEL Level, const char *Format, ...) {
+void Log(LOG_LEVEL Level, const char *Format, ...)
+{
 	if (Level == LOG_LEVEL_DEBUG) {
 #if !DEBUG
 		return;
@@ -14,7 +15,7 @@ void Log(LOG_LEVEL Level, const char *Format, ...) {
 	va_list args;
 	va_start(args, Format);
 
-	switch(Level) {
+	switch (Level) {
 		case LOG_LEVEL_SUCCESS: {
 			printf("[OK] ");
 			break;

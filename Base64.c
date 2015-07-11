@@ -9,7 +9,8 @@
 #include <stdbool.h>
 #include <string.h>
 
-size_t MEM_OUT Base64Encode(const unsigned char* buffer, size_t length, char** b64text) {
+size_t MEM_OUT Base64Encode(const unsigned char* buffer, size_t length, char** b64text)
+{
 	// outputs with NUL
 	BIO *bio, *b64;
 	BUF_MEM *bufferPtr;
@@ -30,7 +31,8 @@ size_t MEM_OUT Base64Encode(const unsigned char* buffer, size_t length, char** b
 	return bufferPtr->length;
 }
 
-static size_t CalcDecodeLength(const char* b64input) {
+static size_t CalcDecodeLength(const char* b64input)
+{
 	size_t len = strlen(b64input),
 		padding = 0;
 
@@ -42,7 +44,8 @@ static size_t CalcDecodeLength(const char* b64input) {
 	return (len * 3) / 4 - padding;
 }
 
-bool MEM_OUT Base64Decode(char* b64message, unsigned char** buffer, size_t* length) {
+bool MEM_OUT Base64Decode(char* b64message, unsigned char** buffer, size_t* length)
+{
 	BIO *bio, *b64;
 
 	int decodeLen = CalcDecodeLength(b64message);

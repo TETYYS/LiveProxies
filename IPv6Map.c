@@ -8,7 +8,8 @@
 
 #define zalloc(x) calloc(1, (x))
 
-IPV6_TYPE GetIPType(IPv6Map *In) {
+IP_TYPE GetIPType(IPv6Map *In)
+{
 	bool found = false;
 
 	// 2001:0db8:0000:0000:0000:ff00:0042:8329
@@ -27,10 +28,11 @@ IPV6_TYPE GetIPType(IPv6Map *In) {
 	return found ? IPV6 : IPV4;
 }
 
-MEM_OUT IPv6Map *StringToIPv6Map(char *In) {
+MEM_OUT IPv6Map *StringToIPv6Map(char *In)
+{
 	IPv6Map *ret = zalloc(sizeof(IPv6Map));
 
-	IPV6_TYPE type = strchr(In, '.') == NULL ? IPV6 : IPV4;
+	IP_TYPE type = strchr(In, '.') == NULL ? IPV6 : IPV4;
 
 	if (type == IPV4) {
 		if (inet_pton(AF_INET, In, &(ret->Data[3])) != 1) {
@@ -48,27 +50,27 @@ MEM_OUT IPv6Map *StringToIPv6Map(char *In) {
 	return ret;
 }
 
-MEM_OUT char *IPv6MapToString(IPv6Map *In) {
+MEM_OUT char *IPv6MapToString(IPv6Map *In)
+{
 	char *ret;
 	if (GetIPType(In) == IPV4) {
-		ret = malloc(sizeof(char) * INET_ADDRSTRLEN + 1);
+		ret = malloc(sizeof(char)* INET_ADDRSTRLEN + 1);
 		inet_ntop(AF_INET, &(In->Data[3]), ret, INET_ADDRSTRLEN);
-	}
-	else if (GetIPType(In) == IPV6) {
-		ret = malloc(sizeof(char) * INET6_ADDRSTRLEN + 1);
+	} else if (GetIPType(In) == IPV6) {
+		ret = malloc(sizeof(char)* INET6_ADDRSTRLEN + 1);
 		inet_ntop(AF_INET6, In->Data, ret, INET6_ADDRSTRLEN);
 	}
 	return ret;
 }
 
-MEM_OUT char *IPv6MapToString2(IPv6Map *In) {
+MEM_OUT char *IPv6MapToString2(IPv6Map *In)
+{
 	char *ret;
 	if (GetIPType(In) == IPV4) {
-		ret = malloc(sizeof(char) * INET_ADDRSTRLEN + 1);
+		ret = malloc(sizeof(char)* INET_ADDRSTRLEN + 1);
 		inet_ntop(AF_INET, &(In->Data[3]), ret, INET_ADDRSTRLEN);
-	}
-	else if (GetIPType(In) == IPV6) {
-		ret = malloc(sizeof(char) * (INET6_ADDRSTRLEN + 2) + 1);//calloc((INET6_ADDRSTRLEN + 2) + 1, sizeof(char));
+	} else if (GetIPType(In) == IPV6) {
+		ret = malloc(sizeof(char)* (INET6_ADDRSTRLEN + 2) + 1);//calloc((INET6_ADDRSTRLEN + 2) + 1, sizeof(char));
 		memset(ret, 0, sizeof(char)* (INET6_ADDRSTRLEN + 2) + 1);
 		inet_ntop(AF_INET6, In->Data, ret + 1, INET6_ADDRSTRLEN);
 		ret[0] = '[';
@@ -77,7 +79,8 @@ MEM_OUT char *IPv6MapToString2(IPv6Map *In) {
 	return ret;
 }
 
-MEM_OUT struct sockaddr *IPv6MapToRaw(IPv6Map *In, uint16_t Port) {
+MEM_OUT struct sockaddr *IPv6MapToRaw(IPv6Map *In, uint16_t Port)
+{
 	if (GetIPType(In) == IPV4) {
 		struct sockaddr_in *sin = calloc(1, sizeof(struct sockaddr_in));
 		*((uint32_t*)(&(sin->sin_addr.s_addr))) = In->Data[3];
@@ -101,7 +104,8 @@ MEM_OUT struct sockaddr *IPv6MapToRaw(IPv6Map *In, uint16_t Port) {
 	}
 }
 
-MEM_OUT IPv6Map *GetIPFromHSock(int hSock) {
+MEM_OUT IPv6Map *GetIPFromHSock(int hSock)
+{
 	socklen_t len;
 	struct sockaddr_storage addr;
 
@@ -114,8 +118,7 @@ MEM_OUT IPv6Map *GetIPFromHSock(int hSock) {
 		struct sockaddr_in *s = (struct sockaddr_in *)&addr;
 		memcpy(&(ret->Data[3]), &(s->sin_addr.s_addr), IPV4_SIZE);
 		ret->Data[2] = 0xFFFF0000; // THAT WAY!
-	}
-	else { // AF_INET6
+	} else { // AF_INET6
 		struct sockaddr_in6 *s = (struct sockaddr_in6 *)&addr;
 		memcpy(ret->Data, s->sin6_addr.__in6_u.__u6_addr8, IPV6_SIZE);
 	}
@@ -123,8 +126,9 @@ MEM_OUT IPv6Map *GetIPFromHSock(int hSock) {
 	return ret;
 }
 
-bool IPv6MapCompare(IPv6Map *a, IPv6Map *b) {
-	IPV6_TYPE type;
+bool IPv6MapCompare(IPv6Map *a, IPv6Map *b)
+{
+	IP_TYPE type;
 	if (GetIPType(a) != GetIPType(b))
 		return false;
 	type = GetIPType(a);

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <evhttp.h>
-#include <semaphore.h>
+#include <pthread.h>
 #include "IPv6Map.h"
 
 #define HTTP_AUTHORIZATION_REALM "Live Proxies interface - private access"
@@ -18,11 +18,11 @@ typedef struct _AUTH_LOCAL {
 	char *password;
 } AUTH_LOCAL;
 
-sem_t AuthWebLock;
+pthread_mutex_t AuthWebLock;
 AUTH_WEB **AuthWebList;
 size_t AuthWebCount;
 
-sem_t AuthLocalLock;
+pthread_mutex_t AuthLocalLock;
 AUTH_LOCAL **AuthLocalList;
 size_t AuthLocalCount;
 

@@ -18,7 +18,6 @@
 #include <sys/time.h>
 
 #include <pthread.h>
-#include <semaphore.h>
 #include <dirent.h>
 #include <sys/prctl.h>
 
