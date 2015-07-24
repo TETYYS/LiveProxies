@@ -15,3 +15,9 @@ IPv6Map *GlobalIp6;
 char *HarvestersPath;
 bool DisableIPv6;
 uint64_t AuthLoginExpiry;
+
+bool SSLEnabled;
+char *SSLPublicKey;
+char *SSLPrivateKey;
+char *SSLCipherList;
+uint16_t SSLServerPort;

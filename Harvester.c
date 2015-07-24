@@ -8,7 +8,6 @@
 #include "Config.h"
 #include <python2.7/Python.h>
 #include <dirent.h>
-#include <openssl/sha.h>
 
 static char *last_strstr(const char *haystack, const char *needle)
 {
@@ -75,19 +74,24 @@ void HarvestLoop()
 				goto freefunc;
 			}
 
-			uint32_t added = 0, total = 0;
+			uint32_t added = 0, addedPrev = 0, total = 0;
 			char *result = PyString_AsString(pResult);
 			char *tokSave = NULL;
-			char *pch = strtok_r(result, "\r\n", &tokSave);
+			char *pch = strtok_r(result, "\n", &tokSave);
 			char curType = PROXY_TYPE_HTTP;
 			uint16_t curPort;
 			while (pch != NULL) {
 				if (pch[0] == '\0') {
-					pch = strtok_r(NULL, "\r\n", &tokSave);
+					pch = strtok_r(NULL, "\n", &tokSave);
 					continue;
 				}
 				if (strncmp(pch, "setType", 7) == 0) {
 					curType = atoi(pch + 7);
+				}
+
+				if (ProxyIsSSL(curType) && !SSLEnabled) {
+					Log(LOG_LEVEL_WARNING, "Got SSL proxy, but SSL is disabled");
+					goto next;
 				}
 
 				char *delimiterOffset = last_strstr(pch, ":");
@@ -137,16 +141,18 @@ void HarvestLoop()
 				up->checkSuccess = false;
 				up->retries = 0;
 				up->timeout = NULL;
+				up->sslStage = 0;
 				pthread_mutex_init(&(up->processing), NULL);
 				up->port = curPort;
 				up->ip = map;
 				GenerateHashForUProxy(up);
 				up->associatedProxy = NULL;
 
-				if (!UProxyAdd(up))
+				addedPrev = added;
+				added += UProxyAdd(up);
+
+				if (addedPrev == added)
 					UProxyFree(up);
-				else
-					added++;
 				total++;
 
 next:

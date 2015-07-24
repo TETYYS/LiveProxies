@@ -104,6 +104,13 @@ MEM_OUT struct sockaddr *IPv6MapToRaw(IPv6Map *In, uint16_t Port)
 	}
 }
 
+MEM_OUT IPv6Map *RawToIPv6Map(struct sockaddr *In)
+{
+	IPv6Map *ret = malloc(sizeof(IPv6Map));
+	memcpy(ret->Data, In->sa_data, IPV6_SIZE);
+	return ret;
+}
+
 MEM_OUT IPv6Map *GetIPFromHSock(int hSock)
 {
 	socklen_t len;

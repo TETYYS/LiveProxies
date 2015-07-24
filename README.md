@@ -27,8 +27,8 @@ make
 ```
 mkdir /etc/liveproxies
 mkdir /etc/liveproxies/scripts
-mv ./liveproxies.conf /etc/liveproxies.conf
-nano /etc/liveproxies.conf
+mv ./docs/liveproxies.conf /etc/liveproxies.conf
+nano /etc/liveproxies.conf # Modify configuration here
 mkdir /usr/local/share/GeoIP
 wget http://geolite.maxmind.com/download/geoip/database/GeoLiteCountry/GeoIP.dat.gz
 gunzip GeoIP.dat.gz
@@ -51,6 +51,7 @@ See [Auth](docs/auth.md) for preparing users for interface pages
 
 ## Dependencies
  - libevent >= 2.0.2-alpha
+ - [libevhtp] (forked from [original libevhtp] with fixed bug)
  - python >= 2.7
  - [Maxmind's GeoIP]
  - libconfig
@@ -64,7 +65,7 @@ The program is currently in its very early stages, so any help is appreciated. S
 Currently, program doesn't slow down at all at 7000 simultaneous proxy checks, but has memory problems. 85 MB for 7000 simultaneous proxy checks seems high.
 
 ## TODO
- - Adapt SSL for interface and proxies
+ - ~~Adapt SSL for interface and proxies~~
  - Implement full proxy check
  - Provide more information on interface pages, fix formatting
  - Provide more interactivity on interface pages
@@ -76,3 +77,5 @@ Currently, program doesn't slow down at all at 7000 simultaneous proxy checks, b
  
 
 [Maxmind's GeoIP]:https://github.com/maxmind/geoip-api-c/
+[libevhtp]:https://github.com/TETYYS/libevhtp
+[original libevhtp]:https://github.com/ellzey/libevhtp

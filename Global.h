@@ -20,3 +20,4 @@
 size_t CurrentlyChecking;
 
 double GetUnixTimestampMilliseconds();
+char *GetHost(IP_TYPE Preffered, bool SSL);

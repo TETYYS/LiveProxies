@@ -1,6 +1,6 @@
 #pragma once
 
-#include <evhttp.h>
+#include <evhtp.h>
 #include <pthread.h>
 #include "IPv6Map.h"
 
@@ -14,8 +14,8 @@ typedef struct _AUTH_WEB {
 } AUTH_WEB;
 
 typedef struct _AUTH_LOCAL {
-	char *username;
-	char *password;
+	const char *username;
+	const char *password;
 } AUTH_LOCAL;
 
 pthread_mutex_t AuthWebLock;
@@ -26,5 +26,5 @@ pthread_mutex_t AuthLocalLock;
 AUTH_LOCAL **AuthLocalList;
 size_t AuthLocalCount;
 
-void InterfaceWeb(struct evhttp_request *evRequest, void *arg);
-void InterfaceWebUnchecked(struct evhttp_request *evRequest, void *arg);
+void InterfaceWeb(evhtp_request_t *evRequest, void *arg);
+void InterfaceWebUnchecked(evhtp_request_t *evRequest, void *arg);

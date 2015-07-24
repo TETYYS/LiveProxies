@@ -1,8 +1,9 @@
 #pragma once
 
-#include <evhttp.h>
+#include <evhtp.h>
 #include <pcre.h>
 #include <stdbool.h>
+#include <openssl/ssl.h>
 #include "GeoIP.h"
 
 GeoIP *GeoIPDB;
@@ -12,8 +13,16 @@ pcre_extra *ipv6RegexEx;
 pcre *ipv4Regex;
 pcre_extra *ipv4RegexEx;
 
-struct event_base *evWServerBase;
-struct evhttp *evWServerHTTP;
+evbase_t *evWServerBase;
+evhtp_t *evWServerHTTP4;
+evhtp_t *evWServerHTTP6;
 
-void WServerLanding(struct evhttp_request *evRequest, void *arg);
+evbase_t *evWServerBaseSSL;
+evhtp_t *evWServerHTTPSSL4;
+evhtp_t *evWServerHTTPSSL6;
+
+void WServerLanding(evhtp_request_t *evRequest, void *arg);
+void GenericCb(evhtp_request_t *evRequest, void *arg);
 void WServerBase();
+void WServerBaseSSL();
+struct bufferevent *WServerSSLNewSocket(struct event_base *EvBase, SSL_CTX *Arg);
