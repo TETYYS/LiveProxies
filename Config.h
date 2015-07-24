@@ -9,12 +9,14 @@ uint64_t CheckingInterval;
 uint64_t GlobalTimeout;
 uint64_t AcceptableSequentialFails;
 uint16_t ServerPort;
+uint16_t ServerPortUDP;
 uint64_t SimultaneousChecks;
 IPv6Map *GlobalIp4;
 IPv6Map *GlobalIp6;
 char *HarvestersPath;
-bool DisableIPv6;
 uint64_t AuthLoginExpiry;
+
+struct timeval GlobalTimeoutTV;
 
 bool SSLEnabled;
 char *SSLPublicKey;

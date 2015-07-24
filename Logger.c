@@ -2,9 +2,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#define DEBUG 0
+#define DEBUG 1
 
-void Log(LOG_LEVEL Level, const char *Format, ...)
+void _Log(char *File, int Line, LOG_LEVEL Level, const char *Format, ...)
 {
 	if (Level == LOG_LEVEL_DEBUG) {
 #if !DEBUG
@@ -29,7 +29,7 @@ void Log(LOG_LEVEL Level, const char *Format, ...)
 			break;
 		}
 		case LOG_LEVEL_DEBUG: {
-			printf("[DEBUG] ");
+			printf("[DEBUG] (%s:%d) ", File, Line);
 			break;
 		}
 	}
