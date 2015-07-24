@@ -1,11 +1,9 @@
 #include "Global.h"
-#include "Config.h"
 #include "ProxyRequest.h"
 #include "IPv6Map.h"
 #include <sys/time.h>
 #include <stddef.h>
 #include <assert.h>
-#include <math.h>
 
 double GetUnixTimestampMilliseconds()
 {
@@ -25,13 +23,4 @@ char *GetHost(IP_TYPE Preffered, bool SSL)
 		return host6;
 	else
 		return host4;
-}
-
-IPv6Map *GetIP(IP_TYPE Preffered) {
-	if (GlobalIp4 != NULL && GlobalIp6 != NULL)
-		return Preffered == IPV4 ? GlobalIp4 : GlobalIp6;
-	if (GlobalIp4 == NULL)
-		return GlobalIp6;
-	else
-		return GlobalIp4;
 }

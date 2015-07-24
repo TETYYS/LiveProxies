@@ -13,18 +13,16 @@ pcre_extra *ipv6RegexEx;
 pcre *ipv4Regex;
 pcre_extra *ipv4RegexEx;
 
-struct event_base *levServerBase;
-struct evconnlistener *levServerList4;
-struct evconnlistener *levServerList6;
+evbase_t *evWServerBase;
+evhtp_t *evWServerHTTP4;
+evhtp_t *evWServerHTTP6;
 
-SSL_CTX *levServerSSL;
+evbase_t *evWServerBaseSSL;
+evhtp_t *evWServerHTTPSSL4;
+evhtp_t *evWServerHTTPSSL6;
 
-struct event_base *levServerBaseSSL;
-struct evconnlistener *levServerListSSL4;
-struct evconnlistener *levServerListSSL6;
-
+void WServerLanding(evhtp_request_t *evRequest, void *arg);
 void GenericCb(evhtp_request_t *evRequest, void *arg);
 void WServerBase();
 void WServerBaseSSL();
-void WServerUDP6();
-void WServerUDP4();
+struct bufferevent *WServerSSLNewSocket(struct event_base *EvBase, SSL_CTX *Arg);

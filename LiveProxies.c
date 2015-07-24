@@ -15,6 +15,7 @@
 #include <event2/thread.h>
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
+#include <evhtp.h>
 #include <pcre.h>
 #include <limits.h>
 #include <libconfig.h>
@@ -54,11 +55,6 @@ static char *HostFormat(IPv6Map *Ip, uint16_t Port)
 	} free(hostFormat);
 	ret[len + 1 + (size_t)INTEGER_VISIBLE_SIZE(Port)] = 0x00;
 	return ret;
-}
-
-static void EvLog(int Level, char *Format, va_list VA)
-{
-	Log(Level, Format, VA);
 }
 
 int main(int argc, char** argv)
@@ -126,15 +122,16 @@ int main(int argc, char** argv)
 	printf("========================DEBUG========================\n");
 	evthread_enable_lock_debugging();
 	event_enable_debug_mode();
-	event_set_log_callback((event_log_cb)EvLog);
+	event_set_log_callback((event_log_cb)Log);
 	event_enable_debug_logging(EVENT_DBG_ALL);
 #endif
 
 	evthread_use_pthreads();
 
-	AuthWebList = NULL;
-	pthread_mutex_init(&AuthWebLock, NULL);
-	AuthWebCount = 0;
+	SSL_library_init();
+	ERR_load_crypto_strings();
+	SSL_load_error_strings();
+	OpenSSL_add_all_algorithms();
 
 	levRequestBase = event_base_new();
 
@@ -168,49 +165,8 @@ int main(int argc, char** argv)
 	CONFIG_INT64(cfgRoot, "AcceptableSequentialFails", AcceptableSequentialFails, 3)
 	CONFIG_INT64(cfgRoot, "AuthLoginExpiry", AuthLoginExpiry, 10800)
 	CONFIG_INT(cfgRoot, "ServerPort", ServerPort, 8080)
-	CONFIG_INT(cfgRoot, "ServerPortUDP", ServerPortUDP, 8082)
 	CONFIG_STRING(cfgRoot, "HarvestersPath", HarvestersPath, "/etc/liveproxies/scripts/")
-
-	GlobalTimeoutTV.tv_sec = GlobalTimeout / 1000;
-	GlobalTimeoutTV.tv_usec = (GlobalTimeout % 1000) * 1000;
-
-	/* GlobalIP */ {
-		const char *globalIp4 = NULL;
-		const char *globalIp6 = NULL;
-		config_setting_lookup_string(cfgRoot, "GlobalIp4", &globalIp4);
-		config_setting_lookup_string(cfgRoot, "GlobalIp6", &globalIp6);
-		if (globalIp4 == NULL && globalIp6 == NULL) {
-			Log(LOG_LEVEL_ERROR, "Failed to lookup global IP address (GlobalIp4 or GlobalIp6)");
-		}
-
-		GlobalIp4 = NULL;
-		if (globalIp4 != NULL) {
-			GlobalIp4 = StringToIPv6Map((char*)globalIp4);
-
-			if (GlobalIp4 == NULL) {
-				Log(LOG_LEVEL_ERROR, "Invalid GlobalIp4 value, exiting...");
-				exit(EXIT_FAILURE);
-			}
-
-			Host4 = HostFormat(GlobalIp4, ServerPort);
-			if (SSLEnabled)
-				Host4SSL = HostFormat(GlobalIp4, SSLServerPort);
-		}
-
-		GlobalIp6 = NULL;
-		if (globalIp6 != NULL) {
-			GlobalIp6 = StringToIPv6Map((char*)globalIp6);
-
-			if (GlobalIp6 == NULL) {
-				Log(LOG_LEVEL_ERROR, "Invalid GlobalIp6 value, exiting...");
-				exit(EXIT_FAILURE);
-			}
-
-			Host6 = HostFormat(GlobalIp6, ServerPort);
-			if (SSLEnabled)
-				Host6SSL = HostFormat(GlobalIp6, SSLServerPort);
-		}
-	} /* End GlobalIP */
+	CONFIG_BOOL(cfgRoot, "DisableIPv6", DisableIPv6, false)
 
 	/* SSL */ {
 		config_setting_t *sslGroup = config_setting_get_member(cfgRoot, "SSL");
@@ -222,23 +178,80 @@ int main(int argc, char** argv)
 		CONFIG_INT(sslGroup, "ServerPort", SSLServerPort, 8081)
 
 		if (SSLEnabled) {
-			SSL_load_error_strings();
-			SSL_library_init();
-			if (!RAND_poll()) {
-				Log(LOG_LEVEL_ERROR, "RAND_poll, exiting...");
+			evWServerBaseSSL = event_base_new();
+			evWServerHTTPSSL4 = evhtp_new(evWServerBaseSSL, NULL);
+
+			evhtp_ssl_cfg_t scfg = {
+				.pemfile = SSLPublicKey,
+				.privfile = SSLPrivateKey,
+				.ciphers = SSLCipherList,
+				.ssl_opts = SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3,
+				.ssl_ctx_timeout = 60 * 60 * 48,
+				.verify_peer = SSL_VERIFY_PEER,
+				.verify_depth = 42,
+				.scache_type = evhtp_ssl_scache_type_internal,
+				.scache_size = 1024,
+				.scache_timeout = 1024,
+				.scache_init = NULL,
+				.scache_add = NULL,
+				.scache_get = NULL,
+				.scache_del = NULL,
+			};
+
+			evhtp_ssl_init(evWServerHTTPSSL4, &scfg);
+
+			/*SSL_CTX *ctx = SSL_CTX_new(TLSv1_2_server_method());
+
+			evhttp_set_bevcb(evWServerHTTPSSL, WServerSSLNewSocket, ctx);
+
+			bool sslPvkUseSuccess = false;
+			if (!(sslPvkUseSuccess = SSL_CTX_use_PrivateKey_file(ctx, SSLPrivateKey, SSL_FILETYPE_PEM)))
+				sslPvkUseSuccess = SSL_CTX_use_PrivateKey_file(ctx, SSLPrivateKey, SSL_FILETYPE_ASN1);
+
+			if (!SSL_CTX_use_certificate_chain_file(ctx, SSLPublicKey) || !sslPvkUseSuccess) {
+				Log(LOG_LEVEL_ERROR, "Failed to use TLS public / private keys, exiting...");
 				exit(EXIT_FAILURE);
 			}
 
-			levServerSSL = SSL_CTX_new(SSLv23_server_method());
-
-			if (!SSL_CTX_use_certificate_chain_file(levServerSSL, SSLPublicKey) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
-				Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
-				exit(EXIT_FAILURE);
-			}
-			SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-			SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
+			SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+			SSL_CTX_set_cipher_list(ctx, SSLCipherList);*/
 		}
 	} /* End SSL */
+
+	/* GlobalIP */ {
+
+		const char *globalIp4 = NULL;
+		const char *globalIp6 = NULL;
+		config_setting_lookup_string(cfgRoot, "GlobalIp4", &globalIp4);
+		config_setting_lookup_string(cfgRoot, "GlobalIp6", &globalIp6);
+		if (globalIp4 == NULL && globalIp6 == NULL) {
+			Log(LOG_LEVEL_ERROR, "Failed to lookup global IP address (GlobalIp4 or GlobalIp6)");
+		}
+
+		GlobalIp4 = NULL;
+		if (globalIp4 != NULL)
+			GlobalIp4 = StringToIPv6Map((char*)globalIp4);
+
+		GlobalIp6 = NULL;
+		if (globalIp6 != NULL)
+			GlobalIp6 = StringToIPv6Map((char*)globalIp6);
+
+		if (GlobalIp4 == NULL) {
+			Log(LOG_LEVEL_ERROR, "Invalid GlobalIp4 value, exiting...");
+			exit(EXIT_FAILURE);
+		}
+		if (GlobalIp6 == NULL) {
+			Log(LOG_LEVEL_ERROR, "Invalid GlobalIp6 value, exiting...");
+			exit(EXIT_FAILURE);
+		}
+		if (GetIPType(GlobalIp6) == IPV6 && DisableIPv6) {
+			if (GlobalIp4 == NULL) {
+				Log(LOG_LEVEL_ERROR, "Got IPv6 address at GlobalIp, but IPv6 is disabled (DisableIPv6 == true) and IPv4 address doesn't exist, exiting...");
+				exit(EXIT_FAILURE);
+			} else
+				Log(LOG_LEVEL_WARNING, "Got IPv6 address at GlobalIp, but IPv6 is disabled (DisableIPv6 == true)");
+		}
+	} /* End GlobalIP */
 
 #undef CONFIG_INT64
 #undef CONFIG_INT
@@ -291,6 +304,17 @@ int main(int argc, char** argv)
 
 	} /* End auth init */
 
+	if (GlobalIp4 != NULL) {
+		Host4 = HostFormat(GlobalIp4, ServerPort);
+		if (SSLEnabled)
+			Host4SSL = HostFormat(GlobalIp4, SSLServerPort);
+	}
+	if (GlobalIp6 != NULL) {
+		Host6 = HostFormat(GlobalIp6, ServerPort);
+		if (SSLEnabled)
+			Host6SSL = HostFormat(GlobalIp6, SSLServerPort);
+	}
+
 	RequestString = calloc(300 /* :^) */ + 2 + strlen(VERSION) + 1 /* NUL */, sizeof(char));
 	sprintf(RequestString,
 		"GET /prxchk HTTP/1.1\r\n"
@@ -312,7 +336,7 @@ int main(int argc, char** argv)
 		"\r\n", "%s", "%s", VERSION);
 
 	RequestHeaders = evhtp_headers_new();
-
+	
 	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Connection", "Close", 0, 0));
 	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Cache-Control", "max-age=0", 0, 0));
 	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8", 0, 0));
@@ -355,23 +379,7 @@ int main(int argc, char** argv)
 	pthread_mutex_init(&lockUncheckedProxies, NULL);
 	pthread_mutex_init(&lockCheckedProxies, NULL);
 
-	pthread_t serverBase;
-	int status = pthread_create(&serverBase, NULL, (void*)WServerBase, NULL);
-	if (status != 0) {
-		Log(LOG_LEVEL_ERROR, "WServerBase thread creation error, return code: %d\n", status);
-		return status;
-	}
-	pthread_detach(serverBase);
-
-	pthread_t serverBaseSSL;
-	status = pthread_create(&serverBaseSSL, NULL, (void*)WServerBaseSSL, NULL);
-	if (status != 0) {
-		Log(LOG_LEVEL_ERROR, "WServerBaseSSL thread creation error, return code: %d\n", status);
-		return status;
-	}
-	pthread_detach(serverBaseSSL);
-
-	status = pthread_create(&harvestThread, NULL, (void*)HarvestLoop, NULL);
+	int status = pthread_create(&harvestThread, NULL, (void*)HarvestLoop, NULL);
 	if (status != 0) {
 		Log(LOG_LEVEL_ERROR, "HarvestLoop thread creation error, return code: %d\n", status);
 		return status;
@@ -395,6 +403,21 @@ int main(int argc, char** argv)
 	pthread_detach(checkThread);
 	Log(LOG_LEVEL_DEBUG, "Started check thread");
 
+	pthread_t serverBase;
+	status = pthread_create(&serverBase, NULL, (void*)WServerBase, NULL);
+	if (status != 0) {
+		Log(LOG_LEVEL_ERROR, "WServerBase thread creation error, return code: %d\n", status);
+		return status;
+	}
+	pthread_detach(serverBase);
+
+	pthread_t serverBaseSSL;
+	status = pthread_create(&serverBaseSSL, NULL, (void*)WServerBaseSSL, NULL);
+	if (status != 0) {
+		Log(LOG_LEVEL_ERROR, "WServerBaseSSL thread creation error, return code: %d\n", status);
+		return status;
+	}
+	pthread_detach(serverBaseSSL);
 
 	pthread_t requestBase;
 	status = pthread_create(&requestBase, NULL, (void*)RequestBase, NULL);
@@ -416,7 +439,7 @@ void RequestBase()
 		RequestBaseSSLCTX = SSL_CTX_new(SSLv23_client_method());
 
 	for (;;) {
-		if (CurrentlyChecking > 0)
+		if (sizeUncheckedProxies > 0)
 			event_base_dispatch(levRequestBase);
 		usleep(10000);
 	}
@@ -436,7 +459,7 @@ void CheckLoop()
 			for (size_t x = 0; x < sizeUncheckedProxies; x++) {
 				if (CurrentlyChecking > SimultaneousChecks)
 					break;
-				if (!(uncheckedProxies[x]->checking) && uncheckedProxies[x]->singleCheck == NULL) {
+				if (!(uncheckedProxies[x]->checking)) {
 					if (proxiesToCheck == NULL)
 						proxiesToCheck = malloc(sizeof(proxiesToCheck));
 					else
@@ -448,6 +471,7 @@ void CheckLoop()
 		} pthread_mutex_unlock(&lockUncheckedProxies);
 
 		for (size_t x = 0; x < count; x++) {
+			proxiesToCheck[x]->checking = true;
 			Log(LOG_LEVEL_DEBUG, "CheckLoop: Proxy %d set checking", x);
 			RequestAsync(proxiesToCheck[x]);
 		}

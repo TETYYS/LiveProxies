@@ -16,8 +16,7 @@ typedef enum _PROXY_TYPE {
 	PROXY_TYPE_SOCKS5 = 16,
 	PROXY_TYPE_SOCKS4_TO_SSL = 32,
 	PROXY_TYPE_SOCKS4A_TO_SSL = 64,
-	PROXY_TYPE_SOCKS5_TO_SSL = 128,
-	PROXY_TYPE_SOCKS5_WITH_UDP = 256
+	PROXY_TYPE_SOCKS5_TO_SSL = 128
 } PROXY_TYPE;
 
 #define PROXY_TYPE_COUNT 8
@@ -25,24 +24,24 @@ typedef enum _PROXY_TYPE {
 #define PROXY_TYPE_SOCKS_GENERIC_SSL (PROXY_TYPE_SOCKS4_TO_SSL | PROXY_TYPE_SOCKS4A_TO_SSL | PROXY_TYPE_SOCKS5_TO_SSL)
 #define PROXY_TYPE_ALL (PROXY_TYPE_HTTP | PROXY_TYPE_HTTPS | PROXY_TYPE_SOCKS_GENERIC | PROXY_TYPE_SOCKS_GENERIC_SSL)
 
-typedef enum _ANONYMITY {
+typedef enum _ANONIMITY {
 	ANONYMITY_NONE,
 	ANONYMITY_TRANSPARENT,
 	ANONYMITY_ANONYMOUS,
 	ANONYMITY_MAX
-} ANONYMITY;
+} ANONIMITY;
 
 typedef struct _PROXY {
 	IPv6Map *ip;
 	uint16_t port;
 	char type; // PROXY_TYPE
-	ANONYMITY anonymity; // ANONYMITY
+	ANONIMITY anonymity; // ANONYMITY
 	const char *country;
-	bool rechecking;
 	uint64_t httpTimeoutMs;
 	uint64_t timeoutMs;
 	uint64_t liveSinceMs;
-	uint64_t lastCheckedMs;
+	uint64_t lastChecked;
+	bool rechecking;
 	uint8_t retries;
 	uint32_t successfulChecks;
 	uint32_t failedChecks;
@@ -68,8 +67,6 @@ typedef struct _UNCHECKED_PROXY {
 	uint64_t requestTimeMs;
 	uint64_t requestTimeHttpMs;
 	PROXY *associatedProxy;
-	
-	pthread_mutex_t *singleCheck;
 } UNCHECKED_PROXY;
 
 UNCHECKED_PROXY	**uncheckedProxies;
@@ -89,5 +86,4 @@ bool ProxyRemove(PROXY *Proxy);
 void GenerateHashForUProxy(UNCHECKED_PROXY *In);
 void UProxyFree(UNCHECKED_PROXY *In);
 void ProxyFree(PROXY *In);
-UNCHECKED_PROXY *UProxyFromProxy(PROXY *In, bool SingleCheck);
-UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct event *Timeout, PROXY *AssociatedProxy, bool SingleCheck);
+UNCHECKED_PROXY *UProxyFromProxy(PROXY *In);

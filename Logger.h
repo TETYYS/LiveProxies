@@ -7,5 +7,4 @@ typedef enum _LOG_LEVEL {
 	LOG_LEVEL_DEBUG
 } LOG_LEVEL;
 
-void _Log(char *File, int Line, LOG_LEVEL Level, const char *Format, ...);
-#define Log(Level, Format, ...) _Log(__FILE__, __LINE__, Level, Format, ##__VA_ARGS__)
+void Log(LOG_LEVEL Level, const char *Format, ...);

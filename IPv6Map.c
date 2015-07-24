@@ -107,15 +107,7 @@ MEM_OUT struct sockaddr *IPv6MapToRaw(IPv6Map *In, uint16_t Port)
 MEM_OUT IPv6Map *RawToIPv6Map(struct sockaddr *In)
 {
 	IPv6Map *ret = malloc(sizeof(IPv6Map));
-	if (In->sa_family == AF_INET) {
-		struct sockaddr_in *sin = (struct sockaddr_in*)In;
-		memset(ret->Data, 0, IPV6_SIZE / 2);
-		ret->Data[3] = sin->sin_addr.s_addr;
-		ret->Data[2] = 0xFFFF0000; // THAT WAY!
-	} else {
-		struct sockaddr_in6 *sin = (struct sockaddr_in6*)In;
-		memcpy(ret->Data, In->sa_data, IPV6_SIZE);
-	}
+	memcpy(ret->Data, In->sa_data, IPV6_SIZE);
 	return ret;
 }
 

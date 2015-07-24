@@ -28,4 +28,3 @@ size_t AuthLocalCount;
 
 void InterfaceWeb(evhtp_request_t *evRequest, void *arg);
 void InterfaceWebUnchecked(evhtp_request_t *evRequest, void *arg);
-void InterfaceProxyRecheck(evhtp_request_t *evRequest, void *arg);
