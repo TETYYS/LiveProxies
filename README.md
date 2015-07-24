@@ -51,7 +51,6 @@ See [Auth](docs/auth.md) for preparing users for interface pages
 
 ## Dependencies
  - libevent >= 2.0.2-alpha
- - [libevhtp] (forked from [original libevhtp] with fixed bug)
  - python >= 2.7
  - [Maxmind's GeoIP]
  - libconfig

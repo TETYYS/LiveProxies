@@ -26,6 +26,7 @@ size_t MEM_OUT Base64Encode(const unsigned char* buffer, size_t length, char** b
 	BIO_set_close(bio, BIO_NOCLOSE);
 	BIO_free_all(bio);
 
+
 	*b64text = realloc(bufferPtr->data, bufferPtr->length + 1); // HACK HACK oops
 	(*b64text)[bufferPtr->length] = 0x00;
 	return bufferPtr->length;

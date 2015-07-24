@@ -10,23 +10,23 @@
 void RemoveThread()
 {
 	for (;;) {
-		/*PROXY *proxy = NULL;
+		msleep(RemoveThreadInterval);
+		continue; ////////////////////////////////////////////////
+		PROXY *proxy = NULL;
 		pthread_mutex_lock(&lockCheckedProxies); {
-		uint64_t low = UINT64_MAX;
-		for (uint32_t x = 0; x < sizeCheckedProxies; x++) {
-		if (!checkedProxies[x]->rechecking && checkedProxies[x]->lastChecked < low) {
-		proxy = checkedProxies[x];
-		low = proxy->lastChecked;
-		}
-		}
-		if (proxy != NULL)
-		InterlockedIncrement(&(proxy->rechecking), 1); // lock set
+			uint64_t low = UINT64_MAX;
+			for (uint32_t x = 0; x < sizeCheckedProxies; x++) {
+				if (!checkedProxies[x]->rechecking && checkedProxies[x]->lastCheckedMs < low) {
+					proxy = checkedProxies[x];
+					low = proxy->lastCheckedMs;
+				}
+			}
 		} pthread_mutex_unlock(&lockCheckedProxies);
 		if (proxy != NULL) {
-		UNCHECKED_PROXY *UProxy = UProxyFromProxy(proxy);
-		RequestAsync(UProxy);
-		}*/
-		msleep(RemoveThreadInterval);
+			UNCHECKED_PROXY *UProxy = UProxyFromProxy(proxy, false);
+			proxy->rechecking = true;
+			RequestAsync(UProxy);
+		}
 	}
 }
 
@@ -35,7 +35,7 @@ void UProxyFailUpdateParentInfo(UNCHECKED_PROXY *In)
 	In->associatedProxy->timeoutMs = 0;
 	In->associatedProxy->failedChecks++;
 	In->associatedProxy->httpTimeoutMs = 0;
-	In->associatedProxy->lastChecked = GetUnixTimestampMilliseconds();
+	In->associatedProxy->lastCheckedMs = GetUnixTimestampMilliseconds();
 	In->associatedProxy->retries++;
 
 	if (In->associatedProxy->retries >= AcceptableSequentialFails)
@@ -44,7 +44,7 @@ void UProxyFailUpdateParentInfo(UNCHECKED_PROXY *In)
 
 void UProxySuccessUpdateParentInfo(UNCHECKED_PROXY *In)
 {
-	In->associatedProxy->lastChecked = GetUnixTimestampMilliseconds();
+	In->associatedProxy->lastCheckedMs = GetUnixTimestampMilliseconds();
 	In->associatedProxy->httpTimeoutMs = GetUnixTimestampMilliseconds() - In->requestTimeHttpMs;
 	In->associatedProxy->timeoutMs = GetUnixTimestampMilliseconds() - In->requestTimeMs;
 	In->associatedProxy->retries = 0;

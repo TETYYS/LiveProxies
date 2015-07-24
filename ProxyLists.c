@@ -22,7 +22,7 @@ bool ProxyIsSSL(PROXY_TYPE In)
 	return In == PROXY_TYPE_HTTPS || In == PROXY_TYPE_SOCKS4_TO_SSL || In == PROXY_TYPE_SOCKS4A_TO_SSL || In == PROXY_TYPE_SOCKS5_TO_SSL;
 }
 
-static char *ProxyTypes[] = { "HTTP", "HTTPS", "SOCKS4", "SOCKS4A", "SOCKS5", "SOCKS4 -> SSL", "SOCKS4A -> SSL", "SOCKS5 -> SSL", "N/A"};
+static char *ProxyTypes[] = { "HTTP", "HTTPS", "SOCKS4", "SOCKS4A", "SOCKS5", "SOCKS4 -> SSL", "SOCKS4A -> SSL", "SOCKS5 -> SSL", "SOCKS5 UDP", "N/A"};
 
 char *ProxyGetTypeString(PROXY_TYPE In)
 {
@@ -35,7 +35,8 @@ char *ProxyGetTypeString(PROXY_TYPE In)
 		case PROXY_TYPE_SOCKS4_TO_SSL: return ProxyTypes[5]; break;
 		case PROXY_TYPE_SOCKS4A_TO_SSL: return ProxyTypes[6]; break;
 		case PROXY_TYPE_SOCKS5_TO_SSL: return ProxyTypes[7]; break;
-		default: return ProxyTypes[8];
+		case PROXY_TYPE_SOCKS5_WITH_UDP: return ProxyTypes[8]; break;
+		default: return ProxyTypes[9];
 	}
 }
 
@@ -47,7 +48,7 @@ bool ProxyAdd(PROXY *Proxy)
 				checkedProxies[x]->anonymity = Proxy->anonymity;
 				checkedProxies[x]->failedChecks = Proxy->failedChecks;
 				checkedProxies[x]->httpTimeoutMs = Proxy->httpTimeoutMs;
-				checkedProxies[x]->lastChecked = Proxy->lastChecked;
+				checkedProxies[x]->lastCheckedMs = Proxy->lastCheckedMs;
 				checkedProxies[x]->retries = Proxy->retries;
 				checkedProxies[x]->successfulChecks = Proxy->successfulChecks;
 				checkedProxies[x]->timeoutMs = Proxy->timeoutMs;
@@ -81,14 +82,9 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 	if (MultiFlag(UProxy->type)) { // matches 0, 1, 2, 4, 8, 16...
 		for (size_t x = 0; x < PROXY_TYPE_COUNT - 1 /* -1 because of type 1 */; x++) {
 			if ((UProxy->type & (uint32_t)pow(2, x)) == (uint32_t)pow(2, x)) {
-				UNCHECKED_PROXY *newProxy = malloc(sizeof(UNCHECKED_PROXY));
-				memcpy(newProxy, UProxy, sizeof(UNCHECKED_PROXY));
-				newProxy->type = (uint32_t)pow(2, x);
-				newProxy->ip = malloc(sizeof(IPv6Map));
-				memcpy(newProxy->ip->Data, UProxy->ip->Data, sizeof(IPv6Map));
-				GenerateHashForUProxy(newProxy);
-				pthread_mutex_init(&(newProxy->processing), NULL);
-				ret += UProxyAdd(newProxy);
+				IPv6Map *ip = malloc(sizeof(IPv6Map));
+				memcpy(ip, UProxy->ip->Data, sizeof(IPv6Map));
+				ret += UProxyAdd(AllocUProxy(ip, UProxy->port, (uint32_t)pow(2, x), NULL, NULL, false));
 			}
 		}
 	} else {
@@ -140,27 +136,34 @@ bool ProxyRemove(PROXY *Proxy)
 	return found;
 }
 
-UNCHECKED_PROXY *UProxyFromProxy(PROXY *In)
+UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct event *Timeout, PROXY *AssociatedProxy, bool SingleCheck)
 {
-	Log(LOG_LEVEL_DEBUG, "UProxyFromProxy: In: %16x", In);
-	UNCHECKED_PROXY *ret = malloc(sizeof(UNCHECKED_PROXY));
-	Log(LOG_LEVEL_DEBUG, "UProxyFromProxy: UProxy: %16x", ret);
-	ret->ip = malloc(sizeof(IPv6Map));
-	Log(LOG_LEVEL_DEBUG, "UProxyFromProxy: UProxy->ip: %16x", ret->ip);
+	UNCHECKED_PROXY *UProxy = malloc(sizeof(UNCHECKED_PROXY));
+	UProxy->ip = Ip;
+	UProxy->port = Port;
+	UProxy->type = Type;
+	UProxy->checking = false;
+	UProxy->retries = UProxy->requestTimeMs = UProxy->requestTimeHttpMs = UProxy->sslStage = 0;
+	UProxy->checkSuccess = false;
+	pthread_mutex_init(&(UProxy->processing), NULL);
+	UProxy->timeout = Timeout;
+	GenerateHashForUProxy(UProxy);
+	UProxy->associatedProxy = AssociatedProxy;
+	if (SingleCheck) {
+		UProxy->singleCheck = malloc(sizeof(*(UProxy->singleCheck)));
+		pthread_mutex_init(UProxy->singleCheck, NULL);
+	} else
+		UProxy->singleCheck = NULL;
+	return UProxy;
+}
 
-	memcpy(ret->ip->Data, In->ip->Data, IPV6_SIZE);
-	ret->port = In->port;
-	pthread_mutex_init(&(ret->processing), NULL);
-	ret->requestTimeMs = ret->requestTimeHttpMs = 0;
-	ret->checking = false;
-	ret->type = In->type;
-	GenerateHashForUProxy(ret);
-	Log(LOG_LEVEL_DEBUG, "UProxyFromProxy: UProxy->hash: %16x", ret->hash);
-	ret->associatedProxy = In;
-	Log(LOG_LEVEL_DEBUG, "UProxyFromProxy: UProxy->associatedProxy: %16x", ret->associatedProxy);
-	Log(LOG_LEVEL_DEBUG, "UProxyFromProxy: UProxy: %16x", ret);
+UNCHECKED_PROXY *UProxyFromProxy(PROXY *In, bool SingleCheck)
+{
+	Log(LOG_LEVEL_DEBUG, "UProxyFromProxy: In: %p", In);
+	IPv6Map *ip = malloc(sizeof(IPv6Map));
+	memcpy(ip, In->ip->Data, IPV6_SIZE);
 
-	return ret;
+	return AllocUProxy(ip, In->port, In->type, NULL, In, SingleCheck);
 }
 
 void GenerateHashForUProxy(UNCHECKED_PROXY *In)
@@ -185,7 +188,8 @@ void UProxyFree(UNCHECKED_PROXY *In)
 		event_del(In->timeout);
 		event_free(In->timeout);
 	}
-
+	if (In->singleCheck != NULL)
+		pthread_mutex_destroy(In->singleCheck);
 	pthread_mutex_destroy(&(In->processing));
 	free(In->ip);
 	free(In);

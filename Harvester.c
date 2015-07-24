@@ -8,6 +8,7 @@
 #include "Config.h"
 #include <python2.7/Python.h>
 #include <dirent.h>
+#include <openssl/sha.h>
 
 static char *last_strstr(const char *haystack, const char *needle)
 {
@@ -117,11 +118,6 @@ void HarvestLoop()
 
 				IP_TYPE type = GetIPType(map);
 
-				if (type == IPV6 && DisableIPv6) {
-					Log(LOG_LEVEL_WARNING, "Got IPv6 address from harvester %s, but IPv6 is disabled (DisableIPv6 == true)", path);
-					free(map);
-					goto next;
-				}
 				if (GlobalIp4 == NULL && type == IPV4) {
 					Log(LOG_LEVEL_WARNING, "Got IPv4 address from harvester %s, but no IPv4 is provided (GlobalIp4)", path);
 					free(map);
@@ -133,20 +129,7 @@ void HarvestLoop()
 					goto next;
 				}
 
-				UNCHECKED_PROXY *up = malloc(sizeof(UNCHECKED_PROXY));
-				up->type = curType;
-				up->checking = false;
-				up->requestTimeMs = 0;
-				up->requestTimeHttpMs = 0;
-				up->checkSuccess = false;
-				up->retries = 0;
-				up->timeout = NULL;
-				up->sslStage = 0;
-				pthread_mutex_init(&(up->processing), NULL);
-				up->port = curPort;
-				up->ip = map;
-				GenerateHashForUProxy(up);
-				up->associatedProxy = NULL;
+				UNCHECKED_PROXY *up = AllocUProxy(map, curPort, curType, NULL, NULL, false);
 
 				addedPrev = added;
 				added += UProxyAdd(up);
