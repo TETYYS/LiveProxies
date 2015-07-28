@@ -1,7 +1,7 @@
 #pragma once
 
-#include <evhtp.h>
 #include <pthread.h>
+#include <event2/bufferevent.h>
 #include "IPv6Map.h"
 
 #define HTTP_AUTHORIZATION_REALM "Live Proxies interface - private access"
@@ -26,6 +26,6 @@ pthread_mutex_t AuthLocalLock;
 AUTH_LOCAL **AuthLocalList;
 size_t AuthLocalCount;
 
-void InterfaceWeb(evhtp_request_t *evRequest, void *arg);
-void InterfaceWebUnchecked(evhtp_request_t *evRequest, void *arg);
-void InterfaceProxyRecheck(evhtp_request_t *evRequest, void *arg);
+void InterfaceWeb(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceWebUnchecked(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceProxyRecheck(struct bufferevent *BuffEvent, char *Buff);

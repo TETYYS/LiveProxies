@@ -188,8 +188,10 @@ void UProxyFree(UNCHECKED_PROXY *In)
 		event_del(In->timeout);
 		event_free(In->timeout);
 	}
-	if (In->singleCheck != NULL)
+	if (In->singleCheck != NULL) {
 		pthread_mutex_destroy(In->singleCheck);
+		free(In->singleCheck);
+	}
 	pthread_mutex_destroy(&(In->processing));
 	free(In->ip);
 	free(In);

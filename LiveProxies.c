@@ -1,5 +1,4 @@
 #include "LiveProxies.h"
-#include "WServer.h"
 #include "ProxyRequest.h"
 #include "GeoIP.h"
 #include "ProxyLists.h"
@@ -7,13 +6,12 @@
 #include "Global.h"
 #include "IPv6Map.h"
 #include "Harvester.h"
-#include "ProxyRequest.h"
 #include "Config.h"
 #include "Interface.h"
 #include "PBKDF2.h"
+#include "Server.h"
 #include <event2/event.h>
 #include <event2/thread.h>
-#include <openssl/evp.h>
 #include <openssl/ssl.h>
 #include <pcre.h>
 #include <limits.h>
@@ -124,10 +122,10 @@ int main(int argc, char** argv)
 	printf("LiveProxes "VERSION" started\n");
 #if DEBUG
 	printf("========================DEBUG========================\n");
-	evthread_enable_lock_debugging();
-	event_enable_debug_mode();
-	event_set_log_callback((event_log_cb)EvLog);
-	event_enable_debug_logging(EVENT_DBG_ALL);
+	//evthread_enable_lock_debugging();
+	//event_enable_debug_mode();
+	//event_set_log_callback((event_log_cb)EvLog);
+	//event_enable_debug_logging(EVENT_DBG_ALL);
 #endif
 
 	evthread_use_pthreads();
@@ -167,12 +165,41 @@ int main(int argc, char** argv)
 	CONFIG_INT64(cfgRoot, "GlobalTimeout", GlobalTimeout, 10000)
 	CONFIG_INT64(cfgRoot, "AcceptableSequentialFails", AcceptableSequentialFails, 3)
 	CONFIG_INT64(cfgRoot, "AuthLoginExpiry", AuthLoginExpiry, 10800)
-	CONFIG_INT(cfgRoot, "ServerPort", ServerPort, 8080)
-	CONFIG_INT(cfgRoot, "ServerPortUDP", ServerPortUDP, 8082)
+	CONFIG_INT(cfgRoot, "ServerPort", ServerPort, 8084)
+	CONFIG_INT(cfgRoot, "ServerPortUDP", ServerPortUDP, 8084)
+	CONFIG_BOOL(cfgRoot, "EnableUDP", EnableUDP, true)
 	CONFIG_STRING(cfgRoot, "HarvestersPath", HarvestersPath, "/etc/liveproxies/scripts/")
 
 	GlobalTimeoutTV.tv_sec = GlobalTimeout / 1000;
 	GlobalTimeoutTV.tv_usec = (GlobalTimeout % 1000) * 1000;
+
+	/* SSL */ {
+		config_setting_t *sslGroup = config_setting_get_member(cfgRoot, "SSL");
+
+		CONFIG_BOOL(sslGroup, "Enable", SSLEnabled, false)
+			CONFIG_STRING(sslGroup, "Private", SSLPrivateKey, "/etc/liveproxies/private.key")
+			CONFIG_STRING(sslGroup, "Public", SSLPublicKey, "/etc/liveproxies/public.cer")
+			CONFIG_STRING(sslGroup, "CipherList", SSLCipherList, "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH")
+			CONFIG_INT(sslGroup, "ServerPort", SSLServerPort, 8085)
+
+			if (SSLEnabled) {
+				SSL_load_error_strings();
+				SSL_library_init();
+				if (!RAND_poll()) {
+					Log(LOG_LEVEL_ERROR, "RAND_poll, exiting...");
+					exit(EXIT_FAILURE);
+				}
+
+				levServerSSL = SSL_CTX_new(SSLv23_server_method());
+
+				if (!SSL_CTX_use_certificate_chain_file(levServerSSL, SSLPublicKey) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
+					Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
+					exit(EXIT_FAILURE);
+				}
+				SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+				SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
+			}
+	} /* End SSL */
 
 	/* GlobalIP */ {
 		const char *globalIp4 = NULL;
@@ -211,34 +238,6 @@ int main(int argc, char** argv)
 				Host6SSL = HostFormat(GlobalIp6, SSLServerPort);
 		}
 	} /* End GlobalIP */
-
-	/* SSL */ {
-		config_setting_t *sslGroup = config_setting_get_member(cfgRoot, "SSL");
-
-		CONFIG_BOOL(sslGroup, "Enable", SSLEnabled, false)
-		CONFIG_STRING(sslGroup, "Private", SSLPrivateKey, "/etc/liveproxies/private.key")
-		CONFIG_STRING(sslGroup, "Public", SSLPublicKey, "/etc/liveproxies/public.cer")
-		CONFIG_STRING(sslGroup, "CipherList", SSLCipherList, "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH")
-		CONFIG_INT(sslGroup, "ServerPort", SSLServerPort, 8081)
-
-		if (SSLEnabled) {
-			SSL_load_error_strings();
-			SSL_library_init();
-			if (!RAND_poll()) {
-				Log(LOG_LEVEL_ERROR, "RAND_poll, exiting...");
-				exit(EXIT_FAILURE);
-			}
-
-			levServerSSL = SSL_CTX_new(SSLv23_server_method());
-
-			if (!SSL_CTX_use_certificate_chain_file(levServerSSL, SSLPublicKey) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
-				Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
-				exit(EXIT_FAILURE);
-			}
-			SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-			SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
-		}
-	} /* End SSL */
 
 #undef CONFIG_INT64
 #undef CONFIG_INT
@@ -311,18 +310,18 @@ int main(int argc, char** argv)
 		"User-Agent: LiveProxies Proxy Checker %s (tetyys.com)\r\n"
 		"\r\n", "%s", "%s", VERSION);
 
-	RequestHeaders = evhtp_headers_new();
+	// RequestHeaders = evhtp_headers_new();
 
-	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Connection", "Close", 0, 0));
-	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Cache-Control", "max-age=0", 0, 0));
-	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8", 0, 0));
-	char *ua = malloc(39 + strlen(VERSION) + 1); {
-		sprintf(ua, "LiveProxies Proxy Checker %s (tetyys.com)", VERSION);
-		evhtp_headers_add_header(RequestHeaders, evhtp_header_new("User-Agent", ua, 0, 1));
-	} free(ua);
-	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("DNT", "1", 0, 0));
-	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Accept-Encoding", "gzip, deflate, sdch", 0, 0));
-	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Accept-Language", "en-US,en;q=0.8", 0, 0));
+	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Connection", "Close", 0, 0));
+	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Cache-Control", "max-age=0", 0, 0));
+	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8", 0, 0));
+	// char *ua = malloc(39 + strlen(VERSION) + 1); {
+	// 	sprintf(ua, "LiveProxies Proxy Checker %s (tetyys.com)", VERSION);
+	// 	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("User-Agent", ua, 0, 1));
+	// } free(ua);
+	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("DNT", "1", 0, 0));
+	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Accept-Encoding", "gzip, deflate, sdch", 0, 0));
+	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Accept-Language", "en-US,en;q=0.8", 0, 0));
 
 	const char *pcreError;
 	int pcreErrorOffset;
@@ -339,7 +338,7 @@ int main(int argc, char** argv)
 		return EXIT_FAILURE;
 	}
 
-	ipv4Regex = pcre_compile("(\\b((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\\.|$)){4}\\b)", 0, &pcreError, &pcreErrorOffset, NULL); // 👌
+	ipv4Regex = pcre_compile("(\\b(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}\\b)", 0, &pcreError, &pcreErrorOffset, NULL); // 👌
 	if (ipv4Regex == NULL) {
 		Log(LOG_LEVEL_ERROR, "Couldn't compile PCRE IPv4 regex:\n%s at %d", pcreError, pcreErrorOffset);
 		return EXIT_FAILURE;
@@ -356,7 +355,7 @@ int main(int argc, char** argv)
 	pthread_mutex_init(&lockCheckedProxies, NULL);
 
 	pthread_t serverBase;
-	int status = pthread_create(&serverBase, NULL, (void*)WServerBase, NULL);
+	int status = pthread_create(&serverBase, NULL, (void*)ServerBase, NULL);
 	if (status != 0) {
 		Log(LOG_LEVEL_ERROR, "WServerBase thread creation error, return code: %d\n", status);
 		return status;
@@ -364,12 +363,19 @@ int main(int argc, char** argv)
 	pthread_detach(serverBase);
 
 	pthread_t serverBaseSSL;
-	status = pthread_create(&serverBaseSSL, NULL, (void*)WServerBaseSSL, NULL);
+	status = pthread_create(&serverBaseSSL, NULL, (void*)ServerBaseSSL, NULL);
 	if (status != 0) {
 		Log(LOG_LEVEL_ERROR, "WServerBaseSSL thread creation error, return code: %d\n", status);
 		return status;
 	}
 	pthread_detach(serverBaseSSL);
+
+	if (EnableUDP) {
+		if (GlobalIp4 != NULL)
+			ServerUDP4();
+		if (GlobalIp6 != NULL)
+			ServerUDP6();
+	}
 
 	status = pthread_create(&harvestThread, NULL, (void*)HarvestLoop, NULL);
 	if (status != 0) {
@@ -395,7 +401,6 @@ int main(int argc, char** argv)
 	pthread_detach(checkThread);
 	Log(LOG_LEVEL_DEBUG, "Started check thread");
 
-
 	pthread_t requestBase;
 	status = pthread_create(&requestBase, NULL, (void*)RequestBase, NULL);
 	if (status != 0) {
@@ -406,8 +411,13 @@ int main(int argc, char** argv)
 
 	Log(LOG_LEVEL_SUCCESS, "Non-interactive mode active");
 
-	for (;;)
-		sleep(INT_MAX); // gdb is flipping out when we exit main thread
+	for (;;) {
+		msleep(1000); // gdb is flipping out when we exit main thread
+		FILE *hF = fopen("events.txt", "w+"); {
+			//Log(LOG_LEVEL_DEBUG, "Dumping events...");
+			event_base_dump_events(levRequestBase, hF);
+		} fclose(hF);
+	}
 }
 
 void RequestBase()

@@ -1,8 +1,6 @@
 #pragma once
 
-#include <evhtp.h>
 #include <pcre.h>
-#include <stdbool.h>
 #include <openssl/ssl.h>
 #include "GeoIP.h"
 
@@ -23,8 +21,12 @@ struct event_base *levServerBaseSSL;
 struct evconnlistener *levServerListSSL4;
 struct evconnlistener *levServerListSSL6;
 
-void GenericCb(evhtp_request_t *evRequest, void *arg);
-void WServerBase();
-void WServerBaseSSL();
-void WServerUDP6();
-void WServerUDP4();
+void ServerBase();
+void ServerBaseSSL();
+void ServerUDP6();
+void ServerUDP4();
+
+void HTTPRead(struct bufferevent *BuffEvent, void *Ctx);
+
+MEM_OUT bool ServerFindHeader(char *In, char *Buff, char **Out, char **StartIndex, char **EndIndex);
+void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...);

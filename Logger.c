@@ -12,8 +12,6 @@ void _Log(char *File, int Line, LOG_LEVEL Level, const char *Format, ...)
 #endif
 	}
 
-	va_list args;
-	va_start(args, Format);
 
 	switch (Level) {
 		case LOG_LEVEL_SUCCESS: {
@@ -34,7 +32,9 @@ void _Log(char *File, int Line, LOG_LEVEL Level, const char *Format, ...)
 		}
 	}
 
-	vprintf(Format, args);
-	va_end(args);
+	va_list args;
+	va_start(args, Format); {
+		vprintf(Format, args);
+	} va_end(args);
 	printf("\n");
 }

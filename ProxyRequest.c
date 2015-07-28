@@ -117,6 +117,7 @@ void CALLBACK EVRead(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
 		if (BuffEvent != NULL) {
 			Log(LOG_LEVEL_DEBUG, "SSL BuffEvent SET <------------------------------");
 			bufferevent_setcb(BuffEvent, (bufferevent_data_cb)EVRead, (bufferevent_data_cb)EVWrite, (bufferevent_event_cb)EVEvent, UProxy);
+			bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
 		} else {
 			Log(LOG_LEVEL_DEBUG, "SSL BuffEvent NULL");
 		}
@@ -125,7 +126,7 @@ void CALLBACK EVRead(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
 
 void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
 {
-	pthread_mutex_lock(&lockUncheckedProxies); {
+	/*pthread_mutex_lock(&lockUncheckedProxies); {
 		bool found = false;
 		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
 			if (uncheckedProxies[x] == UProxy) {
@@ -138,12 +139,8 @@ void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
 			pthread_mutex_unlock(&lockUncheckedProxies);
 			return;
 		}
-	} pthread_mutex_unlock(&lockUncheckedProxies);
+	} pthread_mutex_unlock(&lockUncheckedProxies);*/
 	Log(LOG_LEVEL_DEBUG, "EVWrite");
-	if (UProxy->sslStage == 2 || !ProxyIsSSL(UProxy->type)) {
-		//pthread_mutex_unlock(&(UProxy->processing));
-		UProxy->requestTimeHttpMs = GetUnixTimestampMilliseconds();
-	}
 }
 
 typedef enum _SOCKS_TYPE {
@@ -258,19 +255,21 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 		} free(ip);
 
 		char *reqString;
+		IP_TYPE type = GetIPType(UProxy->ip);
+		char *host = GetHost(type, ProxyIsSSL(UProxy->type));
 
 		if (!ProxyIsSSL(UProxy->type) || (ProxyIsSSL(UProxy->type) && UProxy->sslStage == 2)) {
 			char *key;
 			size_t key64Len = Base64Encode(UProxy->hash, 512 / 8, &key); {
-				IP_TYPE type = GetIPType(UProxy->ip);
 				size_t rawOrigLen = strlen(RequestString);
-				size_t baseLen = (rawOrigLen - 2 /* %s for Host header */) + (strlen(GetHost(type, ProxyIsSSL(UProxy->type))));
+				size_t baseLen = (rawOrigLen - 2 /* %s for Host header */) + strlen(host);
+				size_t fullOrigLen = (sizeof(char) * rawOrigLen) + 1;
 
 				reqString = malloc((sizeof(char)* (baseLen + key64Len + 4 /* \r\n\r\n */)) + 1 /* NUL */);
-				memcpy(reqString, RequestString, (sizeof(char)* rawOrigLen) + 1);
-				char *reqStringFormat = malloc((sizeof(char)* rawOrigLen) + 1); {
-					memcpy(reqStringFormat, reqString, (sizeof(char)* rawOrigLen) + 1);
-					sprintf(reqString, reqStringFormat, GetHost(type, ProxyIsSSL(UProxy->type)));
+				memcpy(reqString, RequestString, fullOrigLen);
+				char *reqStringFormat = malloc(fullOrigLen); {
+					memcpy(reqStringFormat, reqString, fullOrigLen);
+					sprintf(reqString, reqStringFormat, host);
 				} free(reqStringFormat);
 				memcpy(reqString + baseLen, key, key64Len * sizeof(char));
 				reqString[baseLen + key64Len] = '\r';
@@ -280,22 +279,21 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 				reqString[baseLen + key64Len + 4] = 0x00;
 			} free(key);
 		} else {
-			IP_TYPE type = GetIPType(UProxy->ip);
 			size_t rawOrigLen = strlen(RequestStringSSL);
-			size_t baseLen = (rawOrigLen - 4 /* %s for Host and CONNECT header */) + (strlen(GetHost(type, ProxyIsSSL(UProxy->type))) * 2);
+			size_t baseLen = (rawOrigLen - 4 /* %s for Host and CONNECT header */) + (strlen(host) * 2);
+			size_t fullOrigLen = (sizeof(char) * rawOrigLen) + 1;
 
-			reqString = malloc((sizeof(char)* (baseLen)) + 1 /* NUL */);
-			memcpy(reqString, RequestStringSSL, (sizeof(char)* rawOrigLen) + 1);
-			char *reqStringFormat = malloc((sizeof(char)* rawOrigLen) + 1); {
-				memcpy(reqStringFormat, reqString, (sizeof(char)* rawOrigLen) + 1);
-				char *host = GetHost(type, ProxyIsSSL(UProxy->type));
+			reqString = malloc((sizeof(char) * baseLen) + 1 /* NUL */);
+			memcpy(reqString, RequestStringSSL, fullOrigLen);
+			char *reqStringFormat = malloc(fullOrigLen); {
+				memcpy(reqStringFormat, reqString, fullOrigLen);
 				sprintf(reqString, reqStringFormat, host, host);
 			} free(reqStringFormat);
 			reqString[baseLen] = 0x00;
 		}
 		if (UProxy->type == PROXY_TYPE_HTTP || (ProxyIsSSL(UProxy->type) && UProxy->sslStage == 2)) {
 			Log(LOG_LEVEL_DEBUG, "HTTP / SSL stage 2");
-			bufferevent_setwatermark(BuffEvent, EV_WRITE, strlen(reqString) * sizeof(char), 0);
+			UProxy->requestTimeHttpMs = GetUnixTimestampMilliseconds();
 			bufferevent_write(BuffEvent, (void*)reqString, strlen(reqString) * sizeof(char));
 			free(reqString);
 		}
@@ -347,7 +345,7 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 		}
 		if (!ProxyIsSSL(UProxy->type))
 			bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
-	} else if (Event & BEV_EVENT_ERROR) {
+	} else {
 		if (ProxyIsSSL(UProxy->type))
 			Log(LOG_LEVEL_DEBUG, "SSL stage %d error %02x", UProxy->sslStage, Event);
 
@@ -356,7 +354,7 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 		char *ip = IPv6MapToString(UProxy->ip); {
 			Log(LOG_LEVEL_DEBUG, "EVEvent: event timeout / fail %s", ip);
 		} free(ip);
-		Log(LOG_LEVEL_DEBUG, "EVEvent: timeout BuffEvent: %08x event %02x", BuffEvent, Event);
+		Log(LOG_LEVEL_DEBUG, "EVEvent: BuffEvent: %08x event %02x", BuffEvent, Event);
 #endif
 
 		REQUEST_FREE_STRUCT *s = malloc(sizeof(REQUEST_FREE_STRUCT));
@@ -404,7 +402,7 @@ void RequestAsync(UNCHECKED_PROXY *UProxy)
 	Log(LOG_LEVEL_DEBUG, "RequestAsync: new socket");
 
 	bufferevent_set_timeouts(buffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
-	bufferevent_setcb(buffEvent, (bufferevent_data_cb)EVRead, (bufferevent_data_cb)EVWrite, (bufferevent_data_cb)EVEvent, UProxy);
+	bufferevent_setcb(buffEvent, (bufferevent_data_cb)EVRead, (bufferevent_data_cb)EVWrite, (bufferevent_event_cb)EVEvent, UProxy);
 	bufferevent_enable(buffEvent, EV_READ | EV_WRITE);
 
 	UProxy->requestTimeMs = GetUnixTimestampMilliseconds();
@@ -419,10 +417,8 @@ void RequestAsync(UNCHECKED_PROXY *UProxy)
 
 	UProxy->timeout = event_new(levRequestBase, -1, EV_TIMEOUT, (event_callback_fn)RequestFree, s);
 	event_add(UProxy->timeout, &GlobalTimeoutTV);
-	Log(LOG_LEVEL_DEBUG, "Added timeout event");
 
 	UProxy->checking = true;
-	//pthread_mutex_lock(&(UProxy->processing));
 	assert(bufferevent_socket_connect(buffEvent, sa, sizeof(struct sockaddr_in6)) == 0); // socket creation should never fail, because IP is always valid (!= dead)
 	free(sa);
 }

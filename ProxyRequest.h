@@ -1,16 +1,13 @@
 #pragma once
 
 #include <event2/event.h>
-#include <evhtp.h>
 #include <event2/bufferevent.h>
 #include <openssl/ssl.h>
-#include <stdint.h>
-#include <pthread.h>
 #include "ProxyLists.h"
 
 char *RequestString;
 char *RequestStringSSL;
-evhtp_kvs_t *RequestHeaders;
+//evhtp_kvs_t *RequestHeaders;
 char *Host4;
 char *Host6;
 

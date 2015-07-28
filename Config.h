@@ -15,6 +15,7 @@ IPv6Map *GlobalIp4;
 IPv6Map *GlobalIp6;
 char *HarvestersPath;
 uint64_t AuthLoginExpiry;
+bool EnableUDP;
 
 struct timeval GlobalTimeoutTV;
 
