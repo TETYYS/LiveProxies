@@ -79,16 +79,15 @@ void HarvestLoop()
 			char *result = PyString_AsString(pResult);
 			char *tokSave = NULL;
 			char *pch = strtok_r(result, "\n", &tokSave);
-			char curType = PROXY_TYPE_HTTP;
+			PROXY_TYPE curType = PROXY_TYPE_HTTP;
 			uint16_t curPort;
 			while (pch != NULL) {
 				if (pch[0] == '\0') {
 					pch = strtok_r(NULL, "\n", &tokSave);
 					continue;
 				}
-				if (strncmp(pch, "setType", 7) == 0) {
-					curType = atoi(pch + 7);
-				}
+				if (strncmp(pch, "setType", 7) == 0)
+					curType = atoll(pch + 8);
 
 				if (ProxyIsSSL(curType) && !SSLEnabled) {
 					Log(LOG_LEVEL_WARNING, "Got SSL proxy, but SSL is disabled");

@@ -271,7 +271,7 @@ static void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx)
 static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 {
 	UNCHECKED_PROXY *UProxy = NULL;
-
+	Log(LOG_LEVEL_DEBUG, "Server landing");
 	/* Page dispatch */ {
 		if (Buff[0] != 'G') {
 			// wait a sec we don't have any POST or any other handlers
@@ -324,8 +324,12 @@ typedef enum _SERVER_TYPE {
 
 void HTTPRead(struct bufferevent *BuffEvent, void *Ctx)
 {
+	Log(LOG_LEVEL_DEBUG, "HTTPRead");
 	struct evbuffer *evBuff = bufferevent_get_input(BuffEvent);
 	size_t len = evbuffer_get_length(evBuff);
+	if (len < 4)
+		return;
+
 	char buff[4];
 	struct evbuffer_ptr pos;
 
@@ -338,11 +342,8 @@ void HTTPRead(struct bufferevent *BuffEvent, void *Ctx)
 			valid = true;
 	}
 	if (!valid) {
-		evbuffer_ptr_set(evBuff, &pos, len - 2, EVBUFFER_PTR_SET);
-		evbuffer_copyout_from(evBuff, &pos, buff, 2);
-		if (buff[0] != '\n' || buff[1] != '\n') {
+		if (buff[2] != '\n' || buff[3] != '\n')
 			return;
-		}
 	}
 
 	char *out = malloc(len + 1);
@@ -357,13 +358,14 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 {
 	SERVER_TYPE type = (SERVER_TYPE)Ctx;
 	struct event_base *base = evconnlistener_get_base(List);
-
+	Log(LOG_LEVEL_DEBUG, "ServerAccept");
 	switch (type) {
 		case HTTP4:
 		case HTTP6:
 		{
+			Log(LOG_LEVEL_DEBUG, "ServerAccept: HTTP");
 			struct bufferevent *bev = bufferevent_socket_new(base, Fd, BEV_OPT_CLOSE_ON_FREE);
-			//bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
+			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			bufferevent_setcb(bev, HTTPRead, NULL, ServerEvent, NULL);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
@@ -371,8 +373,9 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 		case SSL4:
 		case SSL6:
 		{
+			Log(LOG_LEVEL_DEBUG, "ServerAccept: SSL");
 			struct bufferevent *bev = bufferevent_openssl_socket_new(base, Fd, SSL_new(levServerSSL), BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
-			//bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
+			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			bufferevent_setcb(bev, HTTPRead, NULL, ServerEvent, NULL);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
@@ -496,9 +499,13 @@ static void ServerUDP(int hSock)
 
 	for (;;) {
 		len = sizeof(remote);
+		Log(LOG_LEVEL_DEBUG, "WServerUDP: Waiting...");
 		size = recvfrom(hSock, buff, 512 / 8, 0, (struct sockaddr *)&remote, &len);
-		if (size != 512 / 8)
+		Log(LOG_LEVEL_DEBUG, "WServerUDP: Got data");
+		if (size != 512 / 8) {
+			Log(LOG_LEVEL_DEBUG, "WServerUDP: Drop on len");
 			continue;
+		}
 
 		UNCHECKED_PROXY *UProxy = NULL;
 
@@ -513,8 +520,10 @@ static void ServerUDP(int hSock)
 			} pthread_mutex_unlock(&lockUncheckedProxies);
 		} free(ip);
 
-		if (UProxy == NULL)
+		if (UProxy == NULL) {
+			Log(LOG_LEVEL_DEBUG, "WServerUDP: Drop on proxy");
 			continue;
+		}
 
 		PROXY *proxy;
 
@@ -563,7 +572,6 @@ void ServerUDP4()
 
 	bzero(&local, sizeof(local));
 	local.sin_family = AF_INET;
-	local.sin_addr.s_addr = htonl(INADDR_ANY);
 	local.sin_port = htons(ServerPortUDP);
 	bind(hSock, (struct sockaddr *)&local, sizeof(local));
 
@@ -579,7 +587,7 @@ void ServerUDP4()
 void ServerUDP6()
 {
 	int hSock;
-	struct sockaddr_in local;
+	struct sockaddr_in6 local;
 
 	hSock = socket(AF_INET6, SOCK_DGRAM, 0);
 	int yes = 1;
@@ -588,9 +596,8 @@ void ServerUDP6()
 	setsockopt(hSock, IPPROTO_IPV6, IPV6_V6ONLY, (void *)&yes, sizeof(yes));
 
 	bzero(&local, sizeof(local));
-	local.sin_family = AF_INET6;
-	local.sin_addr.s_addr = htonl(INADDR_ANY);
-	local.sin_port = htons(ServerPortUDP);
+	local.sin6_family = AF_INET6;
+	local.sin6_port = htons(ServerPortUDP);
 	bind(hSock, (struct sockaddr *)&local, sizeof(local));
 
 	pthread_t wServerUDP;

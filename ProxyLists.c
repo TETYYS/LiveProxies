@@ -12,7 +12,7 @@
 #include <openssl/sha.h>
 #include <event2/event.h>
 
-static bool MultiFlag(char Flag)
+static bool MultiFlag(uint64_t Flag)
 {
 	return (Flag & (Flag - 1)) != 0 && Flag != 1;
 }
@@ -79,12 +79,12 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 	} pthread_mutex_unlock(&lockUncheckedProxies);
 	Log(LOG_LEVEL_DEBUG, "UProxyAdd: size %d", sizeUncheckedProxies);
 
-	if (MultiFlag(UProxy->type)) { // matches 0, 1, 2, 4, 8, 16...
+	if (MultiFlag(UProxy->type)) {
 		for (size_t x = 0; x < PROXY_TYPE_COUNT - 1 /* -1 because of type 1 */; x++) {
-			if ((UProxy->type & (uint32_t)pow(2, x)) == (uint32_t)pow(2, x)) {
+			if ((UProxy->type & (PROXY_TYPE)pow(2, x)) == (PROXY_TYPE)pow(2, x)) {
 				IPv6Map *ip = malloc(sizeof(IPv6Map));
 				memcpy(ip, UProxy->ip->Data, sizeof(IPv6Map));
-				ret += UProxyAdd(AllocUProxy(ip, UProxy->port, (uint32_t)pow(2, x), NULL, NULL, false));
+				ret += UProxyAdd(AllocUProxy(ip, UProxy->port, (PROXY_TYPE)pow(2, x), NULL, NULL, false));
 			}
 		}
 	} else {
@@ -143,7 +143,7 @@ UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct
 	UProxy->port = Port;
 	UProxy->type = Type;
 	UProxy->checking = false;
-	UProxy->retries = UProxy->requestTimeMs = UProxy->requestTimeHttpMs = UProxy->sslStage = 0;
+	UProxy->retries = UProxy->requestTimeMs = UProxy->requestTimeHttpMs = UProxy->stage = 0;
 	UProxy->checkSuccess = false;
 	pthread_mutex_init(&(UProxy->processing), NULL);
 	UProxy->timeout = Timeout;

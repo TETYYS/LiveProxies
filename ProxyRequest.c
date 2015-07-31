@@ -79,101 +79,49 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 	}
 }
 
-void CALLBACK EVRead(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
+typedef enum _SOCKS_TYPE {
+	SOCKS_TYPE_CONNECT = 0x01,
+	SOCKS_TYPE_BIND = 0x02,
+	SOCKS_TYPE_UDP_ASSOCIATE = 0x03
+} SOCKS_TYPE;
+
+static bool SOCKS4(SOCKS_TYPE Type, uint16_t Port, UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEvent)
 {
-	Log(LOG_LEVEL_DEBUG, "EVRead");
-	if (UProxy->sslStage == 1) {
-		pthread_mutex_lock(&lockUncheckedProxies); {
-			bool found = false;
-			for (size_t x = 0; x < sizeUncheckedProxies; x++) {
-				if (uncheckedProxies[x] == UProxy) {
-					found = true;
-					break;
-				}
-			}
-			if (!found) {
-				Log(LOG_LEVEL_DEBUG, "EVRead: UProxy doesn't exist");
-				pthread_mutex_unlock(&lockUncheckedProxies);
-				return;
-			}
-		} pthread_mutex_unlock(&lockUncheckedProxies);
+	if (Type == SOCKS_TYPE_UDP_ASSOCIATE)
+		return;
 
-		struct evbuffer *buff = bufferevent_get_input(BuffEvent);
-		evbuffer_drain(buff, evbuffer_get_length(buff));
+	if (UProxy->stage == 1) {
+		/*
+		field 1: SOCKS version number, 1 byte, must be 0x04 for this version
+		field 2: command code, 1 byte:
+		0x01 = establish a TCP/IP stream connection
+		0x02 = establish a TCP/IP port binding
+		field 3: network byte order port number, 2 bytes
+		field 4: network byte order IP address, 4 bytes
+		field 5: the user ID string, variable length, terminated with a null (0x00)
+		*/
+		char buff[1 + 1 + sizeof(uint16_t) + IPV4_SIZE + 1 /* ? */];
+		buff[0] = 0x04;
+		buff[1] = 0x01; // CONNECT
+		*((uint16_t*)(&(buff[2]))) = htons(Port);
+		*((uint32_t*)(&(buff[4]))) = htonl(GlobalIp4->Data[3]);
+		buff[8] = 0x00;
 
-		// Begin REAL SSL
+		bufferevent_write(BuffEvent, buff, 9);
+		bufferevent_setwatermark(BuffEvent, EV_READ, 8, 0);
+	} else if (UProxy->stage == 2) {
+		size_t len = evbuffer_get_length(bufferevent_get_input(BuffEvent));
+		uint8_t data[2];
+		if (len != 8)
+			return false;
 
-		Log(LOG_LEVEL_DEBUG, "SSL stage 1 -> 2");
-
-		UProxy->sslStage = 2;
-
-		BuffEvent = bufferevent_openssl_filter_new(levRequestBase,
-												   BuffEvent,
-												   SSL_new(RequestBaseSSLCTX),
-												   BUFFEREVENT_SSL_CONNECTING,
-												   BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
-		bufferevent_openssl_set_allow_dirty_shutdown(BuffEvent, 1);
-
-		if (BuffEvent != NULL) {
-			Log(LOG_LEVEL_DEBUG, "SSL BuffEvent SET <------------------------------");
-			bufferevent_setcb(BuffEvent, (bufferevent_data_cb)EVRead, (bufferevent_data_cb)EVWrite, (bufferevent_event_cb)EVEvent, UProxy);
-			bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
-		} else {
-			Log(LOG_LEVEL_DEBUG, "SSL BuffEvent NULL");
-		}
+		evbuffer_remove(bufferevent_get_input(BuffEvent), data, 2);
+		Log(LOG_LEVEL_DEBUG, "SOCKS4: Stage 2 data[1]: %d", data[1]);
+		return data[1] == 0x5A;
 	}
 }
 
-void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
-{
-	/*pthread_mutex_lock(&lockUncheckedProxies); {
-		bool found = false;
-		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
-			if (uncheckedProxies[x] == UProxy) {
-				found = true;
-				break;
-			}
-		}
-		if (!found) {
-			Log(LOG_LEVEL_DEBUG, "EVWrite: UProxy doesn't exist");
-			pthread_mutex_unlock(&lockUncheckedProxies);
-			return;
-		}
-	} pthread_mutex_unlock(&lockUncheckedProxies);*/
-	Log(LOG_LEVEL_DEBUG, "EVWrite");
-}
-
-typedef enum _SOCKS_TYPE {
-	CONNECT = 0x01,
-	BIND = 0x02,
-	UDP_ASSOCIATE = 0x03
-} SOCKS_TYPE;
-
-static void SendSOCKS4Packet(SOCKS_TYPE Type, uint16_t Port, UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEvent)
-{
-	if (Type == UDP_ASSOCIATE)
-		return;
-
-	/*
-	field 1: SOCKS version number, 1 byte, must be 0x04 for this version
-	field 2: command code, 1 byte:
-	0x01 = establish a TCP/IP stream connection
-	0x02 = establish a TCP/IP port binding
-	field 3: network byte order port number, 2 bytes
-	field 4: network byte order IP address, 4 bytes
-	field 5: the user ID string, variable length, terminated with a null (0x00)
-	*/
-	char buff[1 + 1 + sizeof(uint16_t)+IPV4_SIZE + 1 /* ? */];
-	buff[0] = 0x04;
-	buff[1] = 0x01; // CONNECT
-	*((uint16_t*)(&(buff[2]))) = htons(Port);
-	*((uint32_t*)(&(buff[4]))) = htonl(GlobalIp4->Data[3]);
-	buff[8] = 0x00;
-
-	bufferevent_write(BuffEvent, buff, 9);
-}
-
-static void SendSOCKS5Packet(SOCKS_TYPE Type, uint16_t Port, UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEvent)
+static bool SOCKS5(SOCKS_TYPE Type, uint16_t Port, UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEvent)
 {
 	/*
 	field 1: SOCKS version number (must be 0x05 for this version)
@@ -206,29 +154,286 @@ static void SendSOCKS5Packet(SOCKS_TYPE Type, uint16_t Port, UNCHECKED_PROXY *UP
 	o  DST.PORT desired destination port in network octet order
 	*/
 
-	char *buff;
-	IP_TYPE type = GetIP(UProxy->ip);
-	if (type == IPV4)
-		buff = malloc(7 + IPV4_SIZE + sizeof(uint16_t));
-	else
-		buff = malloc(7 + IPV6_SIZE + sizeof(uint16_t));
-	{
-		buff[0] = 0x05;
-		buff[1] = 1; // 1 auth
-		buff[2] = 0x00; // no auth
+	switch (UProxy->stage) {
+		case 0:
+		{
+			uint8_t buff[3];
+			buff[0] = 0x05;
+			buff[1] = 1; // 1 auth
+			buff[2] = 0x00; // no auth
+			bufferevent_write(BuffEvent, buff, 3);
+			bufferevent_setwatermark(BuffEvent, EV_READ, 2, 0);
+			break;
+		}
+		case 1:
+		{
+			size_t len = evbuffer_get_length(bufferevent_get_input(BuffEvent));
+			uint8_t data[2];
+			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 1 data len: %d", len);
+			if (len != 2)
+				return false;
 
-		buff[3] = 0x05; // again?
-		buff[4] = Type;
-		buff[5] = 0x00; // RESERVED
-		buff[6] = type == IPV4 ? 0x01 : 0x04; // who was 0x02?
-		if (type == IPV4)
-			(*(uint32_t*)(&(buff[7]))) = GlobalIp4->Data[3];
-		else
-			memcpy(&(buff[7]), GlobalIp4->Data, IPV6_SIZE);
-		*((uint16_t*)&(buff[7 + (type == IPV4 ? IPV4_SIZE : IPV6_SIZE)])) = htons(Port);
+			evbuffer_remove(bufferevent_get_input(BuffEvent), data, 2);
+			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 1 data[1]: %d", data[1]);
+			return data[1] == 0x00;
+			break;
+		}
+		case 2:
+		{
 
-		bufferevent_write(BuffEvent, buff, 7 + (type == IPV4 ? IPV4_SIZE : IPV6_SIZE) + sizeof(uint16_t));
-	} free(buff);
+			IP_TYPE ipType = GetIPTypePreffered(GetIPType(UProxy->ip));
+			uint8_t *buff;
+			if (ipType == IPV4) {
+				Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 2 IPV4");
+				uint8_t tBuff[4 + IPV4_SIZE + sizeof(uint16_t)];
+				buff = tBuff;
+			} else {
+				Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 2 IPV6");
+				uint8_t tBuff[4 + IPV6_SIZE + sizeof(uint16_t)];
+				buff = tBuff;
+			}
+			buff[0] = 0x05; // again?
+			buff[1] = Type;
+			buff[2] = 0x00; // RESERVED
+			buff[3] = ipType == IPV4 ? 0x01 : 0x04; // who was 0x02?
+			if (ipType == IPV4)
+				(*(uint32_t*)(&(buff[4]))) = GlobalIp4->Data[3];
+			else
+				memcpy(&(buff[4]), GlobalIp4->Data, IPV6_SIZE);
+			*((uint16_t*)&(buff[4 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)])) = htons(Port);
+
+			bufferevent_write(BuffEvent, buff, 4 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE) + sizeof(uint16_t));
+			bufferevent_setwatermark(BuffEvent, EV_READ, 10, 0);
+			break;
+		}
+		case 3:
+		{
+			size_t len = evbuffer_get_length(bufferevent_get_input(BuffEvent));
+			uint8_t data[2];
+			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 data len: %d", len);
+			if (len < 10)
+				return false;
+
+			evbuffer_remove(bufferevent_get_input(BuffEvent), data, 2);
+
+			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 data[1]: %d", data[1]);
+
+			return data[1] == 0x00;
+			break;
+		}
+	}
+	return true;
+}
+
+typedef enum _PROXY_HANDLE_DATA_EV_TYPE {
+	EV_TYPE_READ,
+	EV_TYPE_WRITE,
+	EV_TYPE_CONNECT
+} PROXY_HANDLE_DATA_EV_TYPE;
+
+static void ProxyHandleData(UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEvent, PROXY_HANDLE_DATA_EV_TYPE EVType)
+{
+	Log(LOG_LEVEL_DEBUG, "ProxyHandleData: Proxy %s, stage %d", ProxyGetTypeString(UProxy->type), UProxy->stage);
+	char *reqString;
+#define EVTYPE_CASE(x) if (EVType != x) return;
+#define EVTYPE_CASE_NOT(x) if (EVType == x) return;
+
+	switch (UProxy->type) {
+		case PROXY_TYPE_HTTP: {
+			EVTYPE_CASE(EV_TYPE_CONNECT);
+			UProxy->stage = 7;
+			break;
+		}
+		case PROXY_TYPE_HTTPS: {
+			switch (UProxy->stage) {
+				case 0: {
+					EVTYPE_CASE(EV_TYPE_CONNECT);
+
+					char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
+					size_t rawOrigLen = strlen(RequestStringSSL);
+					size_t baseLen = (rawOrigLen - 4 /* %s for Host and CONNECT header */) + (strlen(host) * 2);
+					size_t fullOrigLen = (sizeof(char) * rawOrigLen) + 1;
+
+					reqString = malloc((sizeof(char) * baseLen) + 1 /* NUL */); {
+						memcpy(reqString, RequestStringSSL, fullOrigLen);
+						char *reqStringFormat = malloc(fullOrigLen); {
+							memcpy(reqStringFormat, reqString, fullOrigLen);
+							sprintf(reqString, reqStringFormat, host, host);
+						} free(reqStringFormat);
+						reqString[baseLen] = 0x00;
+						bufferevent_write(BuffEvent, (void*)reqString, strlen(reqString) * sizeof(char));
+					} free(reqString);
+
+					UProxy->stage = 1;
+					break;
+				}
+				case 1: {
+					EVTYPE_CASE(EV_TYPE_READ);
+					// HTTP/1.1 200
+
+					size_t len = evbuffer_get_length(bufferevent_get_input(BuffEvent));
+					char data[12];
+					if (len < 12)
+						goto fail;
+
+					evbuffer_remove(bufferevent_get_input(BuffEvent), data, 12);
+					if (strncmp(data + 9, "200", 3) != 0)
+						goto fail;
+
+					UProxy->stage = 6;
+					break;
+				}
+			}
+			break;
+		}
+		case PROXY_TYPE_SOCKS4:
+		case PROXY_TYPE_SOCKS4A:
+		case PROXY_TYPE_SOCKS4_TO_SSL:
+		case PROXY_TYPE_SOCKS4A_TO_SSL: {
+			if (GetIPType(UProxy->ip) == IPV4) // ???
+				goto fail;
+
+			switch (UProxy->stage) {
+				case 0: {
+					EVTYPE_CASE(EV_TYPE_CONNECT);
+
+					SOCKS4(SOCKS_TYPE_CONNECT, ProxyIsSSL(UProxy->type) ? SSLServerPort : ServerPort, UProxy, BuffEvent);
+					UProxy->stage = 1;
+
+					break;
+				}
+				case 1: {
+					EVTYPE_CASE(EV_TYPE_READ);
+
+					SOCKS4(SOCKS_TYPE_CONNECT, ProxyIsSSL(UProxy->type) ? SSLServerPort : ServerPort, UProxy, BuffEvent);
+					UProxy->stage = ProxyIsSSL(UProxy->type) ? 6 : 7;
+				}
+			}
+			break;
+		}
+		case PROXY_TYPE_SOCKS5:
+		case PROXY_TYPE_SOCKS5_TO_SSL:
+		case PROXY_TYPE_SOCKS5_WITH_UDP: {
+			uint16_t port = UProxy->type == PROXY_TYPE_SOCKS5_WITH_UDP ? ServerPortUDP : (ProxyIsSSL(UProxy->type) ? SSLServerPort : ServerPort);
+			SOCKS_TYPE socksType = UProxy->type == PROXY_TYPE_SOCKS5_WITH_UDP ? SOCKS_TYPE_UDP_ASSOCIATE : SOCKS_TYPE_CONNECT;
+
+			Log(LOG_LEVEL_DEBUG, "SOCKS5 port %d", port);
+
+			switch (UProxy->stage) {
+				case 0: {
+					EVTYPE_CASE(EV_TYPE_CONNECT);
+
+					SOCKS5(socksType, port, UProxy, BuffEvent);
+					Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 1");
+					UProxy->stage = 1;
+					break;
+				}
+				case 1: {
+					EVTYPE_CASE(EV_TYPE_READ);
+
+					if (SOCKS5(socksType, port, UProxy, BuffEvent)) {
+						Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 2");
+						UProxy->stage = 2;
+						SOCKS5(socksType, port, UProxy, BuffEvent);
+						Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 3");
+						UProxy->stage = 3;
+
+						// This handles two stages because after first stage, there's no one to send packet after receiving response
+					} else
+						goto fail;
+					break;
+				}
+				case 3: {
+					EVTYPE_CASE(EV_TYPE_READ);
+
+					if (SOCKS5(socksType, port, UProxy, BuffEvent)) {
+						if (UProxy->type == PROXY_TYPE_SOCKS5_WITH_UDP) {
+							Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 4 (UDP)");
+							UProxy->stage = 8;
+
+							bufferevent_write(BuffEvent, UProxy->hash, 512 / 8);
+						} else {
+							Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage %d (%s)", ProxyIsSSL(UProxy->type) ? 6 : 7, ProxyIsSSL(UProxy->type) ? "SSL" : "HTTP");
+							UProxy->stage = ProxyIsSSL(UProxy->type) ? 6 : 7;
+						}
+					} else
+						goto fail;
+					break;
+				}
+			}
+			break;
+		}
+	}
+
+	switch (UProxy->stage) {
+		case 6: {
+			struct evbuffer *buff = bufferevent_get_input(BuffEvent);
+			evbuffer_drain(buff, evbuffer_get_length(buff));
+			Log(LOG_LEVEL_DEBUG, "Establishing SSL connection...");
+			// Begin REAL SSL
+			BuffEvent = bufferevent_openssl_filter_new(levRequestBase,
+													   BuffEvent,
+													   SSL_new(RequestBaseSSLCTX),
+													   BUFFEREVENT_SSL_CONNECTING,
+													   BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
+			bufferevent_openssl_set_allow_dirty_shutdown(BuffEvent, 1);
+
+			if (BuffEvent != NULL) {
+				bufferevent_setcb(BuffEvent, (bufferevent_data_cb)EVRead, (bufferevent_data_cb)EVWrite, (bufferevent_event_cb)EVEvent, UProxy);
+				bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
+			} else
+				goto fail;
+
+			UProxy->stage = 7;
+			// SSL handshake brings up EVEvent connect so this falls to stage 5 later
+			break;
+		}
+		case 7: {
+			EVTYPE_CASE_NOT(EV_TYPE_WRITE);
+
+			UProxy->requestTimeHttpMs = GetUnixTimestampMilliseconds();
+			Log(LOG_LEVEL_DEBUG, "Sending HTTP request");
+			char *key;
+			size_t key64Len = Base64Encode(UProxy->hash, 512 / 8, &key); {
+				char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
+				size_t rawOrigLen = strlen(RequestString);
+				size_t baseLen = (rawOrigLen - 2 /* %s for Host header */) + strlen(host);
+				size_t fullOrigLen = (sizeof(char) * rawOrigLen) + 1;
+
+				reqString = malloc((sizeof(char) * (baseLen + key64Len + 4 /* \r\n\r\n */)) + 1 /* NUL */);
+				memcpy(reqString, RequestString, fullOrigLen);
+
+				char reqStringFormat[fullOrigLen];
+				memcpy(reqStringFormat, reqString, fullOrigLen);
+				sprintf(reqString, reqStringFormat, host);
+
+				memcpy(reqString + baseLen, key, key64Len * sizeof(char));
+				reqString[baseLen + key64Len] = '\r';
+				reqString[baseLen + key64Len + 1] = '\n';
+				reqString[baseLen + key64Len + 2] = '\r';
+				reqString[baseLen + key64Len + 3] = '\n';
+				reqString[baseLen + key64Len + 4] = 0x00;
+			} free(key);
+
+			bufferevent_write(BuffEvent, (void*)reqString, strlen(reqString) * sizeof(char));
+			free(reqString);
+			UProxy->stage = 8;
+			Log(LOG_LEVEL_DEBUG, "Advance to stage 8 (final)");
+			break;
+		}
+		case 8:
+		{
+			bufferevent_setcb(BuffEvent, NULL, NULL, NULL, NULL);
+			break;
+		}
+	}
+
+	return;
+fail:
+	Log(LOG_LEVEL_DEBUG, "ProxyHandleData failure Proxy %s at stage %d", ProxyGetTypeString(UProxy->type), UProxy->stage);
+	bufferevent_setcb(BuffEvent, NULL, NULL, NULL, NULL);
+	if (UProxy->timeout != NULL)
+		event_active(UProxy->timeout, EV_TIMEOUT, 0);
 }
 
 void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_PROXY *UProxy)
@@ -254,100 +459,10 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 			Log(LOG_LEVEL_DEBUG, "EVEvent: event connected %s", ip);
 		} free(ip);
 
-		char *reqString;
-		IP_TYPE type = GetIPType(UProxy->ip);
-		char *host = GetHost(type, ProxyIsSSL(UProxy->type));
-
-		if (!ProxyIsSSL(UProxy->type) || (ProxyIsSSL(UProxy->type) && UProxy->sslStage == 2)) {
-			char *key;
-			size_t key64Len = Base64Encode(UProxy->hash, 512 / 8, &key); {
-				size_t rawOrigLen = strlen(RequestString);
-				size_t baseLen = (rawOrigLen - 2 /* %s for Host header */) + strlen(host);
-				size_t fullOrigLen = (sizeof(char) * rawOrigLen) + 1;
-
-				reqString = malloc((sizeof(char)* (baseLen + key64Len + 4 /* \r\n\r\n */)) + 1 /* NUL */);
-				memcpy(reqString, RequestString, fullOrigLen);
-				char *reqStringFormat = malloc(fullOrigLen); {
-					memcpy(reqStringFormat, reqString, fullOrigLen);
-					sprintf(reqString, reqStringFormat, host);
-				} free(reqStringFormat);
-				memcpy(reqString + baseLen, key, key64Len * sizeof(char));
-				reqString[baseLen + key64Len] = '\r';
-				reqString[baseLen + key64Len + 1] = '\n';
-				reqString[baseLen + key64Len + 2] = '\r';
-				reqString[baseLen + key64Len + 3] = '\n';
-				reqString[baseLen + key64Len + 4] = 0x00;
-			} free(key);
-		} else {
-			size_t rawOrigLen = strlen(RequestStringSSL);
-			size_t baseLen = (rawOrigLen - 4 /* %s for Host and CONNECT header */) + (strlen(host) * 2);
-			size_t fullOrigLen = (sizeof(char) * rawOrigLen) + 1;
-
-			reqString = malloc((sizeof(char) * baseLen) + 1 /* NUL */);
-			memcpy(reqString, RequestStringSSL, fullOrigLen);
-			char *reqStringFormat = malloc(fullOrigLen); {
-				memcpy(reqStringFormat, reqString, fullOrigLen);
-				sprintf(reqString, reqStringFormat, host, host);
-			} free(reqStringFormat);
-			reqString[baseLen] = 0x00;
-		}
-		if (UProxy->type == PROXY_TYPE_HTTP || (ProxyIsSSL(UProxy->type) && UProxy->sslStage == 2)) {
-			Log(LOG_LEVEL_DEBUG, "HTTP / SSL stage 2");
-			UProxy->requestTimeHttpMs = GetUnixTimestampMilliseconds();
-			bufferevent_write(BuffEvent, (void*)reqString, strlen(reqString) * sizeof(char));
-			free(reqString);
-		}
-		if (UProxy->type == PROXY_TYPE_HTTPS && UProxy->sslStage == 0) {
-			Log(LOG_LEVEL_DEBUG, "SSL stage 0 -> 1");
-			/*
-			CONNECT www.example.com:443 HTTP/1.1
-			Host: www.example.com:443
-			*/
-
-			UProxy->sslStage = 1;
-
-			// reqString formatted for stage != 2
-
-			bufferevent_write(BuffEvent, (void*)reqString, strlen(reqString) * sizeof(char));
-			free(reqString);
-		}
-		if ((UProxy->type == PROXY_TYPE_SOCKS4 || UProxy->type == PROXY_TYPE_SOCKS4A ||
-			UProxy->type == PROXY_TYPE_SOCKS4_TO_SSL || UProxy->type == PROXY_TYPE_SOCKS4A_TO_SSL) &&
-			GlobalIp4 == NULL) {
-			// ????
-			REQUEST_FREE_STRUCT *s = malloc(sizeof(REQUEST_FREE_STRUCT));
-			s->BuffEvent = BuffEvent;
-			s->UProxy = UProxy;
-			s->freeBufferEvent = true;
-			RequestFree(0, 0, s);
-			return;
-		}
-
-		if (UProxy->type == PROXY_TYPE_SOCKS4 || UProxy->type == PROXY_TYPE_SOCKS4A) {
-			SendSOCKS4Packet(CONNECT, ServerPort, UProxy, BuffEvent);
-			bufferevent_write(BuffEvent, reqString, strlen(reqString) * sizeof(char));
-		}
-		if (UProxy->type == PROXY_TYPE_SOCKS4_TO_SSL || UProxy->type == PROXY_TYPE_SOCKS4A_TO_SSL) {
-			UProxy->sslStage = 1;
-			SendSOCKS4Packet(CONNECT, SSLServerPort, UProxy, BuffEvent);
-		}
-		if (UProxy->type == PROXY_TYPE_SOCKS5) {
-			SendSOCKS5Packet(CONNECT, ServerPort, UProxy, BuffEvent);
-			bufferevent_write(BuffEvent, reqString, strlen(reqString) * sizeof(char));
-		}
-		if (UProxy->type == PROXY_TYPE_SOCKS5_TO_SSL) {
-			UProxy->sslStage = 1;
-			SendSOCKS5Packet(CONNECT, SSLServerPort, UProxy, BuffEvent);
-		}
-		if (UProxy->type == PROXY_TYPE_SOCKS5_WITH_UDP) {
-			SendSOCKS5Packet(UDP_ASSOCIATE, ServerPortUDP, UProxy, BuffEvent);
-			bufferevent_write(BuffEvent, UProxy->hash, 512 / 8);
-		}
-		if (!ProxyIsSSL(UProxy->type))
-			bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+		ProxyHandleData(UProxy, BuffEvent, EV_TYPE_CONNECT);
 	} else {
 		if (ProxyIsSSL(UProxy->type))
-			Log(LOG_LEVEL_DEBUG, "SSL stage %d error %02x", UProxy->sslStage, Event);
+			Log(LOG_LEVEL_DEBUG, "SSL stage %d error %02x", UProxy->stage, Event);
 
 		bufferevent_setcb(BuffEvent, NULL, NULL, NULL, NULL);
 #if DEBUG
@@ -356,16 +471,59 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 		} free(ip);
 		Log(LOG_LEVEL_DEBUG, "EVEvent: BuffEvent: %08x event %02x", BuffEvent, Event);
 #endif
-
-		REQUEST_FREE_STRUCT *s = malloc(sizeof(REQUEST_FREE_STRUCT));
-		s->BuffEvent = BuffEvent;
-		s->UProxy = UProxy;
-		s->freeBufferEvent = true;
-		ip = IPv6MapToString(UProxy->ip); {
-			Log(LOG_LEVEL_DEBUG, "RequestFree call struct for %s", ip);
-		} free(ip);
-		RequestFree(0, 0, s);
+		if (UProxy->timeout != NULL)
+			event_active(UProxy->timeout, EV_TIMEOUT, 0);
 	}
+}
+
+void CALLBACK EVRead(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
+{
+#if DEBUG
+	Log(LOG_LEVEL_DEBUG, "EVRead");
+	char *data = malloc(evbuffer_get_length(bufferevent_get_input(BuffEvent))); {
+		evbuffer_copyout(bufferevent_get_input(BuffEvent), data, evbuffer_get_length(bufferevent_get_input(BuffEvent)));
+		Log(LOG_LEVEL_DEBUG, "EVRead: %s", data);
+	} free(data);
+#endif
+
+	pthread_mutex_lock(&lockUncheckedProxies); {
+		bool found = false;
+		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
+			if (uncheckedProxies[x] == UProxy) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			Log(LOG_LEVEL_DEBUG, "EVRead: UProxy doesn't exist");
+			pthread_mutex_unlock(&lockUncheckedProxies);
+			return;
+		}
+	} pthread_mutex_unlock(&lockUncheckedProxies);
+
+	ProxyHandleData(UProxy, BuffEvent, EV_TYPE_READ);
+}
+
+void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
+{
+	Log(LOG_LEVEL_DEBUG, "EVWrite");
+
+	pthread_mutex_lock(&lockUncheckedProxies); {
+		bool found = false;
+		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
+			if (uncheckedProxies[x] == UProxy) {
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			Log(LOG_LEVEL_DEBUG, "EVWrite: UProxy doesn't exist");
+			pthread_mutex_unlock(&lockUncheckedProxies);
+			return;
+		}
+	} pthread_mutex_unlock(&lockUncheckedProxies);
+
+	ProxyHandleData(UProxy, BuffEvent, EV_TYPE_WRITE);
 }
 
 void RequestAsync(UNCHECKED_PROXY *UProxy)

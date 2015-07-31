@@ -27,11 +27,12 @@ char *GetHost(IP_TYPE Preffered, bool SSL)
 		return host4;
 }
 
-IPv6Map *GetIP(IP_TYPE Preffered) {
+IP_TYPE GetIPTypePreffered(IP_TYPE Preffered)
+{
 	if (GlobalIp4 != NULL && GlobalIp6 != NULL)
-		return Preffered == IPV4 ? GlobalIp4 : GlobalIp6;
+		return Preffered == IPV4 ? IPV4 : IPV6;
 	if (GlobalIp4 == NULL)
-		return GlobalIp6;
+		return IPV6;
 	else
-		return GlobalIp4;
+		return IPV4;
 }

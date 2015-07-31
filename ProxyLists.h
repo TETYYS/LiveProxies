@@ -35,7 +35,7 @@ typedef enum _ANONYMITY {
 typedef struct _PROXY {
 	IPv6Map *ip;
 	uint16_t port;
-	char type; // PROXY_TYPE
+	PROXY_TYPE type; // PROXY_TYPE
 	ANONYMITY anonymity; // ANONYMITY
 	const char *country;
 	bool rechecking;
@@ -56,8 +56,46 @@ typedef struct _UNCHECKED_PROXY {
 	uint8_t retries;
 	bool checkSuccess;
 
-	// 0 - Send CONNECT, 1 - SSL handshake, 2 - Send HTTP request
-	uint8_t sslStage;
+	/* PROXY_TYPE_HTTP
+	 *	7 - Send HTTP request
+	 * PROXY_TYPE_HTTPS
+	 *	0 - Send CONNECT request
+	 *	1 - Receive CONNECT response
+	 *	6 - SSL hanshake
+	 *	7 - Send HTTP request
+	 * PROXY_TYPE_SOCKS4/A
+	 *	0 - Send SOCKS4/A packet
+	 *	1 - Receive answer
+	 *	7 - Send HTTP request
+	 * PROXY_TYPE_SOCKS5
+	 *	0 - Send SOCKS5 auth packet
+	 *	1 - Receive auth response
+	 *	2 - Send SOCKS5 main packet
+	 *	3 - Receive response
+	 *	7 - Send HTTP request
+	 * PROXY_TYPE_SOCKS4/A_TO_SSL
+	 *	0 - Send SOCKS4/A packet
+	 *	1 - Receive answer
+	 *	6 - SSL hanshake
+	 *	7 - Send HTTP request
+	 * PROXY_TYPE_SOCKS5_TO_SSL
+	 *	0 - Send SOCKS5 auth packet
+	 *	1 - Receive auth response
+	 *	2 - Send SOCKS5 main packet
+	 *	3 - Receive response
+	 *	6 - SSL hanshake
+	 *	7 - Send HTTP request
+	 * PROXY_TYPE_SOCKS5_WITH_UDP
+	 *	0 - Send SOCKS5 auth packet
+	 *	1 - Receive auth response
+	 *	2 - Send SOCKS5 main packet
+	 *	3 - Receive response
+	 *	4 - Send UDP packet
+	 */
+	/*
+	 * Universal stages - 6, 7, 8 - final
+	 */
+	uint8_t stage;
 
 	// This one blocks EVWrite called timeout event in case WServer is processing UProxy while EVWrite timeout event tries to free it
 	pthread_mutex_t processing;
@@ -68,7 +106,7 @@ typedef struct _UNCHECKED_PROXY {
 	uint64_t requestTimeMs;
 	uint64_t requestTimeHttpMs;
 	PROXY *associatedProxy;
-	
+
 	pthread_mutex_t *singleCheck;
 } UNCHECKED_PROXY;
 
