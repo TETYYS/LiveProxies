@@ -3,7 +3,7 @@
 #include "IPv6Map.h"
 #include <stddef.h>
 
-#define VERSION "0.4.9"
+#define VERSION "0.4.10"
 #define CALLBACK
 #define OUT
 #define MEM_OUT
