@@ -13,6 +13,7 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -88,7 +89,7 @@ typedef enum _SOCKS_TYPE {
 static bool SOCKS4(SOCKS_TYPE Type, uint16_t Port, UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEvent)
 {
 	if (Type == SOCKS_TYPE_UDP_ASSOCIATE)
-		return;
+		return false;
 
 	if (UProxy->stage == 1) {
 		/*
@@ -121,7 +122,7 @@ static bool SOCKS4(SOCKS_TYPE Type, uint16_t Port, UNCHECKED_PROXY *UProxy, stru
 	}
 }
 
-static bool SOCKS5(SOCKS_TYPE Type, uint16_t Port, UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEvent)
+static bool SOCKS5(SOCKS_TYPE Type, uint16_t *Port, UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEvent)
 {
 	/*
 	field 1: SOCKS version number (must be 0x05 for this version)
@@ -200,7 +201,7 @@ static bool SOCKS5(SOCKS_TYPE Type, uint16_t Port, UNCHECKED_PROXY *UProxy, stru
 				(*(uint32_t*)(&(buff[4]))) = GlobalIp4->Data[3];
 			else
 				memcpy(&(buff[4]), GlobalIp4->Data, IPV6_SIZE);
-			*((uint16_t*)&(buff[4 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)])) = htons(Port);
+			*((uint16_t*)&(buff[4 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)])) = Type != SOCKS_TYPE_UDP_ASSOCIATE ? htons(*Port) : 0;
 
 			bufferevent_write(BuffEvent, buff, 4 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE) + sizeof(uint16_t));
 			bufferevent_setwatermark(BuffEvent, EV_READ, 10, 0);
@@ -209,14 +210,16 @@ static bool SOCKS5(SOCKS_TYPE Type, uint16_t Port, UNCHECKED_PROXY *UProxy, stru
 		case 3:
 		{
 			size_t len = evbuffer_get_length(bufferevent_get_input(BuffEvent));
-			uint8_t data[2];
+			uint8_t data[10];
 			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 data len: %d", len);
 			if (len < 10)
 				return false;
 
-			evbuffer_remove(bufferevent_get_input(BuffEvent), data, 2);
+			evbuffer_remove(bufferevent_get_input(BuffEvent), data, 10);
 
 			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 data[1]: %d", data[1]);
+			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 port: %d", ntohs(*((uint16_t*)&(data[8]))));
+			*Port = ntohs(*((uint16_t*)&(data[8])));
 
 			return data[1] == 0x00;
 			break;
@@ -323,7 +326,7 @@ static void ProxyHandleData(UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEve
 				case 0: {
 					EVTYPE_CASE(EV_TYPE_CONNECT);
 
-					SOCKS5(socksType, port, UProxy, BuffEvent);
+					SOCKS5(socksType, &port, UProxy, BuffEvent);
 					Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 1");
 					UProxy->stage = 1;
 					break;
@@ -331,10 +334,10 @@ static void ProxyHandleData(UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEve
 				case 1: {
 					EVTYPE_CASE(EV_TYPE_READ);
 
-					if (SOCKS5(socksType, port, UProxy, BuffEvent)) {
+					if (SOCKS5(socksType, &port, UProxy, BuffEvent)) {
 						Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 2");
 						UProxy->stage = 2;
-						SOCKS5(socksType, port, UProxy, BuffEvent);
+						SOCKS5(socksType, &port, UProxy, BuffEvent);
 						Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 3");
 						UProxy->stage = 3;
 
@@ -346,12 +349,42 @@ static void ProxyHandleData(UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEve
 				case 3: {
 					EVTYPE_CASE(EV_TYPE_READ);
 
-					if (SOCKS5(socksType, port, UProxy, BuffEvent)) {
+					if (SOCKS5(socksType, &port, UProxy, BuffEvent)) {
 						if (UProxy->type == PROXY_TYPE_SOCKS5_WITH_UDP) {
 							Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 4 (UDP)");
 							UProxy->stage = 8;
 
-							bufferevent_write(BuffEvent, UProxy->hash, 512 / 8);
+							int hSock;
+
+							UProxy->requestTimeHttpMs = GetUnixTimestampMilliseconds();
+
+							if ((hSock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) != -1) {
+								Log(LOG_LEVEL_DEBUG, "UDP socket");
+								struct sockaddr *sa = IPv6MapToRaw(UProxy->ip, port); {
+									IP_TYPE ipType = GetIPTypePreffered(GetIPType(UProxy->ip));
+									Log(LOG_LEVEL_DEBUG, "UDP IP Type %d", ipType);
+
+									uint8_t buff[512 / 8 + 6 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)];
+									buff[0] = 0x00;
+									buff[1] = 0x00;
+									buff[2] = 0x00;
+									buff[3] = ipType == IPV4 ? 0x01 : 0x04;
+									memcpy(&(buff[4]), ipType == IPV4 ? &(GlobalIp4->Data[3]) : GlobalIp6->Data, ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE);
+									*((uint16_t*)&(buff[4 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)])) = htons(ServerPortUDP);
+									memcpy(&(buff[6 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)]), UProxy->hash, 512 / 8);
+
+									Log(LOG_LEVEL_DEBUG, "UDP buff construct");
+
+									if (sendto(hSock, buff, 512 / 8 + 6 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE), 0, sa, GetIPType(UProxy->ip) == IPV4 ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) == -1) {
+										Log(LOG_LEVEL_DEBUG, "UDP send fail");
+										free(sa);
+										close(hSock);
+										goto fail;
+									}
+									Log(LOG_LEVEL_DEBUG, "UDP sent ;)");
+								} free(sa);
+								close(hSock);
+							}
 						} else {
 							Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage %d (%s)", ProxyIsSSL(UProxy->type) ? 6 : 7, ProxyIsSSL(UProxy->type) ? "SSL" : "HTTP");
 							UProxy->stage = ProxyIsSSL(UProxy->type) ? 6 : 7;
