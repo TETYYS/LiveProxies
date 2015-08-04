@@ -446,7 +446,7 @@ void CheckLoop()
 			for (size_t x = 0; x < sizeUncheckedProxies; x++) {
 				if (CurrentlyChecking > SimultaneousChecks)
 					break;
-				if (!(uncheckedProxies[x]->checking) && uncheckedProxies[x]->singleCheck == NULL) {
+				if (!(uncheckedProxies[x]->checking) && uncheckedProxies[x]->singleCheckCallback == NULL) {
 					if (proxiesToCheck == NULL)
 						proxiesToCheck = malloc(sizeof(proxiesToCheck));
 					else

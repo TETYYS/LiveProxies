@@ -7,18 +7,15 @@
 #include <string.h>
 #include "ProxyRequest.h"
 
-PROXY *Recheck(PROXY *In)
+void Recheck(PROXY *In, void CALLBACK *FinishedCallback, void *Ex)
 {
 	bool success = false;
-	UNCHECKED_PROXY *UProxy = UProxyFromProxy(In, true);
+	UNCHECKED_PROXY *UProxy = UProxyFromProxy(In);
+	UProxy->singleCheckCallback = FinishedCallback;
+	UProxy->singleCheckCallbackExtraData = Ex;
 
-	UProxyAdd(UProxy); {
-		RequestAsync(UProxy);
-
-		pthread_mutex_lock(UProxy->singleCheck);
-		success = UProxy->checkSuccess;
-	} UProxyRemove(UProxy);
-	return success ? In : NULL;
+	UProxyAdd(UProxy);
+	RequestAsync(UProxy);
 }
 
 char *ReverseDNS(IPv6Map *In)

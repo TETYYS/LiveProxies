@@ -85,7 +85,7 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 			if ((UProxy->type & (PROXY_TYPE)pow(2, x)) == (PROXY_TYPE)pow(2, x)) {
 				IPv6Map *ip = malloc(sizeof(IPv6Map));
 				memcpy(ip, UProxy->ip->Data, sizeof(IPv6Map));
-				ret += UProxyAdd(AllocUProxy(ip, UProxy->port, (PROXY_TYPE)pow(2, x), NULL, NULL, false));
+				ret += UProxyAdd(AllocUProxy(ip, UProxy->port, (PROXY_TYPE)pow(2, x), NULL, NULL));
 			}
 		}
 	} else {
@@ -137,7 +137,7 @@ bool ProxyRemove(PROXY *Proxy)
 	return found;
 }
 
-UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct event *Timeout, PROXY *AssociatedProxy, bool SingleCheck)
+UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct event *Timeout, PROXY *AssociatedProxy)
 {
 	UNCHECKED_PROXY *UProxy = malloc(sizeof(UNCHECKED_PROXY));
 	UProxy->ip = Ip;
@@ -150,22 +150,17 @@ UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct
 	UProxy->timeout = Timeout;
 	GenerateHashForUProxy(UProxy);
 	UProxy->associatedProxy = AssociatedProxy;
-	if (SingleCheck) {
-		assert(AssociatedProxy != NULL);
-		UProxy->singleCheck = malloc(sizeof(*(UProxy->singleCheck)));
-		pthread_mutex_init(UProxy->singleCheck, NULL);
-	} else
-		UProxy->singleCheck = NULL;
+	UProxy->singleCheckCallback = NULL;
 	return UProxy;
 }
 
-UNCHECKED_PROXY *UProxyFromProxy(PROXY *In, bool SingleCheck)
+UNCHECKED_PROXY *UProxyFromProxy(PROXY *In)
 {
 	Log(LOG_LEVEL_DEBUG, "UProxyFromProxy: In: %p", In);
 	IPv6Map *ip = malloc(sizeof(IPv6Map));
 	memcpy(ip, In->ip->Data, IPV6_SIZE);
 
-	return AllocUProxy(ip, In->port, In->type, NULL, In, SingleCheck);
+	return AllocUProxy(ip, In->port, In->type, NULL, In);
 }
 
 void GenerateHashForUProxy(UNCHECKED_PROXY *In)
@@ -189,10 +184,6 @@ void UProxyFree(UNCHECKED_PROXY *In)
 	if (In->timeout != NULL) {
 		event_del(In->timeout);
 		event_free(In->timeout);
-	}
-	if (In->singleCheck != NULL) {
-		pthread_mutex_destroy(In->singleCheck);
-		free(In->singleCheck);
 	}
 	pthread_mutex_destroy(&(In->processing));
 	free(In->ip);

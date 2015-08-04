@@ -128,7 +128,7 @@ void HarvestLoop()
 					goto next;
 				}
 
-				UNCHECKED_PROXY *up = AllocUProxy(map, curPort, curType, NULL, NULL, false);
+				UNCHECKED_PROXY *up = AllocUProxy(map, curPort, curType, NULL, NULL);
 
 				addedPrev = added;
 				added += UProxyAdd(up);

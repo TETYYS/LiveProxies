@@ -23,7 +23,7 @@ void RemoveThread()
 			}
 		} pthread_mutex_unlock(&lockCheckedProxies);
 		if (proxy != NULL) {
-			UNCHECKED_PROXY *UProxy = UProxyFromProxy(proxy, false);
+			UNCHECKED_PROXY *UProxy = UProxyFromProxy(proxy);
 			proxy->rechecking = true;
 			RequestAsync(UProxy);
 		}

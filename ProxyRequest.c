@@ -71,12 +71,15 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 			Log(LOG_LEVEL_DEBUG, "RequestFree: Removing proxy %s and updating parent...", ip);
 		} free(ip);
 
-		if (!UProxy->checkSuccess)
+		if (UProxy->singleCheckCallback != NULL)
+			UProxy->singleCheckCallback(UProxy);
+
+		if (!UProxy->checkSuccess) {
 			UProxyFailUpdateParentInfo(UProxy);
-		if (UProxy->singleCheck != NULL)
-			pthread_mutex_unlock(UProxy->singleCheck);
-		else
-			UProxyRemove(UProxy);
+		} else {
+			if (UProxy->singleCheckCallback == NULL)
+				UProxyRemove(UProxy);
+		}
 	}
 }
 
@@ -564,9 +567,6 @@ void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
 void RequestAsync(UNCHECKED_PROXY *UProxy)
 {
 	struct event_base *base;
-
-	if (UProxy->singleCheck != NULL)
-		pthread_mutex_lock(UProxy->singleCheck);
 
 	// getting tired of struct bullshit!!!
 	struct sockaddr *sa = IPv6MapToRaw(UProxy->ip, UProxy->port);

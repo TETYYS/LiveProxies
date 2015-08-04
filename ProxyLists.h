@@ -48,6 +48,8 @@ typedef struct _PROXY {
 	uint32_t failedChecks;
 } PROXY;
 
+typedef void(*SingleCheckCallback)(void *UProxy);
+
 typedef struct _UNCHECKED_PROXY {
 	IPv6Map *ip;
 	uint16_t port;
@@ -107,10 +109,9 @@ typedef struct _UNCHECKED_PROXY {
 	uint64_t requestTimeHttpMs;
 	PROXY *associatedProxy;
 
-	pthread_mutex_t *singleCheck;
+	SingleCheckCallback singleCheckCallback;
+	void *singleCheckCallbackExtraData;
 } UNCHECKED_PROXY;
-
-typedef void(*SingleCheckCallback)(UNCHECKED_PROXY *UProxy);
 
 UNCHECKED_PROXY	**uncheckedProxies;
 uint32_t		sizeUncheckedProxies;
@@ -129,5 +130,5 @@ bool ProxyRemove(PROXY *Proxy);
 void GenerateHashForUProxy(UNCHECKED_PROXY *In);
 void UProxyFree(UNCHECKED_PROXY *In);
 void ProxyFree(PROXY *In);
-UNCHECKED_PROXY *UProxyFromProxy(PROXY *In, bool SingleCheck);
-UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct event *Timeout, PROXY *AssociatedProxy, bool SingleCheck);
+UNCHECKED_PROXY *UProxyFromProxy(PROXY *In);
+UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct event *Timeout, PROXY *AssociatedProxy);

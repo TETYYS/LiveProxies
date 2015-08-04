@@ -238,8 +238,9 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 		if (UProxy->associatedProxy == NULL) {
 			Log(LOG_LEVEL_DEBUG, "WServer: Final proxy add type %d anonimity %d", proxy->type, proxy->anonymity);
 			ProxyAdd(proxy);
-		} else
+		} else {
 			UProxySuccessUpdateParentInfo(UProxy);
+		}
 
 	} /* End process headers */
 
@@ -271,6 +272,8 @@ static void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx)
 static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 {
 	UNCHECKED_PROXY *UProxy = NULL;
+	bool freeBufferEvent = true;
+
 	Log(LOG_LEVEL_DEBUG, "Server landing");
 	/* Page dispatch */ {
 		if (Buff[0] != 'G') {
@@ -302,17 +305,22 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 				InterfaceWebUnchecked(BuffEvent, Buff);
 			else if (strncmp(path, "/iface", 6) == 0 && pathLen == 6)
 				InterfaceWeb(BuffEvent, Buff);
-			else if (pathLen > 13 && strncmp(path, "/iface/check", 12) == 0)
+			else if (pathLen > 13 && strncmp(path, "/iface/check", 12) == 0) {
+				freeBufferEvent = false;
 				InterfaceProxyRecheck(BuffEvent, Buff);
+			}
 		} free(path);
 	} /* End page dispatch */
 
 free:
 	free(Buff);
-	if (evbuffer_get_length(bufferevent_get_output(BuffEvent)))
-		bufferevent_setcb(BuffEvent, HTTPRead, bufferevent_free, ServerEvent, NULL);
-	else
-		bufferevent_free(BuffEvent);
+
+	if (freeBufferEvent) {
+		if (evbuffer_get_length(bufferevent_get_output(BuffEvent)))
+			bufferevent_setcb(BuffEvent, HTTPRead, bufferevent_free, ServerEvent, NULL);
+		else
+			bufferevent_free(BuffEvent);
+	}
 }
 
 typedef enum _SERVER_TYPE {
@@ -552,8 +560,8 @@ static void ServerUDP(int hSock)
 			ProxyAdd(proxy);
 		} else {
 			UProxySuccessUpdateParentInfo(UProxy);
-			if (UProxy->singleCheck != NULL)
-				pthread_mutex_unlock(UProxy->singleCheck);
+			if (UProxy->singleCheckCallback != NULL)
+				pthread_mutex_unlock(UProxy->singleCheckCallback);
 		}
 
 		pthread_mutex_unlock(&(UProxy->processing));

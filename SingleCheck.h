@@ -12,6 +12,6 @@ typedef enum _SPAMHAUS_ZEN_ANSWER {
 	PBL
 } SPAMHAUS_ZEN_ANSWER;
 
-PROXY *Recheck(PROXY *In);
+void Recheck(PROXY *In, void CALLBACK *FinishedCallback, void *Ex);
 MEM_OUT char *ReverseDNS(IPv6Map *In);
 SPAMHAUS_ZEN_ANSWER SpamhausZEN(IPv6Map *In);
