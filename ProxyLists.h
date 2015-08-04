@@ -107,8 +107,10 @@ typedef struct _UNCHECKED_PROXY {
 	uint64_t requestTimeHttpMs;
 	PROXY *associatedProxy;
 
-	pthread_mutex_t *singleCheck;
+	void CALLBACK *singleCheck;
 } UNCHECKED_PROXY;
+
+typedef void(*SingleCheckCallback)(UNCHECKED_PROXY *UProxy);
 
 UNCHECKED_PROXY	**uncheckedProxies;
 uint32_t		sizeUncheckedProxies;

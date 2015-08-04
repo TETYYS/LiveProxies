@@ -414,11 +414,13 @@ static void ProxyHandleData(UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEve
 			if (BuffEvent != NULL) {
 				bufferevent_setcb(BuffEvent, (bufferevent_data_cb)EVRead, (bufferevent_data_cb)EVWrite, (bufferevent_event_cb)EVEvent, UProxy);
 				bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
-			} else
+			} else {
+				Log(LOG_LEVEL_DEBUG, "SSL BuffEvent fail");
 				goto fail;
+			}
 
 			UProxy->stage = 7;
-			// SSL handshake brings up EVEvent connect so this falls to stage 5 later
+			// SSL handshake brings up EVEvent connect so this falls to stage 7 later
 			break;
 		}
 		case 7: {

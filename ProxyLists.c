@@ -11,6 +11,7 @@
 #include <pthread.h>
 #include <openssl/sha.h>
 #include <event2/event.h>
+#include <assert.h>
 
 static bool MultiFlag(uint64_t Flag)
 {
@@ -150,6 +151,7 @@ UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct
 	GenerateHashForUProxy(UProxy);
 	UProxy->associatedProxy = AssociatedProxy;
 	if (SingleCheck) {
+		assert(AssociatedProxy != NULL);
 		UProxy->singleCheck = malloc(sizeof(*(UProxy->singleCheck)));
 		pthread_mutex_init(UProxy->singleCheck, NULL);
 	} else
