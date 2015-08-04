@@ -238,10 +238,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 		if (UProxy->associatedProxy == NULL) {
 			Log(LOG_LEVEL_DEBUG, "WServer: Final proxy add type %d anonimity %d", proxy->type, proxy->anonymity);
 			ProxyAdd(proxy);
-		} else {
-			UProxySuccessUpdateParentInfo(UProxy);
 		}
-
 	} /* End process headers */
 
 	if (UProxy->timeout != NULL)
@@ -360,7 +357,6 @@ void HTTPRead(struct bufferevent *BuffEvent, void *Ctx)
 
 	ServerLanding(BuffEvent, out);
 }
-
 
 static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct sockaddr *Address, int Socklen, void *Ctx)
 {
@@ -558,11 +554,10 @@ static void ServerUDP(int hSock)
 		if (UProxy->associatedProxy == NULL) {
 			Log(LOG_LEVEL_DEBUG, "WServerUDP: Final proxy");
 			ProxyAdd(proxy);
-		} else {
-			UProxySuccessUpdateParentInfo(UProxy);
-			if (UProxy->singleCheckCallback != NULL)
-				pthread_mutex_unlock(UProxy->singleCheckCallback);
 		}
+
+		if (UProxy->timeout != NULL)
+			event_active(UProxy->timeout, EV_TIMEOUT, 0);
 
 		pthread_mutex_unlock(&(UProxy->processing));
 	}

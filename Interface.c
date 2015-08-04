@@ -315,7 +315,7 @@ void InterfaceWebUnchecked(struct bufferevent *BuffEvent, char *Buff)
 	evbuffer_add_printf(body, "<html><head><title>LiveProxies %s interface: Unchecked proxies</title><style>table{border-collapse:collapse;border:1px solid}\ntd{padding:10px 5px;border:1px solid}\nth{padding:10px 5px;border:1px solid}\ntr .s{background-color:#c0c0c0}\ntr .r{background-color:red}\ntr .y{background-color:GoldenRod}\ntr .g{background-color:green}\nspan#check {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5Ojf/2wBDAQoKCg0MDRoPDxo3JR8lNzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzf/wAARCAAQABADASIAAhEBAxEB/8QAFwAAAwEAAAAAAAAAAAAAAAAAAgUGB//EACgQAAIBAgQDCQAAAAAAAAAAAAECAwQFBhEhUQAyQRIUFSQxQmFisf/EABQBAQAAAAAAAAAAAAAAAAAAAAT/xAAcEQACAQUBAAAAAAAAAAAAAAABQQIAAxESIfD/2gAMAwEAAhEDEQA/ANhW9W5qual70iywglwxyAA5tTpp14n4sR192xHDS2dPJxMDOWUZFM9SxOoOwGu/UKeJ8H+J1S1duljp5mbOYOD2T9xl7v3cH1e2S0UtmoVpaRfl5G5pG3PBcX5z1lwBh+dExfnPU8AYfnX/2Q==');}\nspan#x {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwEBAQEBAQEKCgELDRYPDQwMDRsUCQQKIB0iIiAdHx8kKDQsGBolJx8fLT0tMTU3Li4uIys/OD8sNyg5OisBCgoKDQwNGg8PGislEyUrNzc3Nzc3Nzc3Nzc3Nys3Nzc3NzcrKzcrKzc3Kys3Nzc3Kzc3NzcrKysrNys3Nys3N//AABEIABAAEAMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAADBAYB/8QAIxAAAQIGAgIDAAAAAAAAAAAAAQIEBgcIESExEkIJIgMFFP/EABUBAQEAAAAAAAAAAAAAAAAAAAYE/8QAHhEAAAQHAAAAAAAAAAAAAAAAAhES8AABAxMxQYH/2gAMAwEAAhEDEQA/AKJ24rDpBrHi+YkcRkpU/wAkqJWo/iiNnfAA6pGsZQrfIKupZo8rqrar4gWYcqY94zXQb+pJYw8zvkEdknWcrOuIT6ietPIlXZX/AB9KWZEKH4o/T6qBBLP6FnfBB7JO8ZWd2CcYwY1/UHeQWBZYSxg4/JMpZsOIIZ/fM75JPVI3nKDq4ULxGJW0nCaQaUqWQ308Jso//9k=');}</style></head><body>", VERSION);
 
 	pthread_mutex_lock(&lockUncheckedProxies); {
-		evbuffer_add_printf(body, "<center>Unchecked proxies: %d, currently checking: %d</center><br /><table><tbody><tr><th>IP:Port</th><th>Type</th>\n<th>Currently checking</th><th>Retries</th><th>Connection latency (ms)</th><th>HTTP/S latency (ms)</th><th>Rechecking</th></tr>", sizeUncheckedProxies, CurrentlyChecking);
+		evbuffer_add_printf(body, "<center>Unchecked proxies: %d, currently checking: %d</center><br /><table><tbody><tr><th>IP:Port</th><th>Type</th>\n<th>Currently checking</th><th>Retries</th><th>Rechecking</th></tr>", sizeUncheckedProxies, CurrentlyChecking);
 		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
 			evbuffer_add_reference(body, "<tr>", 4 * sizeof(char), NULL, NULL);
 
@@ -327,8 +327,6 @@ void InterfaceWebUnchecked(struct bufferevent *BuffEvent, char *Buff)
 			evbuffer_add_printf(body, "<td><span id=\"%s\"></span></td>", uncheckedProxies[x]->checking ? "check" : "x");
 
 			evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(AcceptableSequentialFails, uncheckedProxies[x]->retries), uncheckedProxies[x]->retries);
-			evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(AcceptableSequentialFails, uncheckedProxies[x]->requestTimeMs), uncheckedProxies[x]->requestTimeMs != 0 ? uncheckedProxies[x]->requestTimeMs : -1);
-			evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(AcceptableSequentialFails, uncheckedProxies[x]->requestTimeHttpMs), uncheckedProxies[x]->requestTimeHttpMs != 0 ? uncheckedProxies[x]->requestTimeHttpMs : -1);
 			evbuffer_add_printf(body, "<td><span id=\"%s\"></span></td>", uncheckedProxies[x]->associatedProxy != NULL ? "check" : "x");
 
 			evbuffer_add_reference(body, "</tr>", 5 * sizeof(char), NULL, NULL);
@@ -363,8 +361,6 @@ static void InterfaceProxyRecheckStage2(UNCHECKED_PROXY *UProxy)
 	}
 
 	PROXY *Proxy = UProxy->associatedProxy;
-
-	UProxyRemove(UProxy);
 
 	if (Proxy->anonymity == ANONYMITY_TRANSPARENT)
 		bufferevent_write(buffEvent, "44\r\n<p style=\"color:red\"><span id=\"x\"></span> Anonimity: Transparent</p>\r\n", 74);

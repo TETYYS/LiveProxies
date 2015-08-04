@@ -50,7 +50,7 @@ After running, you can see your proxy lists at
 See [Auth](docs/auth.md) for preparing users for interface pages
 
 ## Dependencies
- - libevent >= 2.0.2-alpha
+ - libevent >= 2.1.5-beta
  - python >= 2.7
  - [Maxmind's GeoIP]
  - libconfig

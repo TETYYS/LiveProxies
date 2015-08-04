@@ -71,15 +71,15 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 			Log(LOG_LEVEL_DEBUG, "RequestFree: Removing proxy %s and updating parent...", ip);
 		} free(ip);
 
+		if (!UProxy->checkSuccess)
+			UProxyFailUpdateParentInfo(UProxy);
+		else
+			UProxySuccessUpdateParentInfo(UProxy);
+
 		if (UProxy->singleCheckCallback != NULL)
 			UProxy->singleCheckCallback(UProxy);
 
-		if (!UProxy->checkSuccess) {
-			UProxyFailUpdateParentInfo(UProxy);
-		} else {
-			if (UProxy->singleCheckCallback == NULL)
-				UProxyRemove(UProxy);
-		}
+		UProxyRemove(UProxy);
 	}
 }
 
