@@ -107,7 +107,7 @@ typedef struct _UNCHECKED_PROXY {
 	uint64_t requestTimeHttpMs;
 	PROXY *associatedProxy;
 
-	void CALLBACK *singleCheck;
+	pthread_mutex_t *singleCheck;
 } UNCHECKED_PROXY;
 
 typedef void(*SingleCheckCallback)(UNCHECKED_PROXY *UProxy);
