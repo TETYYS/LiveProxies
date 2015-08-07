@@ -20,3 +20,4 @@ size_t CurrentlyChecking;
 double GetUnixTimestampMilliseconds();
 char *GetHost(IP_TYPE Preffered, bool SSL);
 IP_TYPE GetIPTypePreffered(IP_TYPE Preffered);
+MEM_OUT char *FormatTime(uint64_t TimeMs);

@@ -20,6 +20,7 @@
 #include <unistd.h>
 #include <openssl/rand.h>
 #include <math.h>
+#include "HtmlTemplate.h"
 
 static char *StdinDynamic()
 {
@@ -139,6 +140,9 @@ int main(int argc, char** argv)
 	CurrentlyChecking = 0;
 	sizeUncheckedProxies = 0;
 	sizeCheckedProxies = 0;
+
+	InterfaceInit();
+	HtmlTemplateLoadAll();
 
 	config_t cfg;
 	config_init(&cfg);

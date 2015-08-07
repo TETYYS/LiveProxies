@@ -302,6 +302,8 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 				InterfaceWebUnchecked(BuffEvent, Buff);
 			else if (strncmp(path, "/iface", 6) == 0 && pathLen == 6)
 				InterfaceWeb(BuffEvent, Buff);
+			else if (strncmp(path, "/", 1) == 0 && pathLen == 1)
+				InterfaceWebHome(BuffEvent, Buff);
 			else if (pathLen > 13 && strncmp(path, "/iface/check", 12) == 0) {
 				freeBufferEvent = false;
 				InterfaceProxyRecheck(BuffEvent, Buff);

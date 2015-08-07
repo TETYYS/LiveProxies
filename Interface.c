@@ -7,6 +7,7 @@
 #include "Base64.h"
 #include "PBKDF2.h"
 #include "SingleCheck.h"
+#include "HtmlTemplate.h"
 #include <event2/buffer.h>
 #include <event2/event.h>
 #include <openssl/rand.h>
@@ -25,6 +26,22 @@ static char *strnstr(char *Haystack, char *Needle, size_t Size)
 			return &(Haystack[x]);
 	}
 	return 0;
+}
+
+void InterfaceInit()
+{
+	InterfacePagesSize = 5;
+	InterfacePages = malloc(InterfacePagesSize * sizeof(INTERFACE_PAGE));
+	InterfacePages[0].name = "Home";
+	InterfacePages[0].page = INTERFACE_PAGE_HOME;
+	InterfacePages[1].name = "Unchecked proxies";
+	InterfacePages[1].page = INTERFACE_PAGE_UPROXIES;
+	InterfacePages[2].name = "Checked proxies";
+	InterfacePages[2].page = INTERFACE_PAGE_PROXIES;
+	InterfacePages[3].name = "Proxy sources";
+	InterfacePages[3].page = INTERFACE_PAGE_PRXSRC;
+	InterfacePages[4].name = "Statistics";
+	InterfacePages[4].page = INTERFACE_PAGE_STATS;
 }
 
 static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, bool AllowOnlyCookie)
@@ -200,19 +217,6 @@ end:
 	return false;
 }
 
-static MEM_OUT char *FormatTime(uint64_t TimeMs)
-{
-	char *timeBuff = malloc(20 * sizeof(char) + 1);
-	memset(timeBuff, 0, 20 * sizeof(char) + 1);
-	struct tm *timeinfo;
-	time_t timeRaw = TimeMs / 1000;
-
-	timeinfo = localtime(&timeRaw);
-	strftime(timeBuff, 20, "%F %H:%M:%S", timeinfo);
-
-	return timeBuff;
-}
-
 static char IntBlock3(size_t Max, size_t In)
 {
 	if (In <= Max / 3)
@@ -221,6 +225,34 @@ static char IntBlock3(size_t Max, size_t In)
 		return 'y';
 	else
 		return 'r';
+}
+
+void InterfaceWebHome(struct bufferevent *BuffEvent, char *Buff)
+{
+	struct evbuffer *headers = evbuffer_new();
+	struct evbuffer *body = evbuffer_new();
+
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), false)) {
+		bufferevent_write_buffer(BuffEvent, headers);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+		return;
+	}
+
+	for (size_t x = 0;x < HtmlTemplateHomeSize;x++) {
+		switch (HtmlTemplateHome[x]->type) {
+
+		}
+	}
+
+	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
+	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+
+	bufferevent_write_buffer(BuffEvent, headers);
+	bufferevent_write_buffer(BuffEvent, body);
+	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+	evbuffer_free(headers);
+	evbuffer_free(body);
 }
 
 void InterfaceWeb(struct bufferevent *BuffEvent, char *Buff)

@@ -36,3 +36,16 @@ IP_TYPE GetIPTypePreffered(IP_TYPE Preffered)
 	else
 		return IPV4;
 }
+
+MEM_OUT char *FormatTime(uint64_t TimeMs)
+{
+	char *timeBuff = malloc(20 * sizeof(char) + 1);
+	memset(timeBuff, 0, 20 * sizeof(char) + 1);
+	struct tm *timeinfo;
+	time_t timeRaw = TimeMs / 1000;
+
+	timeinfo = localtime(&timeRaw);
+	strftime(timeBuff, 20, "%F %H:%M:%S", timeinfo);
+
+	return timeBuff;
+}
