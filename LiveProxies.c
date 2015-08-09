@@ -142,25 +142,26 @@ int main(int argc, char** argv)
 	sizeCheckedProxies = 0;
 
 	InterfaceInit();
-	HtmlTemplateLoadAll();
+	HtmlTemplateLoadAll(); // These two must be called in this order
+	HtmlTemplateMimeTypesInit(); // These two must be called in this order
 
 	config_t cfg;
 	config_init(&cfg);
 
 	if (config_read_file(&cfg, "liveproxies.conf") == CONFIG_FALSE) {
 		Log(LOG_LEVEL_DEBUG, "Failed to open liveproxies.conf in working directory, opening in global...: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
-	}
 
-	if (config_read_file(&cfg, "/etc/liveproxies/liveproxies.conf") == CONFIG_FALSE) {
-		Log(LOG_LEVEL_ERROR, "Failed to open /etc/liveproxies/liveproxies.conf: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
-		exit(EXIT_FAILURE);
+		if (config_read_file(&cfg, "/etc/liveproxies/liveproxies.conf") == CONFIG_FALSE) {
+			Log(LOG_LEVEL_ERROR, "Failed to open /etc/liveproxies/liveproxies.conf: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	config_setting_t *cfgRoot = config_root_setting(&cfg);
 
 #define CONFIG_INT64(cfg, svar, var, default) if (config_setting_lookup_int64(cfg, svar, (long long*)(&var)) == CONFIG_FALSE) { var = default; Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %d...", svar, default); }
 #define CONFIG_INT(cfg, svar, var, default) if (config_setting_lookup_int(cfg, svar, (int*)(&var)) == CONFIG_FALSE) { var = default; Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %d...", svar, default); }
-#define CONFIG_STRING(cfg, svar, var, default) if (config_setting_lookup_string(cfg, svar, (const char**)(&var)) == CONFIG_FALSE) { var = default; Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %s...", svar, default); }
+#define CONFIG_STRING(cfg, svar, var, default) const char *val_##var; if (config_setting_lookup_string(cfg, svar, &(val_##var)) == CONFIG_FALSE) { var = default; Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %s...", svar, default); } else { var = malloc((strlen(val_##var) * sizeof(char)) + 1); strcpy(var, (val_##var)); }
 #define CONFIG_BOOL(cfg, svar, var, default) if (config_setting_lookup_bool(cfg, svar, (int*)(&var)) == CONFIG_FALSE) { var = default; Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %d...", svar, default); }
 
 	CONFIG_INT64(cfgRoot, "SimultaneousChecks", SimultaneousChecks, 3000)
@@ -243,6 +244,8 @@ int main(int argc, char** argv)
 		}
 	} /* End GlobalIP */
 
+	config_destroy(&cfg);
+
 #undef CONFIG_INT64
 #undef CONFIG_INT
 #undef CONFIG_BOOL
@@ -276,6 +279,7 @@ int main(int argc, char** argv)
 			config_setting_t *Auth = config_setting_get_member(cfgRoot, "Auth");
 			if (Auth != NULL) {
 				while ((currentBlock = config_setting_get_elem(Auth, x)) != NULL) {
+					char *val = config_setting_get_string(currentBlock);
 					if (x % 2 == 0) {
 						if (AuthLocalList == NULL)
 							AuthLocalList = malloc(++AuthLocalCount * sizeof(AuthLocalList));
@@ -284,14 +288,17 @@ int main(int argc, char** argv)
 
 						AuthLocalList[AuthLocalCount - 1] = malloc(sizeof(AUTH_LOCAL));
 
-						AuthLocalList[AuthLocalCount - 1]->username = config_setting_get_string(currentBlock);
-					} else
-						AuthLocalList[AuthLocalCount - 1]->password = config_setting_get_string(currentBlock);
+						AuthLocalList[AuthLocalCount - 1]->username = malloc((strlen(val) * sizeof(char)) + 1);
+						strcpy(AuthLocalList[AuthLocalCount - 1]->username, val);
+					} else {
+						AuthLocalList[AuthLocalCount - 1]->password = malloc((strlen(val) * sizeof(char)) + 1);
+						strcpy(AuthLocalList[AuthLocalCount - 1]->password, val);
+					}
 					x++;
 				}
 			}
+			config_destroy(&cfg);
 		}
-
 	} /* End auth init */
 
 	RequestString = calloc(300 /* :^) */ + 2 + strlen(VERSION) + 1 /* NUL */, sizeof(char));

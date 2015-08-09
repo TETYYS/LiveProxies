@@ -21,6 +21,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <math.h>
+#include <libconfig.h>
+#include "HtmlTemplate.h"
 
 static const char *GetCountryByIPv6Map(IPv6Map *In)
 {
@@ -217,10 +219,10 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 									Log(LOG_LEVEL_DEBUG, "WServer: switch to transparent proxy on (type %d)", UProxy->type);
 									proxy->anonymity = ANONYMITY_TRANSPARENT;
 									free(foundIp);
+									pcre_free_substring(foundIpStr);
 									break;
 								}
-								if (foundIp != NULL)
-									free(foundIp);
+								free(foundIp);
 							}
 							pcre_free_substring(foundIpStr);
 						}
@@ -278,7 +280,6 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 			goto free;
 		}
 
-		char *path;
 		char *firstIndex = strchr(Buff, ' ');
 
 		if (firstIndex == NULL)
@@ -291,24 +292,73 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 
 		size_t pathLen = secondIndex - (firstIndex + 1);
 
-		path = malloc(pathLen * sizeof(char) + 1); {
-			memcpy(path, firstIndex + 1, pathLen * sizeof(char) + 1);
+		char path[pathLen * sizeof(char) + 1];
+		memcpy(path, firstIndex + 1, pathLen * sizeof(char) + 1);
+		path[pathLen] = 0x00;
 
-			Log(LOG_LEVEL_DEBUG, "Server -> %s", path);
+		Log(LOG_LEVEL_DEBUG, "Server -> %s", path);
 
-			if (strncmp(path, "/prxchk", 7) == 0 && pathLen == 7)
-				ProxyCheckLanding(BuffEvent, Buff);
-			else if (strncmp(path, "/ifaceu", 7) == 0 && pathLen == 7)
-				InterfaceWebUnchecked(BuffEvent, Buff);
-			else if (strncmp(path, "/iface", 6) == 0 && pathLen == 6)
-				InterfaceWeb(BuffEvent, Buff);
-			else if (strncmp(path, "/", 1) == 0 && pathLen == 1)
-				InterfaceWebHome(BuffEvent, Buff);
-			else if (pathLen > 13 && strncmp(path, "/iface/check", 12) == 0) {
-				freeBufferEvent = false;
-				InterfaceProxyRecheck(BuffEvent, Buff);
+		if (strncmp(path, "/prxchk", 7) == 0 && pathLen == 7)
+			ProxyCheckLanding(BuffEvent, Buff);
+		else if (strncmp(path, "/ifaceu", 7) == 0 && pathLen == 7)
+			InterfaceWebUnchecked(BuffEvent, Buff);
+		else if (strncmp(path, "/iface", 6) == 0 && pathLen == 6)
+			InterfaceWeb(BuffEvent, Buff);
+		else if (strncmp(path, "/", 1) == 0 && pathLen == 1)
+			InterfaceWebHome(BuffEvent, Buff);
+		else if (pathLen > 13 && strncmp(path, "/iface/check", 12) == 0) {
+			freeBufferEvent = false;
+			InterfaceProxyRecheck(BuffEvent, Buff);
+		} else {
+			if (HtmlTemplateUseStock)
+				goto free;
+			/* Ruse filter */ {
+				// We don't resolve unicode or http %s so we don't care
+				// Absolute path traversal doesn't apply
+
+				if (strstr(path, "..") != 0) {
+					// no
+					goto free;
+				}
+			} /* End ruse filter */
+			char filePath[pathLen + (13 * sizeof(char)) + 1];
+			strcpy(filePath, "./html/files/");
+			strcat(filePath, path); // I WANT TO SEE YOU SWETT
+
+			FILE *hFile;
+			if ((hFile = fopen(filePath, "r")) == NULL) {
+				char filePath[pathLen + (28 * sizeof(char)) + 1];
+				strcpy(filePath, "/etc/liveproxies/html/files/");
+				strcat(filePath, path); // SWETT SWETT SWETT
+				hFile = fopen(filePath, "r");
 			}
-		} free(path);
+			if (hFile != NULL) {
+				fseek(hFile, 0, SEEK_END);
+				size_t size = ftell(hFile);
+				fseek(hFile, 0, SEEK_SET);
+
+				char fileContents[size];
+				fread(fileContents, size, 1, hFile);
+				fclose(hFile);
+
+				char *mime = "text/plain";
+
+				for (size_t x = 0;x < HtmlTemplateMimeTypesSize;x++) {
+					if (strcmp(&(path[pathLen - strlen(HtmlTemplateMimeTypes[x].extension)]), HtmlTemplateMimeTypes[x].extension) == 0) {
+						mime = HtmlTemplateMimeTypes[x].type;
+						break;
+					}
+				}
+
+				size_t intSize = INTEGER_VISIBLE_SIZE(size);
+
+				char header[((53 + intSize + strlen(mime)) * sizeof(char)) + 1];
+				sprintf(header, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: %s\r\n\r\n", size, mime);
+				bufferevent_write(BuffEvent, header, (53 + intSize + strlen(mime)) * sizeof(char));
+				bufferevent_write(BuffEvent, fileContents, size);
+				bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+			}
+		}
 	} /* End page dispatch */
 
 free:
@@ -334,30 +384,33 @@ void HTTPRead(struct bufferevent *BuffEvent, void *Ctx)
 	Log(LOG_LEVEL_DEBUG, "HTTPRead");
 	struct evbuffer *evBuff = bufferevent_get_input(BuffEvent);
 	size_t len = evbuffer_get_length(evBuff);
-	if (len < 4)
+	if (len < 4) {
+		bufferevent_free(BuffEvent);
 		return;
+	}
 
-	char buff[4];
-	struct evbuffer_ptr pos;
+	char *buff = malloc(len + 1);
+	evbuffer_remove(evBuff, buff, len);
 
-	evbuffer_ptr_set(evBuff, &pos, len - 4, EVBUFFER_PTR_SET);
-	evbuffer_copyout_from(evBuff, &pos, buff, 4);
+	for (size_t x = 0;x < len;x++) {
+		// Stop the Ruse man
+		if (buff[x] == 0x00) {
+			bufferevent_free(BuffEvent);
+			return;
+		}
+	}
 
 	bool valid = false;
-	for (size_t x = 0;x < 2;x++) {
-		if (buff[2 * x] == '\r' && buff[(2 * x) + 1] == '\n' && (x == 1 ? valid : true))
-			valid = true;
-	}
+	if (buff[len - 1] == '\n' && buff[len - 2] == '\r' && buff[len - 3] == '\n' && buff[len - 4] == '\r')
+		valid = true;
 	if (!valid) {
-		if (buff[2] != '\n' || buff[3] != '\n')
+		if (buff[len - 1] != '\n' || buff[len - 2] != '\n')
 			return;
 	}
 
-	char *out = malloc(len + 1);
-	evbuffer_remove(evBuff, out, len);
-	out[len] = 0x00;
+	buff[len] = 0x00;
 
-	ServerLanding(BuffEvent, out);
+	ServerLanding(BuffEvent, buff);
 }
 
 static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct sockaddr *Address, int Socklen, void *Ctx)

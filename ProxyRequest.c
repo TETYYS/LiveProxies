@@ -516,14 +516,6 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 
 void CALLBACK EVRead(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
 {
-#if DEBUG
-	Log(LOG_LEVEL_DEBUG, "EVRead");
-	char *data = malloc(evbuffer_get_length(bufferevent_get_input(BuffEvent))); {
-		evbuffer_copyout(bufferevent_get_input(BuffEvent), data, evbuffer_get_length(bufferevent_get_input(BuffEvent)));
-		Log(LOG_LEVEL_DEBUG, "EVRead: %s", data);
-	} free(data);
-#endif
-
 	pthread_mutex_lock(&lockUncheckedProxies); {
 		bool found = false;
 		for (size_t x = 0; x < sizeUncheckedProxies; x++) {

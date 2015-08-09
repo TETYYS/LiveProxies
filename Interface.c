@@ -30,7 +30,7 @@ static char *strnstr(char *Haystack, char *Needle, size_t Size)
 
 void InterfaceInit()
 {
-	InterfacePagesSize = 5;
+	InterfacePagesSize = 6;
 	InterfacePages = malloc(InterfacePagesSize * sizeof(INTERFACE_PAGE));
 	InterfacePages[0].name = "Home";
 	InterfacePages[0].page = INTERFACE_PAGE_HOME;
@@ -42,10 +42,13 @@ void InterfaceInit()
 	InterfacePages[3].page = INTERFACE_PAGE_PRXSRC;
 	InterfacePages[4].name = "Statistics";
 	InterfacePages[4].page = INTERFACE_PAGE_STATS;
+	InterfacePages[5].name = "Proxy recheck";
+	InterfacePages[5].page = INTERFACE_PAGE_RECHECK;
 }
 
-static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, bool AllowOnlyCookie)
+static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, INTERFACE_INFO *InterfaceInfo, bool AllowOnlyCookie)
 {
+	InterfaceInfo->user = NULL;
 	if (AuthLocalList == NULL)
 		goto end;
 
@@ -120,6 +123,7 @@ static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, bool AllowO
 										pthread_mutex_unlock(&AuthLocalLock);
 										pthread_mutex_unlock(&AuthWebLock);
 										evbuffer_add_reference(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char), NULL, NULL);
+										InterfaceInfo->user = AuthWebList[x]->username;
 										return true;
 									} else {
 										free(AuthWebList[x]->username);
@@ -143,6 +147,7 @@ static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, bool AllowO
 							AuthWebList[AuthWebCount - 1]->username = malloc(strlen(username) + 1 /* NUL */);
 							AuthWebList[AuthWebCount - 1]->ip = ip;
 							strcpy(AuthWebList[AuthWebCount - 1]->username, username);
+							InterfaceInfo->user = AuthWebList[AuthWebCount - 1]->username;
 
 							free(authStr); // invalidates username and password from headers
 
@@ -197,6 +202,7 @@ static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, bool AllowO
 					pthread_mutex_unlock(&AuthWebLock);
 					if (!AllowOnlyCookie)
 						evbuffer_add_reference(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char), NULL, NULL);
+					InterfaceInfo->user = AuthWebList[x]->username;
 					return true;
 				} else {
 					free(cookie);
@@ -231,17 +237,31 @@ void InterfaceWebHome(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
+	INTERFACE_INFO info;
+	for (size_t x = 0;x < InterfacePagesSize;x++) {
+		if (InterfacePages[x].page == INTERFACE_PAGE_HOME)
+			info.currentPage = &(InterfacePages[x]);
+	}
 
-	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), false)) {
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(headers);
+		evbuffer_free(body);
 		return;
 	}
 
-	for (size_t x = 0;x < HtmlTemplateHomeSize;x++) {
-		switch (HtmlTemplateHome[x]->type) {
-
-		}
+	if (HtmlTemplateUseStock) {
+		evbuffer_add_printf(body, "<html><head><title>LiveProxies %s interface: Home</title></head><body><a href=\"/iface\">Checked proxies</a> <a href=\"/ifaceu\">Unchecked proxies</a></body></html>", VERSION);
+	} else {
+		HTML_TEMPALTE_TABLE_INFO tableInfo;
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateHead, HtmlTemplateHeadSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateHome, HtmlTemplateHomeSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateFoot, HtmlTemplateFootSize, info, tableInfo);
 	}
 
 	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
@@ -259,65 +279,83 @@ void InterfaceWeb(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
+	INTERFACE_INFO info;
+	for (size_t x = 0;x < InterfacePagesSize;x++) {
+		if (InterfacePages[x].page == INTERFACE_PAGE_PROXIES)
+			info.currentPage = &(InterfacePages[x]);
+	}
 
-	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), false)) {
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(headers);
+		evbuffer_free(body);
 		return;
 	}
 
-	evbuffer_add_printf(body, "<html><head><title>LiveProxies %s interface: Checked proxies</title><style>table{border-collapse:collapse;border:1px solid}\ntd{padding:10px 5px;border:1px solid}\nth{padding:10px 5px;border:1px solid}\ntr .s{background-color:#c0c0c0}\ntr .r{background-color:red}\ntr .y{background-color:GoldenRod}\ntr .g{background-color:green}</style></head><body>", VERSION);
+	if (HtmlTemplateUseStock) {
+		evbuffer_add_printf(body, "<html><head><title>LiveProxies %s interface: Checked proxies</title><style>table{border-collapse:collapse;border:1px solid}\ntd{padding:10px 5px;border:1px solid}\nth{padding:10px 5px;border:1px solid}\ntr .s{background-color:#c0c0c0}\ntr .r{background-color:red}\ntr .y{background-color:GoldenRod}\ntr .g{background-color:green}</style></head><body>", VERSION);
 
-	pthread_mutex_lock(&lockCheckedProxies); {
-		evbuffer_add_printf(body, "<center>Checked proxies: %d, currently checking: %d</center><br /><table><tbody><tr><th>IP:Port</th><th>Type</th><th>Country</th><th>Anonymity</th><th>Connection latency (ms)</th><th>HTTP/S latency (ms)</th><th>Live since</th><th>Last checked</th><th>Retries</th><th>Successful checks</th><th>Failed checks</th><th>Full check</th></tr>", sizeCheckedProxies, CurrentlyChecking);
+		pthread_mutex_lock(&lockCheckedProxies); {
+			evbuffer_add_printf(body, "<center>Checked proxies: %d, currently checking: %d</center><br /><table><tbody><tr><th>IP:Port</th><th>Type</th><th>Country</th><th>Anonymity</th><th>Connection latency (ms)</th><th>HTTP/S latency (ms)</th><th>Live since</th><th>Last checked</th><th>Retries</th><th>Successful checks</th><th>Failed checks</th><th>Full check</th></tr>", sizeCheckedProxies, CurrentlyChecking);
 
-		for (size_t x = 0; x < sizeCheckedProxies; x++) {
-			evbuffer_add_reference(body, "<tr>", 4 * sizeof(char), NULL, NULL);
+			for (size_t x = 0; x < sizeCheckedProxies; x++) {
+				evbuffer_add_reference(body, "<tr>", 4 * sizeof(char), NULL, NULL);
 
-			char *ip = IPv6MapToString2(checkedProxies[x]->ip); {
-				evbuffer_add_printf(body, "<td>%s:%d</td>", ip, checkedProxies[x]->port);
-			} free(ip);
-			evbuffer_add_printf(body, "<td>%s</td>", ProxyGetTypeString(checkedProxies[x]->type));
-			evbuffer_add_printf(body, "<td>%s</td>", checkedProxies[x]->country);
+				char *ip = IPv6MapToString2(checkedProxies[x]->ip); {
+					evbuffer_add_printf(body, "<td>%s:%d</td>", ip, checkedProxies[x]->port);
+				} free(ip);
+				evbuffer_add_printf(body, "<td>%s</td>", ProxyGetTypeString(checkedProxies[x]->type));
+				evbuffer_add_printf(body, "<td>%s</td>", checkedProxies[x]->country);
 
-			if (checkedProxies[x]->anonymity == ANONYMITY_MAX)
-				evbuffer_add_reference(body, "<td class=\"g\">Max</td>", 22 * sizeof(char), NULL, NULL);
-			else if (checkedProxies[x]->anonymity == ANONYMITY_ANONYMOUS)
-				evbuffer_add_reference(body, "<td class=\"y\">Anonymous</td>", 28 * sizeof(char), NULL, NULL);
-			else if (checkedProxies[x]->anonymity == ANONYMITY_TRANSPARENT)
-				evbuffer_add_reference(body, "<td class=\"r\">Transparent</td>", 30 * sizeof(char), NULL, NULL);
-			else
-				evbuffer_add_reference(body, "<td class=\"n\">N/A</td>", 23 * sizeof(char), NULL, NULL);
+				if (checkedProxies[x]->anonymity == ANONYMITY_MAX)
+					evbuffer_add_reference(body, "<td class=\"g\">Max</td>", 22 * sizeof(char), NULL, NULL);
+				else if (checkedProxies[x]->anonymity == ANONYMITY_ANONYMOUS)
+					evbuffer_add_reference(body, "<td class=\"y\">Anonymous</td>", 28 * sizeof(char), NULL, NULL);
+				else if (checkedProxies[x]->anonymity == ANONYMITY_TRANSPARENT)
+					evbuffer_add_reference(body, "<td class=\"r\">Transparent</td>", 30 * sizeof(char), NULL, NULL);
+				else
+					evbuffer_add_reference(body, "<td class=\"n\">N/A</td>", 23 * sizeof(char), NULL, NULL);
 
-			evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(GlobalTimeout, checkedProxies[x]->timeoutMs), checkedProxies[x]->timeoutMs);
+				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(GlobalTimeout, checkedProxies[x]->timeoutMs), checkedProxies[x]->timeoutMs);
 
-			evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(GlobalTimeout, checkedProxies[x]->httpTimeoutMs), checkedProxies[x]->httpTimeoutMs);
+				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(GlobalTimeout, checkedProxies[x]->httpTimeoutMs), checkedProxies[x]->httpTimeoutMs);
 
-			char *time = FormatTime(checkedProxies[x]->liveSinceMs); {
-				evbuffer_add_printf(body, "<td>%s</td>", time);
-			} free(time);
-			time = FormatTime(checkedProxies[x]->lastCheckedMs); {
-				evbuffer_add_printf(body, "<td>%s</td>", time);
-			} free(time);
+				char *time = FormatTime(checkedProxies[x]->liveSinceMs); {
+					evbuffer_add_printf(body, "<td>%s</td>", time);
+				} free(time);
+				time = FormatTime(checkedProxies[x]->lastCheckedMs); {
+					evbuffer_add_printf(body, "<td>%s</td>", time);
+				} free(time);
 
-			evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(AcceptableSequentialFails, checkedProxies[x]->retries), checkedProxies[x]->retries);
+				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(AcceptableSequentialFails, checkedProxies[x]->retries), checkedProxies[x]->retries);
 
-			evbuffer_add_printf(body, "<td>%d</td>", checkedProxies[x]->successfulChecks);
-			evbuffer_add_printf(body, "<td>%d</td>", checkedProxies[x]->failedChecks);
+				evbuffer_add_printf(body, "<td>%d</td>", checkedProxies[x]->successfulChecks);
+				evbuffer_add_printf(body, "<td>%d</td>", checkedProxies[x]->failedChecks);
 
-			uint8_t sid[IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE)];
-			memcpy(sid, checkedProxies[x]->ip->Data, IPV6_SIZE);
-			*((uint16_t*)(sid + IPV6_SIZE)) = checkedProxies[x]->port;
-			*((PROXY_TYPE*)(sid + IPV6_SIZE + sizeof(uint16_t))) = checkedProxies[x]->type;
+				uint8_t sid[IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE)];
+				memcpy(sid, checkedProxies[x]->ip->Data, IPV6_SIZE);
+				*((uint16_t*)(sid + IPV6_SIZE)) = checkedProxies[x]->port;
+				*((PROXY_TYPE*)(sid + IPV6_SIZE + sizeof(uint16_t))) = checkedProxies[x]->type;
 
-			char *sidb64;
-			Base64Encode(sid, IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE), &sidb64); {
-				evbuffer_add_printf(body, "<td><a href=\"/iface/check?sid=%s\">Check</a></td>", sidb64);
-			} free(sidb64);
-		}
-	} pthread_mutex_unlock(&lockCheckedProxies);
+				char *sidb64;
+				Base64Encode(sid, IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE), &sidb64); {
+					evbuffer_add_printf(body, "<td><a href=\"/iface/check?sid=%s\">Check</a></td>", sidb64);
+				} free(sidb64);
+			}
+		} pthread_mutex_unlock(&lockCheckedProxies);
 
-	evbuffer_add_reference(body, "</body></html>\n", 15 * sizeof(char), NULL, NULL);
+		evbuffer_add_reference(body, "</body></html>\n", 15 * sizeof(char), NULL, NULL);
+	} else {
+		HTML_TEMPALTE_TABLE_INFO tableInfo;
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateHead, HtmlTemplateHeadSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateProxies, HtmlTemplateProxiesSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateFoot, HtmlTemplateFootSize, info, tableInfo);
+	}
 
 	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
 	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
@@ -335,7 +373,13 @@ void InterfaceWebUnchecked(struct bufferevent *BuffEvent, char *Buff)
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
 
-	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), false)) {
+	INTERFACE_INFO info;
+	for (size_t x = 0;x < InterfacePagesSize;x++) {
+		if (InterfacePages[x].page == INTERFACE_PAGE_UPROXIES)
+			info.currentPage = &(InterfacePages[x]);
+	}
+
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
@@ -344,28 +388,38 @@ void InterfaceWebUnchecked(struct bufferevent *BuffEvent, char *Buff)
 		return;
 	}
 
-	evbuffer_add_printf(body, "<html><head><title>LiveProxies %s interface: Unchecked proxies</title><style>table{border-collapse:collapse;border:1px solid}\ntd{padding:10px 5px;border:1px solid}\nth{padding:10px 5px;border:1px solid}\ntr .s{background-color:#c0c0c0}\ntr .r{background-color:red}\ntr .y{background-color:GoldenRod}\ntr .g{background-color:green}\nspan#check {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5Ojf/2wBDAQoKCg0MDRoPDxo3JR8lNzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzf/wAARCAAQABADASIAAhEBAxEB/8QAFwAAAwEAAAAAAAAAAAAAAAAAAgUGB//EACgQAAIBAgQDCQAAAAAAAAAAAAECAwQFBhEhUQAyQRIUFSQxQmFisf/EABQBAQAAAAAAAAAAAAAAAAAAAAT/xAAcEQACAQUBAAAAAAAAAAAAAAABQQIAAxESIfD/2gAMAwEAAhEDEQA/ANhW9W5qual70iywglwxyAA5tTpp14n4sR192xHDS2dPJxMDOWUZFM9SxOoOwGu/UKeJ8H+J1S1duljp5mbOYOD2T9xl7v3cH1e2S0UtmoVpaRfl5G5pG3PBcX5z1lwBh+dExfnPU8AYfnX/2Q==');}\nspan#x {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwEBAQEBAQEKCgELDRYPDQwMDRsUCQQKIB0iIiAdHx8kKDQsGBolJx8fLT0tMTU3Li4uIys/OD8sNyg5OisBCgoKDQwNGg8PGislEyUrNzc3Nzc3Nzc3Nzc3Nys3Nzc3NzcrKzcrKzc3Kys3Nzc3Kzc3NzcrKysrNys3Nys3N//AABEIABAAEAMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAADBAYB/8QAIxAAAQIGAgIDAAAAAAAAAAAAAQIEBgcIESExEkIJIgMFFP/EABUBAQEAAAAAAAAAAAAAAAAAAAYE/8QAHhEAAAQHAAAAAAAAAAAAAAAAAhES8AABAxMxQYH/2gAMAwEAAhEDEQA/AKJ24rDpBrHi+YkcRkpU/wAkqJWo/iiNnfAA6pGsZQrfIKupZo8rqrar4gWYcqY94zXQb+pJYw8zvkEdknWcrOuIT6ietPIlXZX/AB9KWZEKH4o/T6qBBLP6FnfBB7JO8ZWd2CcYwY1/UHeQWBZYSxg4/JMpZsOIIZ/fM75JPVI3nKDq4ULxGJW0nCaQaUqWQ308Jso//9k=');}</style></head><body>", VERSION);
+	if (HtmlTemplateUseStock) {
+		evbuffer_add_printf(body, "<html><head><title>LiveProxies %s interface: Unchecked proxies</title><style>table{border-collapse:collapse;border:1px solid}\ntd{padding:10px 5px;border:1px solid}\nth{padding:10px 5px;border:1px solid}\ntr .s{background-color:#c0c0c0}\ntr .r{background-color:red}\ntr .y{background-color:GoldenRod}\ntr .g{background-color:green}\nspan#check {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5Ojf/2wBDAQoKCg0MDRoPDxo3JR8lNzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzf/wAARCAAQABADASIAAhEBAxEB/8QAFwAAAwEAAAAAAAAAAAAAAAAAAgUGB//EACgQAAIBAgQDCQAAAAAAAAAAAAECAwQFBhEhUQAyQRIUFSQxQmFisf/EABQBAQAAAAAAAAAAAAAAAAAAAAT/xAAcEQACAQUBAAAAAAAAAAAAAAABQQIAAxESIfD/2gAMAwEAAhEDEQA/ANhW9W5qual70iywglwxyAA5tTpp14n4sR192xHDS2dPJxMDOWUZFM9SxOoOwGu/UKeJ8H+J1S1duljp5mbOYOD2T9xl7v3cH1e2S0UtmoVpaRfl5G5pG3PBcX5z1lwBh+dExfnPU8AYfnX/2Q==');}\nspan#x {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwEBAQEBAQEKCgELDRYPDQwMDRsUCQQKIB0iIiAdHx8kKDQsGBolJx8fLT0tMTU3Li4uIys/OD8sNyg5OisBCgoKDQwNGg8PGislEyUrNzc3Nzc3Nzc3Nzc3Nys3Nzc3NzcrKzcrKzc3Kys3Nzc3Kzc3NzcrKysrNys3Nys3N//AABEIABAAEAMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAADBAYB/8QAIxAAAQIGAgIDAAAAAAAAAAAAAQIEBgcIESExEkIJIgMFFP/EABUBAQEAAAAAAAAAAAAAAAAAAAYE/8QAHhEAAAQHAAAAAAAAAAAAAAAAAhES8AABAxMxQYH/2gAMAwEAAhEDEQA/AKJ24rDpBrHi+YkcRkpU/wAkqJWo/iiNnfAA6pGsZQrfIKupZo8rqrar4gWYcqY94zXQb+pJYw8zvkEdknWcrOuIT6ietPIlXZX/AB9KWZEKH4o/T6qBBLP6FnfBB7JO8ZWd2CcYwY1/UHeQWBZYSxg4/JMpZsOIIZ/fM75JPVI3nKDq4ULxGJW0nCaQaUqWQ308Jso//9k=');}</style></head><body>", VERSION);
 
-	pthread_mutex_lock(&lockUncheckedProxies); {
-		evbuffer_add_printf(body, "<center>Unchecked proxies: %d, currently checking: %d</center><br /><table><tbody><tr><th>IP:Port</th><th>Type</th>\n<th>Currently checking</th><th>Retries</th><th>Rechecking</th></tr>", sizeUncheckedProxies, CurrentlyChecking);
-		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
-			evbuffer_add_reference(body, "<tr>", 4 * sizeof(char), NULL, NULL);
+		pthread_mutex_lock(&lockUncheckedProxies); {
+			evbuffer_add_printf(body, "<center>Unchecked proxies: %d, currently checking: %d</center><br /><table><tbody><tr><th>IP:Port</th><th>Type</th>\n<th>Currently checking</th><th>Retries</th><th>Rechecking</th></tr>", sizeUncheckedProxies, CurrentlyChecking);
+			for (size_t x = 0; x < sizeUncheckedProxies; x++) {
+				evbuffer_add_reference(body, "<tr>", 4 * sizeof(char), NULL, NULL);
 
-			char *ip = IPv6MapToString2(uncheckedProxies[x]->ip); {
-				evbuffer_add_printf(body, "<td>%s:%d</td>", ip, uncheckedProxies[x]->port);
-			} free(ip);
+				char *ip = IPv6MapToString2(uncheckedProxies[x]->ip); {
+					evbuffer_add_printf(body, "<td>%s:%d</td>", ip, uncheckedProxies[x]->port);
+				} free(ip);
 
-			evbuffer_add_printf(body, "<td>%s</td>", ProxyGetTypeString(uncheckedProxies[x]->type));
-			evbuffer_add_printf(body, "<td><span id=\"%s\"></span></td>", uncheckedProxies[x]->checking ? "check" : "x");
+				evbuffer_add_printf(body, "<td>%s</td>", ProxyGetTypeString(uncheckedProxies[x]->type));
+				evbuffer_add_printf(body, "<td><span id=\"%s\"></span></td>", uncheckedProxies[x]->checking ? "check" : "x");
 
-			evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(AcceptableSequentialFails, uncheckedProxies[x]->retries), uncheckedProxies[x]->retries);
-			evbuffer_add_printf(body, "<td><span id=\"%s\"></span></td>", uncheckedProxies[x]->associatedProxy != NULL ? "check" : "x");
+				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(AcceptableSequentialFails, uncheckedProxies[x]->retries), uncheckedProxies[x]->retries);
+				evbuffer_add_printf(body, "<td><span id=\"%s\"></span></td>", uncheckedProxies[x]->associatedProxy != NULL ? "check" : "x");
 
-			evbuffer_add_reference(body, "</tr>", 5 * sizeof(char), NULL, NULL);
-		}
-	} pthread_mutex_unlock(&lockUncheckedProxies);
+				evbuffer_add_reference(body, "</tr>", 5 * sizeof(char), NULL, NULL);
+			}
+		} pthread_mutex_unlock(&lockUncheckedProxies);
 
-	evbuffer_add_reference(body, "</tbody></table></body></html>", 30 * sizeof(char), NULL, NULL);
+		evbuffer_add_reference(body, "</tbody></table></body></html>", 30 * sizeof(char), NULL, NULL);
+	} else {
+		HTML_TEMPALTE_TABLE_INFO tableInfo;
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateHead, HtmlTemplateHeadSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateUProxies, HtmlTemplateUProxiesSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateFoot, HtmlTemplateFootSize, info, tableInfo);
+	}
 
 	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
 	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
@@ -443,8 +497,14 @@ void InterfaceProxyRecheck(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
 	uint16_t failStatus = 403;
+	INTERFACE_INFO info;
 
-	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), true)) {
+	for (size_t x = 0;x < InterfacePagesSize;x++) {
+		if (InterfacePages[x].page == INTERFACE_PAGE_RECHECK)
+			info.currentPage = &(InterfacePages[x]);
+	}
+
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 

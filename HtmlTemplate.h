@@ -3,8 +3,17 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
+#include "Interface.h"
 
 bool HtmlTemplateUseStock;
+
+typedef struct _HTML_TEMPLATE_MIME_TYPE {
+	char *extension;
+	char *type;
+} HTML_TEMPLATE_MIME_TYPE;
+
+HTML_TEMPLATE_MIME_TYPE *HtmlTemplateMimeTypes;
+size_t HtmlTemplateMimeTypesSize;
 
 typedef enum _HTML_TEMPLATE_COMPONENT_TYPE {
 	STATIC,
@@ -58,4 +67,5 @@ size_t HtmlTemplateProxySourcesSize;
 
 void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT ***Template, size_t *SizeRef);
 void HtmlTemplateLoadAll();
-void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT **Components, size_t Size);
+void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT **Components, size_t Size, INTERFACE_INFO Info, HTML_TEMPALTE_TABLE_INFO TableInfo);
+void HtmlTemplateMimeTypesInit();
