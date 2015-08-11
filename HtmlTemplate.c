@@ -17,12 +17,13 @@
 #include "Base64.h"
 #include "Harvester.h"
 
-char *HtmlTemplateTags[] = { "{T_VERSION}",						"{T_CURRENT_PAGE}",				"{T_CFG_HOME_ACTIVE}",			"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",	"{T_CFG_SOURCES_ACTIVE}",
+char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",				"{T_CFG_HOME_ACTIVE}",			"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",	"{T_CFG_SOURCES_ACTIVE}",
 								"{T_CFG_STATS_ACTIVE}",				"{T_USER}",						"{T_COUNT_UPROXIES}",			"{T_COUNT_PROXIES}",			"{T_UPROXIES_HEAD}",		"{T_UPROXIES_TABLE_ITEMS_START}",
 								"{T_UPROXIES_TABLE_ITEMS_END}",		"{T_CFG_TABLE_ODD}",			"{T_CFG_TABLE_EVEN}",			"{T_CFG_TABLE_OK}",				"{T_CFG_TABLE_WARN}",		"{T_CFG_TABLE_ERR}",
 								"{T_UPROXIES_ITEM}",				"{T_PROXIES_HEAD}",				"{T_PROXIES_TABLE_ITEMS_START}","{T_PROXIES_TABLE_ITEMS_END}",	"{T_PROXIES_ITEM}",			"{T_PRXSRC_HEAD}",
 								"{T_PRXSRC_TABLE_ITEMS_START}",		"{T_PRXSRC_TABLE_ITEMS_END}",	"{T_PRXSRC_ITEM}",				NULL,							"{T_TABLE_BREAK}",			"{T_STATS_GEO_HEAD}",
-								"{T_STATS_GEO_TABLE_ITEMS_START}",	"{T_STATS_GEO_TABLE_ITEMS_END}","{T_STATS_GEO_ITEM}"
+								"{T_STATS_GEO_TABLE_ITEMS_START}",	"{T_STATS_GEO_TABLE_ITEMS_END}","{T_STATS_GEO_ITEM}",			"{T_CHECK_IP}",					"{T_CHECK_PORT}",			"{T_CHECK_TYPE}",
+								"{T_CHECK_COUNTRY_LOWER}",			"{T_CHECK_COUNTRY_UPPER}"
 };
 
 static char *StrReplace(char *string, char *substr, char *replacement)
@@ -66,7 +67,7 @@ void HtmlTemplateLoadAll()
 		fullPath = true;
 	}
 
-	char *files[] = { "head.tmpl", "foot.tmpl", "home.tmpl", "iface.tmpl", "ifaceu.tmpl", "prxsrc.tmpl", "stats.tmpl" };
+	char *files[] = { "head.tmpl", "foot.tmpl", "home.tmpl", "iface.tmpl", "ifaceu.tmpl", "prxsrc.tmpl", "stats.tmpl", "check.tmpl" };
 
 	if (d) {
 		config_t cfg;
@@ -108,6 +109,8 @@ void HtmlTemplateLoadAll()
 							HtmlTemplateParse(hFile, &HtmlTemplateProxySources, &HtmlTemplateProxySourcesSize, cfgRoot);
 						if (strcmp(dir->d_name, "stats.tmpl") == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateStats, &HtmlTemplateStatsSize, cfgRoot);
+						if (strcmp(dir->d_name, "check.tmpl") == 0)
+							HtmlTemplateParse(hFile, &HtmlTemplateCheck, &HtmlTemplateCheckSize, cfgRoot);
 
 						itemsFound++;
 					}
@@ -117,7 +120,7 @@ void HtmlTemplateLoadAll()
 
 		//config_destroy(&cfg);
 
-		if (itemsFound != 7) {
+		if (itemsFound != 8) {
 			Log(LOG_LEVEL_ERROR, "Not all HTML templates found, using stock HTML...");
 			HtmlTemplateUseStock = true;
 		}
@@ -587,7 +590,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 
 							char *sidb64;
 							Base64Encode(sid, IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE), &sidb64); {
-								evbuffer_add_printf(Buffer, "<a href=\"/iface/check?sid=%s\">Check</a>", sidb64);
+								evbuffer_add_printf(Buffer, "<a href=\"/recheck?sid=%s\">Check</a>", sidb64);
 							} free(sidb64);
 						} else
 							evbuffer_add_reference(Buffer, "Full check", 10 * sizeof(char), NULL, NULL);
@@ -736,6 +739,38 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				free(statsGeo);
 				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_GEO_TABLE_ITEMS_END || x > Size)
 					x++;
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_IP: {
+				assert(TableInfo.tableObject != NULL);
+				PROXY *proxy = (PROXY*)(TableInfo.tableObject);
+				char *ip = IPv6MapToString2(proxy->ip); {
+					evbuffer_add_printf(Buffer, "%s", ip);
+				} free(ip);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_PORT: {
+				assert(TableInfo.tableObject != NULL);
+				PROXY *proxy = (PROXY*)(TableInfo.tableObject);
+					evbuffer_add_printf(Buffer, "%d", proxy->port);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_TYPE: {
+				assert(TableInfo.tableObject != NULL);
+				PROXY *proxy = (PROXY*)(TableInfo.tableObject);
+				evbuffer_add_printf(Buffer, "%s", ProxyGetTypeString(proxy->type));
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_COUNTRY_LOWER: {
+				assert(TableInfo.tableObject != NULL);
+				PROXY *proxy = (PROXY*)(TableInfo.tableObject);
+				evbuffer_add_printf(Buffer, "%c%c", tolower(proxy->country[0]), tolower(proxy->country[1]));
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_COUNTRY_UPPER: {
+				assert(TableInfo.tableObject != NULL);
+				PROXY *proxy = (PROXY*)(TableInfo.tableObject);
+				evbuffer_add_printf(Buffer, "%s", proxy->country);
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_UPROXIES_TABLE_ITEMS_END:

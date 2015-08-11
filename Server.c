@@ -317,8 +317,9 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 			InterfaceRawRecheck(BuffEvent, Buff);
 		} else if (strncmp(path, "/", 1) == 0 && pathLen == 1)
 			InterfaceHome(BuffEvent, Buff);
-		else if (pathLen > 13 && strncmp(path, "/iface/check", 12) == 0) {
-			freeBufferEvent = false;
+		else if (pathLen > 8 && strncmp(path, "/recheck", 8) == 0) {
+			if (HtmlTemplateUseStock)
+				freeBufferEvent = false;
 			InterfaceProxyRecheck(BuffEvent, Buff);
 		} else {
 			if (HtmlTemplateUseStock)

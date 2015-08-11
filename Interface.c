@@ -31,7 +31,7 @@ static char *strnstr(char *Haystack, char *Needle, size_t Size)
 
 void InterfaceInit()
 {
-	InterfacePagesSize = 6;
+	InterfacePagesSize = 9;
 	InterfacePages = malloc(InterfacePagesSize * sizeof(INTERFACE_PAGE));
 	InterfacePages[0].name = "Home";
 	InterfacePages[0].page = INTERFACE_PAGE_HOME;
@@ -45,6 +45,12 @@ void InterfaceInit()
 	InterfacePages[4].page = INTERFACE_PAGE_STATS;
 	InterfacePages[5].name = "Proxy recheck";
 	InterfacePages[5].page = INTERFACE_PAGE_RECHECK;
+	InterfacePages[6].name = "Raw Spamhaus ZEN output";
+	InterfacePages[6].page = INTERFACE_PAGE_SPAMHAUS;
+	InterfacePages[7].name = "Raw Reverse DNS output";
+	InterfacePages[7].page = INTERFACE_PAGE_RDNS;
+	InterfacePages[8].name = "Raw proxy check output";
+	InterfacePages[8].page = INTERFACE_PAGE_CHECK;
 }
 
 static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, INTERFACE_INFO *InterfaceInfo, bool AllowOnlyCookie)
@@ -342,7 +348,7 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 
 				char *sidb64;
 				Base64Encode(sid, IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE), &sidb64); {
-					evbuffer_add_printf(body, "<td><a href=\"/iface/check?sid=%s\">Check</a></td>", sidb64);
+					evbuffer_add_printf(body, "<td><a href=\"/recheck?sid=%s\">Check</a></td>", sidb64);
 				} free(sidb64);
 			}
 		} pthread_mutex_unlock(&LockCheckedProxies);
@@ -654,31 +660,63 @@ void InterfaceProxyRecheck(struct bufferevent *BuffEvent, char *Buff)
 
 	PROXY *proxy = GetProxyFromSid(Buff);
 
-	if (proxy == NULL) {
-		goto fail;
-	}
+	if (HtmlTemplateUseStock) {
+		if (proxy == NULL) {
+			goto fail;
+		}
 
-	evbuffer_free(headers);
+		evbuffer_free(headers);
 
-	bufferevent_write(BuffEvent, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n", 72 * sizeof(char));
-	bufferevent_write(BuffEvent, "ac0\r\n<html><head><style type=\"text/css\">span#check {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5Ojf/2wBDAQoKCg0MDRoPDxo3JR8lNzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzf/wAARCAAQABADASIAAhEBAxEB/8QAFwAAAwEAAAAAAAAAAAAAAAAAAgUGB//EACgQAAIBAgQDCQAAAAAAAAAAAAECAwQFBhEhUQAyQRIUFSQxQmFisf/EABQBAQAAAAAAAAAAAAAAAAAAAAT/xAAcEQACAQUBAAAAAAAAAAAAAAABQQIAAxESIfD/2gAMAwEAAhEDEQA/ANhW9W5qual70iywglwxyAA5tTpp14n4sR192xHDS2dPJxMDOWUZFM9SxOoOwGu/UKeJ8H+J1S1duljp5mbOYOD2T9xl7v3cH1e2S0UtmoVpaRfl5G5pG3PBcX5z1lwBh+dExfnPU8AYfnX/2Q==');}\nspan#x {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwEBAQEBAQEKCgELDRYPDQwMDRsUCQQKIB0iIiAdHx8kKDQsGBolJx8fLT0tMTU3Li4uIys/OD8sNyg5OisBCgoKDQwNGg8PGislEyUrNzc3Nzc3Nzc3Nzc3Nys3Nzc3NzcrKzcrKzc3Kys3Nzc3Kzc3NzcrKysrNys3Nys3N//AABEIABAAEAMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAADBAYB/8QAIxAAAQIGAgIDAAAAAAAAAAAAAQIEBgcIESExEkIJIgMFFP/EABUBAQEAAAAAAAAAAAAAAAAAAAYE/8QAHhEAAAQHAAAAAAAAAAAAAAAAAhES8AABAxMxQYH/2gAMAwEAAhEDEQA/AKJ24rDpBrHi+YkcRkpU/wAkqJWo/iiNnfAA6pGsZQrfIKupZo8rqrar4gWYcqY94zXQb+pJYw8zvkEdknWcrOuIT6ietPIlXZX/AB9KWZEKH4o/T6qBBLP6FnfBB7JO8ZWd2CcYwY1/UHeQWBZYSxg4/JMpZsOIIZ/fM75JPVI3nKDq4ULxGJW0nCaQaUqWQ308Jso//9k=');}\nspan#warn {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAAsVBMVEX////mawj/7QD/5AC8RxLDSRP/6gDmfxD/6AD/5QDwnBP+5gn+3AX/8wD/8QD1t1f/+/T4yWn3wBD/4AD/2AD3uhD//vryrA/+1Afysmzncw/shQ3shxn92yb/4xf/9wDccg//2q7/0oD7wUj93Ib5txr+y3jLbjb/0o3935L8u0r/1qX/zGf6tSD95aX7vlL7uUH94Z7MViL+yQX603X5wSv/1Dn/1lL+y0X/0mX7vTjEy7M8AAAAl0lEQVQYlXWPyQ6CMAAFsQVa9sWyqSgoiIiCsuP/f5goCUuM7zaTuTyK+rNnuuT0kS1N6Cf3OceZn1zjeXCJonM4cXA60vTtFUxB1zFM245JWTVNntd1VQ5sWkVhex4htmV+hWYQcQ0hx0Fd+7DKixADhCQZCLzaC8WArCwhdJAA1pVeIFfgWAAAi+He3fXC2a7GbZzf2297mAwTcOhOqQAAAABJRU5ErkJggg==');}\nspan#q {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAAVFBMVEX////x8fFjnM3q6uoESoeIsNRXlMru7u719fV0ptHp8feArNLH0996nbzo6Oi8zNr1+PmXvd7Y3OIbWpFUg6tkjrKoxd660+rD2eyZtc2Tr8iewuBnn7peAAAAoklEQVQYlTVPWxLEIAiLiG9tte/t3v+ei3abD4aEIQFAMCciS2bGgyWFKwLxDGYZPHz/E3xDr0l43JnXD9CM7ItaNy5+Y1EoI12ovnBRN+8Vh4Gt8Kqj8O0RCRbwTnCsm/MQKoJy2hXetVNDqFBa65KlqL4ipl5PA3qYZolV08zrMqkRi9TEVoSpPocBob2nt/Q8Z+iMtcaTzDvJhqy8n3v/A+GkBwY6VTOCAAAAAElFTkSuQmCC');}</style></head><body><div style=\"width:700px;border: 1px solid #000;padding: 20px;display: block;margin-left: auto;margin-right: auto;\"><h2 style=\"text-align:center\">Checking \r\n", 2759);
+		bufferevent_write(BuffEvent, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n", 72 * sizeof(char));
+		bufferevent_write(BuffEvent, "ac0\r\n<html><head><style type=\"text/css\">span#check {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5Ojf/2wBDAQoKCg0MDRoPDxo3JR8lNzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzf/wAARCAAQABADASIAAhEBAxEB/8QAFwAAAwEAAAAAAAAAAAAAAAAAAgUGB//EACgQAAIBAgQDCQAAAAAAAAAAAAECAwQFBhEhUQAyQRIUFSQxQmFisf/EABQBAQAAAAAAAAAAAAAAAAAAAAT/xAAcEQACAQUBAAAAAAAAAAAAAAABQQIAAxESIfD/2gAMAwEAAhEDEQA/ANhW9W5qual70iywglwxyAA5tTpp14n4sR192xHDS2dPJxMDOWUZFM9SxOoOwGu/UKeJ8H+J1S1duljp5mbOYOD2T9xl7v3cH1e2S0UtmoVpaRfl5G5pG3PBcX5z1lwBh+dExfnPU8AYfnX/2Q==');}\nspan#x {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/jpg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAkGBwEBAQEBAQEKCgELDRYPDQwMDRsUCQQKIB0iIiAdHx8kKDQsGBolJx8fLT0tMTU3Li4uIys/OD8sNyg5OisBCgoKDQwNGg8PGislEyUrNzc3Nzc3Nzc3Nzc3Nys3Nzc3NzcrKzcrKzc3Kys3Nzc3Kzc3NzcrKysrNys3Nys3N//AABEIABAAEAMBIgACEQEDEQH/xAAXAAADAQAAAAAAAAAAAAAAAAADBAYB/8QAIxAAAQIGAgIDAAAAAAAAAAAAAQIEBgcIESExEkIJIgMFFP/EABUBAQEAAAAAAAAAAAAAAAAAAAYE/8QAHhEAAAQHAAAAAAAAAAAAAAAAAhES8AABAxMxQYH/2gAMAwEAAhEDEQA/AKJ24rDpBrHi+YkcRkpU/wAkqJWo/iiNnfAA6pGsZQrfIKupZo8rqrar4gWYcqY94zXQb+pJYw8zvkEdknWcrOuIT6ietPIlXZX/AB9KWZEKH4o/T6qBBLP6FnfBB7JO8ZWd2CcYwY1/UHeQWBZYSxg4/JMpZsOIIZ/fM75JPVI3nKDq4ULxGJW0nCaQaUqWQ308Jso//9k=');}\nspan#warn {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAAsVBMVEX////mawj/7QD/5AC8RxLDSRP/6gDmfxD/6AD/5QDwnBP+5gn+3AX/8wD/8QD1t1f/+/T4yWn3wBD/4AD/2AD3uhD//vryrA/+1Afysmzncw/shQ3shxn92yb/4xf/9wDccg//2q7/0oD7wUj93Ib5txr+y3jLbjb/0o3935L8u0r/1qX/zGf6tSD95aX7vlL7uUH94Z7MViL+yQX603X5wSv/1Dn/1lL+y0X/0mX7vTjEy7M8AAAAl0lEQVQYlXWPyQ6CMAAFsQVa9sWyqSgoiIiCsuP/f5goCUuM7zaTuTyK+rNnuuT0kS1N6Cf3OceZn1zjeXCJonM4cXA60vTtFUxB1zFM245JWTVNntd1VQ5sWkVhex4htmV+hWYQcQ0hx0Fd+7DKixADhCQZCLzaC8WArCwhdJAA1pVeIFfgWAAAi+He3fXC2a7GbZzf2297mAwTcOhOqQAAAABJRU5ErkJggg==');}\nspan#q {display:inline-block;width: 16px;height: 16px;background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAAVFBMVEX////x8fFjnM3q6uoESoeIsNRXlMru7u719fV0ptHp8feArNLH0996nbzo6Oi8zNr1+PmXvd7Y3OIbWpFUg6tkjrKoxd660+rD2eyZtc2Tr8iewuBnn7peAAAAoklEQVQYlTVPWxLEIAiLiG9tte/t3v+ei3abD4aEIQFAMCciS2bGgyWFKwLxDGYZPHz/E3xDr0l43JnXD9CM7ItaNy5+Y1EoI12ovnBRN+8Vh4Gt8Kqj8O0RCRbwTnCsm/MQKoJy2hXetVNDqFBa65KlqL4ipl5PA3qYZolV08zrMqkRi9TEVoSpPocBob2nt/Q8Z+iMtcaTzDvJhqy8n3v/A+GkBwY6VTOCAAAAAElFTkSuQmCC');}</style></head><body><div style=\"width:700px;border: 1px solid #000;padding: 20px;display: block;margin-left: auto;margin-right: auto;\"><h2 style=\"text-align:center\">Checking \r\n", 2759);
 
-	char *ip = IPv6MapToString2(proxy->ip); {
-		SendChunkPrintf(BuffEvent, "%s:%d (%s)...</h2>", ip, proxy->port, ProxyGetTypeString(proxy->type));
-	} free(ip);
+		char *ip = IPv6MapToString2(proxy->ip); {
+			SendChunkPrintf(BuffEvent, "%s:%d (%s)...</h2>", ip, proxy->port, ProxyGetTypeString(proxy->type));
+		} free(ip);
 
-	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FLUSH);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FLUSH);
 
-	Recheck(proxy, InterfaceProxyRecheckStage2, BuffEvent);
+		Recheck(proxy, InterfaceProxyRecheckStage2, BuffEvent);
 
-	return;
+		return;
 fail:
-	evbuffer_add_printf(headers, "HTTP/1.1 %s\r\nContent-Length: %d\r\n\r\n", "404 Not found", 15);
-	bufferevent_write_buffer(BuffEvent, headers);
-	bufferevent_write(BuffEvent, "Proxy not found", 15);
-	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
-	bufferevent_free(BuffEvent);
-	evbuffer_free(headers);
+		evbuffer_add_printf(headers, "HTTP/1.1 %s\r\nContent-Length: %d\r\n\r\n", "404 Not found", 15);
+		bufferevent_write_buffer(BuffEvent, headers);
+		bufferevent_write(BuffEvent, "Proxy not found", 15);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+		bufferevent_free(BuffEvent);
+		evbuffer_free(headers);
+	} else {
+
+		if (proxy == NULL) {
+			bufferevent_write(BuffEvent, "HTTP/1.1 404 Not found\r\nContent-Length: 15\r\n\r\nProxy not found", 61 * sizeof(char));
+			bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+			evbuffer_free(headers);
+			return;
+		}
+
+		struct evbuffer *body = evbuffer_new();
+
+		HTML_TEMPALTE_TABLE_INFO tableInfo;
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateHead, HtmlTemplateHeadSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		tableInfo.tableObject = proxy;
+		HtmlTemplateBufferInsert(body, HtmlTemplateCheck, HtmlTemplateCheckSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateFoot, HtmlTemplateFootSize, info, tableInfo);
+
+		evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
+		evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+
+		bufferevent_write_buffer(BuffEvent, headers);
+		bufferevent_write_buffer(BuffEvent, body);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(headers);
+		evbuffer_free(body);
+	}
 }
 
 void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)

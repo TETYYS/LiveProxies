@@ -12,7 +12,10 @@ typedef enum _INTERFACE_PAGES {
 	INTERFACE_PAGE_PROXIES = 2,
 	INTERFACE_PAGE_PRXSRC = 3,
 	INTERFACE_PAGE_STATS = 4,
-	INTERFACE_PAGE_RECHECK = 5
+	INTERFACE_PAGE_RECHECK = 5,
+	INTERFACE_PAGE_SPAMHAUS = 6,
+	INTERFACE_PAGE_RDNS = 7,
+	INTERFACE_PAGE_CHECK = 8
 } INTERFACE_PAGES;
 
 typedef struct _INTERFACE_PAGE {
@@ -57,3 +60,4 @@ void InterfaceProxySources		(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceStats				(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawSpamhausZen	(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawReverseDNS		(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceRawRecheck		(struct bufferevent *BuffEvent, char *Buff);
