@@ -46,8 +46,8 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 
 	InterlockedDecrement(&CurrentlyChecking, 1);
 
-	pthread_mutex_lock(&lockUncheckedProxies); {
-	} pthread_mutex_unlock(&lockUncheckedProxies);
+	pthread_mutex_lock(&LockUncheckedProxies); {
+	} pthread_mutex_unlock(&LockUncheckedProxies);
 
 	struct timespec tm;
 	tm.tv_sec = 1;
@@ -239,7 +239,7 @@ typedef enum _PROXY_HANDLE_DATA_EV_TYPE {
 
 static void ProxyHandleData(UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEvent, PROXY_HANDLE_DATA_EV_TYPE EVType)
 {
-	Log(LOG_LEVEL_DEBUG, "ProxyHandleData: Proxy %s, stage %d", ProxyGetTypeString(UProxy->type), UProxy->stage);
+	Log(LOG_LEVEL_DEBUG, "ProxyHandleData: Proxy %s (%d), stage %d", ProxyGetTypeString(UProxy->type), UProxy->type, UProxy->stage);
 	char *reqString;
 #define EVTYPE_CASE(x) if (EVType != x) return;
 #define EVTYPE_CASE_NOT(x) if (EVType == x) return;
@@ -477,20 +477,20 @@ fail:
 void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_PROXY *UProxy)
 {
 	Log(LOG_LEVEL_DEBUG, "EVEvent %02x", Event);
-	pthread_mutex_lock(&lockUncheckedProxies); {
+	pthread_mutex_lock(&LockUncheckedProxies); {
 		bool found = false;
-		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
-			if (uncheckedProxies[x] == UProxy) {
+		for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+			if (UncheckedProxies[x] == UProxy) {
 				found = true;
 				break;
 			}
 		}
 		if (!found) {
 			Log(LOG_LEVEL_DEBUG, "EVEvent: UProxy doesn't exist");
-			pthread_mutex_unlock(&lockUncheckedProxies);
+			pthread_mutex_unlock(&LockUncheckedProxies);
 			return;
 		}
-	} pthread_mutex_unlock(&lockUncheckedProxies);
+	} pthread_mutex_unlock(&LockUncheckedProxies);
 
 	if (Event == BEV_EVENT_CONNECTED) {
 		char *ip = IPv6MapToString(UProxy->ip); {
@@ -516,20 +516,20 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 
 void CALLBACK EVRead(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
 {
-	pthread_mutex_lock(&lockUncheckedProxies); {
+	pthread_mutex_lock(&LockUncheckedProxies); {
 		bool found = false;
-		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
-			if (uncheckedProxies[x] == UProxy) {
+		for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+			if (UncheckedProxies[x] == UProxy) {
 				found = true;
 				break;
 			}
 		}
 		if (!found) {
 			Log(LOG_LEVEL_DEBUG, "EVRead: UProxy doesn't exist");
-			pthread_mutex_unlock(&lockUncheckedProxies);
+			pthread_mutex_unlock(&LockUncheckedProxies);
 			return;
 		}
-	} pthread_mutex_unlock(&lockUncheckedProxies);
+	} pthread_mutex_unlock(&LockUncheckedProxies);
 
 	ProxyHandleData(UProxy, BuffEvent, EV_TYPE_READ);
 }
@@ -538,20 +538,20 @@ void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
 {
 	Log(LOG_LEVEL_DEBUG, "EVWrite");
 
-	pthread_mutex_lock(&lockUncheckedProxies); {
+	pthread_mutex_lock(&LockUncheckedProxies); {
 		bool found = false;
-		for (size_t x = 0; x < sizeUncheckedProxies; x++) {
-			if (uncheckedProxies[x] == UProxy) {
+		for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+			if (UncheckedProxies[x] == UProxy) {
 				found = true;
 				break;
 			}
 		}
 		if (!found) {
 			Log(LOG_LEVEL_DEBUG, "EVWrite: UProxy doesn't exist");
-			pthread_mutex_unlock(&lockUncheckedProxies);
+			pthread_mutex_unlock(&LockUncheckedProxies);
 			return;
 		}
-	} pthread_mutex_unlock(&lockUncheckedProxies);
+	} pthread_mutex_unlock(&LockUncheckedProxies);
 
 	ProxyHandleData(UProxy, BuffEvent, EV_TYPE_WRITE);
 }

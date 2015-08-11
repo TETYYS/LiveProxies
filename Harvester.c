@@ -32,14 +32,20 @@ void HarvestLoop()
 	// holy memory
 
 	Py_Initialize();
+	HarvesterPrxsrcStats = NULL;
+	SizeHarvesterPrxsrcStats = 0;
 
 	for (;;) {
 		PyObject *pName, *pModule, *pFunc = NULL, *pResult;
+		bool statsEntryAdded = false;
+
 		PyRun_SimpleString("import sys");
+
 		char *sysPath = malloc(19 + strlen(HarvestersPath) + 1); {
 			sprintf(sysPath, "sys.path.append(\"%s\")", HarvestersPath);
 			PyRun_SimpleString(sysPath);
 		} free(sysPath);
+
 		DIR *d;
 		struct dirent *ent;
 		d = opendir(HarvestersPath);
@@ -50,6 +56,7 @@ void HarvestLoop()
 		while ((ent = readdir(d)) != NULL) {
 			if (ent->d_type != DT_REG /* normal file */ || strlen(ent->d_name) < 4 || strcmp(ent->d_name + strlen(ent->d_name) - 3, ".py"))
 				continue;
+
 			char *path = (char*)malloc(10 + strlen(ent->d_name) + 1 /* NULL */);
 			sprintf(path, "%s", ent->d_name);
 			path[strlen(path) - 3] = '\0';
@@ -136,10 +143,31 @@ void HarvestLoop()
 				if (addedPrev == added)
 					UProxyFree(up);
 				total++;
-
 next:
 				pch = strtok_r(NULL, "\n", &tokSave);
 			}
+
+			HARVESTER_PRXSRC_STATS_ENTRY entry;
+			entry.name = path;
+			entry.added = total;
+			entry.addedNew = added;
+
+			pthread_mutex_lock(&LockHarvesterPrxsrcStats); {
+				if (SizeHarvesterPrxsrcStats < ProxySourcesBacklog) {
+					HarvesterPrxsrcStats = SizeHarvesterPrxsrcStats == 0 ? malloc(++SizeHarvesterPrxsrcStats * sizeof(HARVESTER_PRXSRC_STATS_ENTRY)) :
+						realloc(HarvesterPrxsrcStats, ++SizeHarvesterPrxsrcStats * sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
+					memcpy(&(HarvesterPrxsrcStats[SizeHarvesterPrxsrcStats - 1]), &entry, sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
+				} else {
+					free(HarvesterPrxsrcStats[SizeHarvesterPrxsrcStats].name);
+					for (size_t x = SizeHarvesterPrxsrcStats - 1;x < SizeHarvesterPrxsrcStats;x--) {
+						memcpy(&(HarvesterPrxsrcStats[x - 1]), &(HarvesterPrxsrcStats[x]), sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
+					}
+					memcpy(&(HarvesterPrxsrcStats[0]), &entry, sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
+				}
+			} pthread_mutex_unlock(&LockHarvesterPrxsrcStats);
+
+			statsEntryAdded = true;
+
 			printf("Added %d (%d new) proxies from %s\n", total, added, path);
 			Py_DECREF(pResult);
 freefunc:
@@ -147,10 +175,11 @@ freefunc:
 freemodule:
 			Py_DECREF(pModule);
 freepath:
-			free(path);
+			if (!statsEntryAdded)
+				free(path);
 		}
 		closedir(d);
-		if (sizeUncheckedProxies == 0)
+		if (SizeUncheckedProxies == 0)
 			printf("Warning: no proxies to check, all threads will be inactive\n");
 end:
 		msleep(HARVEST_TIMEOUT);

@@ -113,13 +113,13 @@ typedef struct _UNCHECKED_PROXY {
 	void *singleCheckCallbackExtraData;
 } UNCHECKED_PROXY;
 
-UNCHECKED_PROXY	**uncheckedProxies;
-uint32_t		sizeUncheckedProxies;
-pthread_mutex_t	lockUncheckedProxies;
+UNCHECKED_PROXY	**UncheckedProxies;
+uint32_t		SizeUncheckedProxies;
+pthread_mutex_t	LockUncheckedProxies;
 
-PROXY	 		**checkedProxies;
-uint32_t		sizeCheckedProxies;
-pthread_mutex_t	lockCheckedProxies;
+PROXY	 		**CheckedProxies;
+uint32_t		SizeCheckedProxies;
+pthread_mutex_t	LockCheckedProxies;
 
 bool ProxyIsSSL(PROXY_TYPE In);
 char *ProxyGetTypeString(PROXY_TYPE In);

@@ -43,42 +43,42 @@ char *ProxyGetTypeString(PROXY_TYPE In)
 
 bool ProxyAdd(PROXY *Proxy)
 {
-	pthread_mutex_lock(&lockCheckedProxies); {
-		for (uint32_t x = 0; x < sizeCheckedProxies; x++) {
-			if (memcmp(Proxy->ip->Data, checkedProxies[x]->ip->Data, IPV6_SIZE) == 0 && Proxy->port == checkedProxies[x]->port && Proxy->type == checkedProxies[x]->type) {
-				checkedProxies[x]->anonymity = Proxy->anonymity;
-				checkedProxies[x]->failedChecks = Proxy->failedChecks;
-				checkedProxies[x]->httpTimeoutMs = Proxy->httpTimeoutMs;
-				checkedProxies[x]->lastCheckedMs = Proxy->lastCheckedMs;
-				checkedProxies[x]->retries = Proxy->retries;
-				checkedProxies[x]->successfulChecks = Proxy->successfulChecks;
-				checkedProxies[x]->timeoutMs = Proxy->timeoutMs;
+	pthread_mutex_lock(&LockCheckedProxies); {
+		for (uint32_t x = 0; x < SizeCheckedProxies; x++) {
+			if (memcmp(Proxy->ip->Data, CheckedProxies[x]->ip->Data, IPV6_SIZE) == 0 && Proxy->port == CheckedProxies[x]->port && Proxy->type == CheckedProxies[x]->type) {
+				CheckedProxies[x]->anonymity = Proxy->anonymity;
+				CheckedProxies[x]->failedChecks = Proxy->failedChecks;
+				CheckedProxies[x]->httpTimeoutMs = Proxy->httpTimeoutMs;
+				CheckedProxies[x]->lastCheckedMs = Proxy->lastCheckedMs;
+				CheckedProxies[x]->retries = Proxy->retries;
+				CheckedProxies[x]->successfulChecks = Proxy->successfulChecks;
+				CheckedProxies[x]->timeoutMs = Proxy->timeoutMs;
 				free(Proxy);
-				pthread_mutex_unlock(&lockCheckedProxies);
+				pthread_mutex_unlock(&LockCheckedProxies);
 				return false;
 			}
 		}
-		checkedProxies = (PROXY**)realloc(checkedProxies, ++sizeCheckedProxies * sizeof(checkedProxies));
-		checkedProxies[sizeCheckedProxies - 1] = Proxy;
-	} pthread_mutex_unlock(&lockCheckedProxies);
+		CheckedProxies = (PROXY**)realloc(CheckedProxies, ++SizeCheckedProxies * sizeof(CheckedProxies));
+		CheckedProxies[SizeCheckedProxies - 1] = Proxy;
+	} pthread_mutex_unlock(&LockCheckedProxies);
 	return true;
 }
 
 uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 {
 	uint8_t ret = 0;
-	pthread_mutex_lock(&lockUncheckedProxies); {
-		for (uint32_t x = 0; x < sizeUncheckedProxies; x++) {
-			if (memcmp(UProxy->hash, uncheckedProxies[x]->hash, 512 / 8) == 0) {
+	pthread_mutex_lock(&LockUncheckedProxies); {
+		for (uint32_t x = 0; x < SizeUncheckedProxies; x++) {
+			if (memcmp(UProxy->hash, UncheckedProxies[x]->hash, 512 / 8) == 0) {
 				char *ip = IPv6MapToString2(UProxy->ip); {
 					Log(LOG_LEVEL_WARNING, "Warning: tried to add already added unchecked proxy (%s:%d) (type %d)", ip, UProxy->port, UProxy->type);
 				} free(ip);
-				pthread_mutex_unlock(&lockUncheckedProxies);
+				pthread_mutex_unlock(&LockUncheckedProxies);
 				return ret;
 			}
 		}
-	} pthread_mutex_unlock(&lockUncheckedProxies);
-	Log(LOG_LEVEL_DEBUG, "UProxyAdd: size %d", sizeUncheckedProxies);
+	} pthread_mutex_unlock(&LockUncheckedProxies);
+	Log(LOG_LEVEL_DEBUG, "UProxyAdd: size %d", SizeUncheckedProxies);
 
 	if (MultiFlag(UProxy->type)) {
 		for (size_t x = 0; x < PROXY_TYPE_COUNT - 1 /* -1 because of type 1 */; x++) {
@@ -89,10 +89,10 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 			}
 		}
 	} else {
-		pthread_mutex_lock(&lockUncheckedProxies); {
-			uncheckedProxies = (UNCHECKED_PROXY**)realloc(uncheckedProxies, sizeof(uncheckedProxies) * ++sizeUncheckedProxies);
-			uncheckedProxies[sizeUncheckedProxies - 1] = UProxy;
-		} pthread_mutex_unlock(&lockUncheckedProxies);
+		pthread_mutex_lock(&LockUncheckedProxies); {
+			UncheckedProxies = (UNCHECKED_PROXY**)realloc(UncheckedProxies, sizeof(UncheckedProxies) * ++SizeUncheckedProxies);
+			UncheckedProxies[SizeUncheckedProxies - 1] = UProxy;
+		} pthread_mutex_unlock(&LockUncheckedProxies);
 		ret++;
 	}
 	return ret;
@@ -102,19 +102,19 @@ bool UProxyRemove(UNCHECKED_PROXY *UProxy)
 {
 	bool found = false;
 
-	pthread_mutex_lock(&lockUncheckedProxies); {
-		for (uint32_t x = 0; x < sizeUncheckedProxies; x++) {
-			if (UProxy == uncheckedProxies[x]) {
-				UProxyFree(uncheckedProxies[x]);
-				sizeUncheckedProxies--;
-				uncheckedProxies[x] = uncheckedProxies[sizeUncheckedProxies];
-				uncheckedProxies = (UNCHECKED_PROXY**)realloc(uncheckedProxies, sizeUncheckedProxies * sizeof(uncheckedProxies));
+	pthread_mutex_lock(&LockUncheckedProxies); {
+		for (uint32_t x = 0; x < SizeUncheckedProxies; x++) {
+			if (UProxy == UncheckedProxies[x]) {
+				UProxyFree(UncheckedProxies[x]);
+				SizeUncheckedProxies--;
+				UncheckedProxies[x] = UncheckedProxies[SizeUncheckedProxies];
+				UncheckedProxies = (UNCHECKED_PROXY**)realloc(UncheckedProxies, SizeUncheckedProxies * sizeof(UncheckedProxies));
 				found = true;
 				break;
 			}
 		}
-	} pthread_mutex_unlock(&lockUncheckedProxies);
-	Log(LOG_LEVEL_DEBUG, "UProxyRemove: size %d", sizeUncheckedProxies);
+	} pthread_mutex_unlock(&LockUncheckedProxies);
+	Log(LOG_LEVEL_DEBUG, "UProxyRemove: size %d", SizeUncheckedProxies);
 	return found;
 }
 
@@ -122,18 +122,18 @@ bool ProxyRemove(PROXY *Proxy)
 {
 	bool found = false;
 
-	pthread_mutex_lock(&lockCheckedProxies); {
-		for (uint32_t x = 0; x < sizeCheckedProxies; x++) {
-			if (Proxy == checkedProxies[x]) {
-				ProxyFree(checkedProxies[x]);
-				sizeCheckedProxies--;
-				checkedProxies[x] = checkedProxies[sizeCheckedProxies];
-				checkedProxies = (PROXY**)realloc(checkedProxies, sizeCheckedProxies * sizeof(checkedProxies));
+	pthread_mutex_lock(&LockCheckedProxies); {
+		for (uint32_t x = 0; x < SizeCheckedProxies; x++) {
+			if (Proxy == CheckedProxies[x]) {
+				ProxyFree(CheckedProxies[x]);
+				SizeCheckedProxies--;
+				CheckedProxies[x] = CheckedProxies[SizeCheckedProxies];
+				CheckedProxies = (PROXY**)realloc(CheckedProxies, SizeCheckedProxies * sizeof(CheckedProxies));
 				found = true;
 				break;
 			}
 		}
-	} pthread_mutex_unlock(&lockCheckedProxies);
+	} pthread_mutex_unlock(&LockCheckedProxies);
 	return found;
 }
 

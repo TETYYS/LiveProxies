@@ -130,14 +130,14 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 		}
 		free(keyRaw);
 
-		pthread_mutex_lock(&lockUncheckedProxies); {
-			for (size_t x = 0; x < sizeUncheckedProxies; x++) {
-				if (memcmp(key, uncheckedProxies[x]->hash, 512 / 8) == 0) {
-					UProxy = uncheckedProxies[x];
+		pthread_mutex_lock(&LockUncheckedProxies); {
+			for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+				if (memcmp(key, UncheckedProxies[x]->hash, 512 / 8) == 0) {
+					UProxy = UncheckedProxies[x];
 					pthread_mutex_lock(&(UProxy->processing));
 				}
 			}
-		} pthread_mutex_unlock(&lockUncheckedProxies);
+		} pthread_mutex_unlock(&LockUncheckedProxies);
 		free(key);
 
 		if (UProxy == NULL)
@@ -301,11 +301,22 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 		if (strncmp(path, "/prxchk", 7) == 0 && pathLen == 7)
 			ProxyCheckLanding(BuffEvent, Buff);
 		else if (strncmp(path, "/ifaceu", 7) == 0 && pathLen == 7)
-			InterfaceWebUnchecked(BuffEvent, Buff);
+			InterfaceUncheckedProxies(BuffEvent, Buff);
 		else if (strncmp(path, "/iface", 6) == 0 && pathLen == 6)
-			InterfaceWeb(BuffEvent, Buff);
-		else if (strncmp(path, "/", 1) == 0 && pathLen == 1)
-			InterfaceWebHome(BuffEvent, Buff);
+			InterfaceProxies(BuffEvent, Buff);
+		else if (strncmp(path, "/prxsrc", 7) == 0 && pathLen == 7)
+			InterfaceProxySources(BuffEvent, Buff);
+		else if (strncmp(path, "/stats", 6) == 0 && pathLen == 6)
+			InterfaceStats(BuffEvent, Buff);
+		else if (strncmp(path, "/zen", 4) == 0 && pathLen >= 4)
+			InterfaceRawSpamhausZen(BuffEvent, Buff);
+		else if (strncmp(path, "/rdns", 5) == 0 && pathLen >= 5)
+			InterfaceRawReverseDNS(BuffEvent, Buff);
+		else if (strncmp(path, "/check", 6) == 0 && pathLen >= 6) {
+			freeBufferEvent = false;
+			InterfaceRawRecheck(BuffEvent, Buff);
+		} else if (strncmp(path, "/", 1) == 0 && pathLen == 1)
+			InterfaceHome(BuffEvent, Buff);
 		else if (pathLen > 13 && strncmp(path, "/iface/check", 12) == 0) {
 			freeBufferEvent = false;
 			InterfaceProxyRecheck(BuffEvent, Buff);
@@ -313,7 +324,7 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 			if (HtmlTemplateUseStock)
 				goto free;
 			/* Ruse filter */ {
-				// We don't resolve unicode or http %s so we don't care
+				// We don't resolve unicode or http %hex so we don't care
 				// Absolute path traversal doesn't apply
 
 				if (strstr(path, "..") != 0) {
@@ -569,14 +580,14 @@ static void ServerUDP(int hSock)
 		UNCHECKED_PROXY *UProxy = NULL;
 
 		IPv6Map *ip = RawToIPv6Map(&remote); {
-			pthread_mutex_lock(&lockUncheckedProxies); {
-				for (size_t x = 0; x < sizeUncheckedProxies; x++) {
-					if (memcmp(buff, uncheckedProxies[x]->hash, 512 / 8) == 0 && IPv6MapCompare(ip, uncheckedProxies[x]->ip)) {
-						UProxy = uncheckedProxies[x];
+			pthread_mutex_lock(&LockUncheckedProxies); {
+				for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+					if (memcmp(buff, UncheckedProxies[x]->hash, 512 / 8) == 0 && IPv6MapCompare(ip, UncheckedProxies[x]->ip)) {
+						UProxy = UncheckedProxies[x];
 						pthread_mutex_lock(&(UProxy->processing));
 					}
 				}
-			} pthread_mutex_unlock(&lockUncheckedProxies);
+			} pthread_mutex_unlock(&LockUncheckedProxies);
 		} free(ip);
 
 		if (UProxy == NULL) {

@@ -49,7 +49,11 @@ AUTH_LOCAL **AuthLocalList;
 size_t AuthLocalCount;
 
 void InterfaceInit();
-void InterfaceWeb(struct bufferevent *BuffEvent, char *Buff);
-void InterfaceWebUnchecked(struct bufferevent *BuffEvent, char *Buff);
-void InterfaceProxyRecheck(struct bufferevent *BuffEvent, char *Buff);
-void InterfaceWebHome(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceProxies			(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceUncheckedProxies	(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceProxyRecheck		(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceHome				(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceProxySources		(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceStats				(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceRawSpamhausZen	(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceRawReverseDNS		(struct bufferevent *BuffEvent, char *Buff);

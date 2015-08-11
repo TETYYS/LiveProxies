@@ -138,8 +138,8 @@ int main(int argc, char** argv)
 	levRequestBase = event_base_new();
 
 	CurrentlyChecking = 0;
-	sizeUncheckedProxies = 0;
-	sizeCheckedProxies = 0;
+	SizeUncheckedProxies = 0;
+	SizeCheckedProxies = 0;
 
 	InterfaceInit();
 	HtmlTemplateLoadAll(); // These two must be called in this order
@@ -170,6 +170,7 @@ int main(int argc, char** argv)
 	CONFIG_INT64(cfgRoot, "GlobalTimeout", GlobalTimeout, 10000)
 	CONFIG_INT64(cfgRoot, "AcceptableSequentialFails", AcceptableSequentialFails, 3)
 	CONFIG_INT64(cfgRoot, "AuthLoginExpiry", AuthLoginExpiry, 10800)
+	CONFIG_INT64(cfgRoot, "ProxySourcesBacklog", ProxySourcesBacklog, 20)
 	CONFIG_INT(cfgRoot, "ServerPort", ServerPort, 8084)
 	CONFIG_INT(cfgRoot, "ServerPortUDP", ServerPortUDP, 8084)
 	CONFIG_BOOL(cfgRoot, "EnableUDP", EnableUDP, true)
@@ -362,8 +363,9 @@ int main(int argc, char** argv)
 
 	RAND_pseudo_bytes((unsigned char*)(&hashSalt), 64);
 
-	pthread_mutex_init(&lockUncheckedProxies, NULL);
-	pthread_mutex_init(&lockCheckedProxies, NULL);
+	pthread_mutex_init(&LockUncheckedProxies, NULL);
+	pthread_mutex_init(&LockCheckedProxies, NULL);
+	pthread_mutex_init(&LockHarvesterPrxsrcStats, NULL);
 
 	pthread_t serverBase;
 	int status = pthread_create(&serverBase, NULL, (void*)ServerBase, NULL);
@@ -451,22 +453,22 @@ void CheckLoop()
 		UNCHECKED_PROXY **proxiesToCheck = NULL;
 
 		Log(LOG_LEVEL_DEBUG, "CheckLoop: Waiting for UProxy list lock...");
-		pthread_mutex_lock(&lockUncheckedProxies); {
+		pthread_mutex_lock(&LockUncheckedProxies); {
 			Log(LOG_LEVEL_DEBUG, "CheckLoop: Looping through UProxies...");
 
-			for (size_t x = 0; x < sizeUncheckedProxies; x++) {
+			for (size_t x = 0; x < SizeUncheckedProxies; x++) {
 				if (CurrentlyChecking > SimultaneousChecks)
 					break;
-				if (!(uncheckedProxies[x]->checking) && uncheckedProxies[x]->singleCheckCallback == NULL) {
+				if (!(UncheckedProxies[x]->checking) && UncheckedProxies[x]->singleCheckCallback == NULL) {
 					if (proxiesToCheck == NULL)
 						proxiesToCheck = malloc(sizeof(proxiesToCheck));
 					else
 						proxiesToCheck = realloc(proxiesToCheck, (count + 1) * sizeof(proxiesToCheck));
-					proxiesToCheck[count++] = uncheckedProxies[x];
+					proxiesToCheck[count++] = UncheckedProxies[x];
 				} else
 					Log(LOG_LEVEL_DEBUG, "CheckLoop: Proxy %d discard", x);
 			}
-		} pthread_mutex_unlock(&lockUncheckedProxies);
+		} pthread_mutex_unlock(&LockUncheckedProxies);
 
 		for (size_t x = 0; x < count; x++) {
 			Log(LOG_LEVEL_DEBUG, "CheckLoop: Proxy %d set checking", x);

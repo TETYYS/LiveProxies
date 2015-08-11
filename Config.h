@@ -16,6 +16,7 @@ IPv6Map *GlobalIp6;
 char *HarvestersPath;
 uint64_t AuthLoginExpiry;
 bool EnableUDP;
+uint64_t ProxySourcesBacklog;
 
 struct timeval GlobalTimeoutTV;
 

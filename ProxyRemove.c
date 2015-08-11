@@ -13,15 +13,15 @@ void RemoveThread()
 		msleep(RemoveThreadInterval);
 		continue; ////////////////////////////////////////////////
 		PROXY *proxy = NULL;
-		pthread_mutex_lock(&lockCheckedProxies); {
+		pthread_mutex_lock(&LockCheckedProxies); {
 			uint64_t low = UINT64_MAX;
-			for (uint32_t x = 0; x < sizeCheckedProxies; x++) {
-				if (!checkedProxies[x]->rechecking && checkedProxies[x]->lastCheckedMs < low) {
-					proxy = checkedProxies[x];
+			for (uint32_t x = 0; x < SizeCheckedProxies; x++) {
+				if (!CheckedProxies[x]->rechecking && CheckedProxies[x]->lastCheckedMs < low) {
+					proxy = CheckedProxies[x];
 					low = proxy->lastCheckedMs;
 				}
 			}
-		} pthread_mutex_unlock(&lockCheckedProxies);
+		} pthread_mutex_unlock(&LockCheckedProxies);
 		if (proxy != NULL) {
 			UNCHECKED_PROXY *UProxy = UProxyFromProxy(proxy);
 			proxy->rechecking = true;
