@@ -12,6 +12,7 @@
 #include <openssl/sha.h>
 #include <event2/event.h>
 #include <assert.h>
+#include "Base64.h"
 
 static bool MultiFlag(uint64_t Flag)
 {
@@ -177,6 +178,45 @@ void GenerateHashForUProxy(UNCHECKED_PROXY *In)
 	} free(data);
 
 	// 👌
+}
+
+char *GenerateUidForProxy(PROXY *In)
+{
+	uint8_t uid[IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE)];
+	memcpy(uid, In->ip->Data, IPV6_SIZE);
+	*((uint16_t*)(uid + IPV6_SIZE)) = In->port;
+	*((PROXY_TYPE*)(uid + IPV6_SIZE + sizeof(uint16_t))) = In->type;
+
+	char *uidb64;
+	Base64Encode(uid, IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE), &uidb64);
+	return uidb64;
+}
+
+PROXY *GetProxyFromUid(char *Uid)
+{
+	PROXY *proxy = NULL;
+
+	uint8_t *uid;
+	size_t len;
+	if (!Base64Decode(Uid, &uid, &len))
+		return NULL;
+	{
+		if (len != IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE)) {
+			free(uid);
+			return NULL;
+		}
+
+		pthread_mutex_lock(&LockCheckedProxies); {
+			for (size_t x = 0;x < SizeCheckedProxies;x++) {
+				if (memcmp(uid, CheckedProxies[x]->ip->Data, IPV6_SIZE) == 0 && *((uint16_t*)(uid + IPV6_SIZE)) == CheckedProxies[x]->port && *((PROXY_TYPE*)(uid + IPV6_SIZE + sizeof(uint16_t))) == CheckedProxies[x]->type) {
+					proxy = CheckedProxies[x];
+					break;
+				}
+			}
+		} pthread_mutex_unlock(&LockCheckedProxies);
+	} free(uid);
+
+	return proxy;
 }
 
 void UProxyFree(UNCHECKED_PROXY *In)

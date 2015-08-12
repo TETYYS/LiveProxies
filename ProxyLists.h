@@ -132,3 +132,5 @@ void UProxyFree(UNCHECKED_PROXY *In);
 void ProxyFree(PROXY *In);
 UNCHECKED_PROXY *UProxyFromProxy(PROXY *In);
 UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct event *Timeout, PROXY *AssociatedProxy);
+char *GenerateUidForProxy(PROXY *In);
+PROXY *GetProxyFromUid(char *Uid);

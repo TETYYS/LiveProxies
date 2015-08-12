@@ -341,15 +341,9 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 				evbuffer_add_printf(body, "<td>%d</td>", CheckedProxies[x]->successfulChecks);
 				evbuffer_add_printf(body, "<td>%d</td>", CheckedProxies[x]->failedChecks);
 
-				uint8_t sid[IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE)];
-				memcpy(sid, CheckedProxies[x]->ip->Data, IPV6_SIZE);
-				*((uint16_t*)(sid + IPV6_SIZE)) = CheckedProxies[x]->port;
-				*((PROXY_TYPE*)(sid + IPV6_SIZE + sizeof(uint16_t))) = CheckedProxies[x]->type;
-
-				char *sidb64;
-				Base64Encode(sid, IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE), &sidb64); {
-					evbuffer_add_printf(body, "<td><a href=\"/recheck?sid=%s\">Check</a></td>", sidb64);
-				} free(sidb64);
+				char *uid = GenerateUidForProxy(CheckedProxies[x]); {
+					evbuffer_add_printf(body, "<td><a href=\"/recheck?uid=%s\">Check</a></td>", uid);
+				} free(uid);
 			}
 		} pthread_mutex_unlock(&LockCheckedProxies);
 
@@ -603,11 +597,11 @@ static void InterfaceProxyRecheckStage2(UNCHECKED_PROXY *UProxy)
 	return;
 }
 
-static PROXY *GetProxyFromSid(char *Buff)
+static PROXY *GetProxyFromUidBuff(char *Buff)
 {
 	PROXY *proxy = NULL;
 
-	char *pathStart = strstr(Buff, "?sid=");
+	char *pathStart = strstr(Buff, "?uid=");
 	if (pathStart == NULL)
 		return NULL;
 
@@ -617,27 +611,7 @@ static PROXY *GetProxyFromSid(char *Buff)
 
 	*pathEnd = 0x00;
 
-	uint8_t *sid;
-	size_t len;
-	if (!Base64Decode(pathStart + (5 * sizeof(char)), &sid, &len))
-		return NULL;
-	{
-		if (len != IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE)) {
-			free(sid);
-			return NULL;
-		}
-
-		pthread_mutex_lock(&LockCheckedProxies); {
-			for (size_t x = 0;x < SizeCheckedProxies;x++) {
-				if (memcmp(sid, CheckedProxies[x]->ip->Data, IPV6_SIZE) == 0 && *((uint16_t*)(sid + IPV6_SIZE)) == CheckedProxies[x]->port && *((PROXY_TYPE*)(sid + IPV6_SIZE + sizeof(uint16_t))) == CheckedProxies[x]->type) {
-					proxy = CheckedProxies[x];
-					break;
-				}
-			}
-		} pthread_mutex_unlock(&LockCheckedProxies);
-	} free(sid);
-
-	return proxy;
+	return GetProxyFromUid(pathStart + (5 * sizeof(char)));
 }
 
 void InterfaceProxyRecheck(struct bufferevent *BuffEvent, char *Buff)
@@ -658,7 +632,7 @@ void InterfaceProxyRecheck(struct bufferevent *BuffEvent, char *Buff)
 		return;
 	}
 
-	PROXY *proxy = GetProxyFromSid(Buff);
+	PROXY *proxy = GetProxyFromUidBuff(Buff);
 
 	if (HtmlTemplateUseStock) {
 		if (proxy == NULL) {
@@ -739,7 +713,7 @@ void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 		return;
 	}
 
-	PROXY *proxy = GetProxyFromSid(Buff);
+	PROXY *proxy = GetProxyFromUidBuff(Buff);
 
 	if (proxy == NULL) {
 		bufferevent_write(BuffEvent, "HTTP/1.1 404 Not found\r\nContent-Length: 15\r\n\r\nProxy not found", 61 * sizeof(char));
@@ -759,7 +733,7 @@ void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 			evbuffer_add_reference(body, "css", 3 * sizeof(char), NULL, NULL);
 			break;
 		case XBL:
-			evbuffer_add_reference(body, "css", 3 * sizeof(char), NULL, NULL);
+			evbuffer_add_reference(body, "xbl", 3 * sizeof(char), NULL, NULL);
 			break;
 		case PBL:
 			evbuffer_add_reference(body, "pbl", 3 * sizeof(char), NULL, NULL);
@@ -800,7 +774,7 @@ void InterfaceRawReverseDNS(struct bufferevent *BuffEvent, char *Buff)
 		return;
 	}
 
-	PROXY *proxy = GetProxyFromSid(Buff);
+	PROXY *proxy = GetProxyFromUidBuff(Buff);
 
 	if (proxy == NULL) {
 		bufferevent_write(BuffEvent, "HTTP/1.1 404 Not found\r\nContent-Length: 15\r\n\r\nProxy not found", 61 * sizeof(char));
@@ -839,19 +813,29 @@ static void InterfaceRawRecheckStage2(UNCHECKED_PROXY *UProxy)
 		return;
 	}
 
-	PROXY *Proxy = UProxy->associatedProxy;
+	PROXY *proxy = UProxy->associatedProxy;
 
-	if (Proxy->anonymity == ANONYMITY_TRANSPARENT)
-		bufferevent_write(buffEvent, "t", 1 * sizeof(char));
-	else if (Proxy->anonymity == ANONYMITY_ANONYMOUS)
-		bufferevent_write(buffEvent, "a", 1 * sizeof(char));
-	else if (Proxy->anonymity == ANONYMITY_MAX)
-		bufferevent_write(buffEvent, "m", 1 * sizeof(char));
-	else
-		bufferevent_write(buffEvent, "n", 1 * sizeof(char));
+	struct evbuffer *body = evbuffer_new(); {
+		char anon;
+		if (proxy->anonymity == ANONYMITY_TRANSPARENT)
+			anon = 't';
+		else if (proxy->anonymity == ANONYMITY_ANONYMOUS)
+			anon = 'a';
+		else if (proxy->anonymity == ANONYMITY_MAX)
+			anon = 'm';
+		else
+			anon = 'n';
 
-	Log(LOG_LEVEL_DEBUG, "Sent anonimity");
-	Log(LOG_LEVEL_DEBUG, "Recheck OK");
+		char *uid = GenerateUidForProxy(proxy); {
+			char *liveSinceTime = FormatTime(proxy->liveSinceMs); {
+				char *lastCheckedTime = FormatTime(proxy->lastCheckedMs); {
+					evbuffer_add_printf(body, "{ \"anonymity\": '%c', \"httpTimeoutMs\": %d, \"timeoutMs\": %d, \"liveSince\": \"%s\", \"lastChecked\": \"%s\", \"retries\": %d, \"successfulChecks\": %d, \"failedChecks\": %d, \"uid\": \"%s\" }",
+												anon, proxy->httpTimeoutMs, proxy->timeoutMs, liveSinceTime, lastCheckedTime, proxy->retries, proxy->successfulChecks, proxy->failedChecks, uid);
+				} free(lastCheckedTime);
+			} free(liveSinceTime);
+		} free(uid);
+		bufferevent_write_buffer(buffEvent, body);
+	} evbuffer_free(body);
 
 	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
 	bufferevent_free(buffEvent);
@@ -876,7 +860,7 @@ void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
 		return;
 	}
 
-	PROXY *proxy = GetProxyFromSid(Buff);
+	PROXY *proxy = GetProxyFromUidBuff(Buff);
 
 	if (proxy == NULL) {
 		bufferevent_write(BuffEvent, "HTTP/1.1 404 Not found\r\nContent-Length: 15\r\n\r\nProxy not found", 61 * sizeof(char));

@@ -23,7 +23,8 @@ char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",				"{T_CFG_
 								"{T_UPROXIES_ITEM}",				"{T_PROXIES_HEAD}",				"{T_PROXIES_TABLE_ITEMS_START}","{T_PROXIES_TABLE_ITEMS_END}",	"{T_PROXIES_ITEM}",			"{T_PRXSRC_HEAD}",
 								"{T_PRXSRC_TABLE_ITEMS_START}",		"{T_PRXSRC_TABLE_ITEMS_END}",	"{T_PRXSRC_ITEM}",				NULL,							"{T_TABLE_BREAK}",			"{T_STATS_GEO_HEAD}",
 								"{T_STATS_GEO_TABLE_ITEMS_START}",	"{T_STATS_GEO_TABLE_ITEMS_END}","{T_STATS_GEO_ITEM}",			"{T_CHECK_IP}",					"{T_CHECK_PORT}",			"{T_CHECK_TYPE}",
-								"{T_CHECK_COUNTRY_LOWER}",			"{T_CHECK_COUNTRY_UPPER}"
+								"{T_CHECK_COUNTRY_LOWER}",			"{T_CHECK_COUNTRY_UPPER}",		"{T_CHECK_LIVE_SINCE}",			"{T_CHECK_LAST_CHECKED}",		"{T_CHECK_CONNECT_TIMEOUT}","{T_CHECK_HTTP_S_TIMEOUT}",
+								"{T_CHECK_SUCCESSFUL_CHECKS}",		"{T_CHECK_FAILED_CHECKS}",		"{T_CHECK_RETRIES}",			"{T_CHECK_UID}"
 };
 
 static char *StrReplace(char *string, char *substr, char *replacement)
@@ -359,6 +360,8 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 		}
 	}
 
+	if (Info.currentPage->page == INTERFACE_PAGE_CHECK)
+		assert(TableInfo.tableObject != NULL);
 
 	Log(LOG_LEVEL_DEBUG, "TableInfo:");
 	Log(LOG_LEVEL_DEBUG, ".x: %d", TableInfo.currentComponentIteration);
@@ -583,15 +586,9 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 					}
 					case 11: {
 						if (item) {
-							uint8_t sid[IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE)];
-							memcpy(sid, proxy->ip->Data, IPV6_SIZE);
-							*((uint16_t*)(sid + IPV6_SIZE)) = proxy->port;
-							*((PROXY_TYPE*)(sid + IPV6_SIZE + sizeof(uint16_t))) = proxy->type;
-
-							char *sidb64;
-							Base64Encode(sid, IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE), &sidb64); {
-								evbuffer_add_printf(Buffer, "<a href=\"/recheck?sid=%s\">Check</a>", sidb64);
-							} free(sidb64);
+							char *uid = GenerateUidForProxy(proxy); {
+								evbuffer_add_printf(Buffer, "<a href=\"/recheck?uid=%s\">Check</a>", uid);
+							} free(uid);
 						} else
 							evbuffer_add_reference(Buffer, "Full check", 10 * sizeof(char), NULL, NULL);
 						TableInfo.tableHeadOrItemIteration = -1; // line+4 sets it to 0
@@ -742,35 +739,64 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_IP: {
-				assert(TableInfo.tableObject != NULL);
-				PROXY *proxy = (PROXY*)(TableInfo.tableObject);
-				char *ip = IPv6MapToString2(proxy->ip); {
+				char *ip = IPv6MapToString2(((PROXY*)(TableInfo.tableObject))->ip); {
 					evbuffer_add_printf(Buffer, "%s", ip);
 				} free(ip);
 				break;
 			}
-			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_PORT: {
-				assert(TableInfo.tableObject != NULL);
-				PROXY *proxy = (PROXY*)(TableInfo.tableObject);
-					evbuffer_add_printf(Buffer, "%d", proxy->port);
-				break;
-			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_TYPE: {
-				assert(TableInfo.tableObject != NULL);
-				PROXY *proxy = (PROXY*)(TableInfo.tableObject);
-				evbuffer_add_printf(Buffer, "%s", ProxyGetTypeString(proxy->type));
+				evbuffer_add_printf(Buffer, "%s", ProxyGetTypeString(((PROXY*)(TableInfo.tableObject))->type));
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_COUNTRY_LOWER: {
-				assert(TableInfo.tableObject != NULL);
 				PROXY *proxy = (PROXY*)(TableInfo.tableObject);
 				evbuffer_add_printf(Buffer, "%c%c", tolower(proxy->country[0]), tolower(proxy->country[1]));
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_COUNTRY_UPPER: {
-				assert(TableInfo.tableObject != NULL);
-				PROXY *proxy = (PROXY*)(TableInfo.tableObject);
-				evbuffer_add_printf(Buffer, "%s", proxy->country);
+				evbuffer_add_printf(Buffer, "%s", ((PROXY*)(TableInfo.tableObject))->country);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_LIVE_SINCE: {
+				char *time = FormatTime(((PROXY*)(TableInfo.tableObject))->liveSinceMs); {
+					evbuffer_add_printf(Buffer, "%s", time);
+				} free(time);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_LAST_CHECKED: {
+				char *time = FormatTime(((PROXY*)(TableInfo.tableObject))->lastCheckedMs); {
+					evbuffer_add_printf(Buffer, "%s", time);
+				} free(time);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_UID: {
+				char *uid = GenerateUidForProxy((PROXY*)(TableInfo.tableObject)); {
+					evbuffer_add_printf(Buffer, "%s", uid);
+				} free(uid);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_PORT: {
+				evbuffer_add_printf(Buffer, "%d", ((PROXY*)(TableInfo.tableObject))->port);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_CONNECT_TIMEOUT: {
+				evbuffer_add_printf(Buffer, "%d", ((PROXY*)(TableInfo.tableObject))->timeoutMs);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_HTTP_S_TIMEOUT: {
+				evbuffer_add_printf(Buffer, "%d", ((PROXY*)(TableInfo.tableObject))->httpTimeoutMs);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_SUCCESSFUL_CHECKS: {
+				evbuffer_add_printf(Buffer, "%d", ((PROXY*)(TableInfo.tableObject))->successfulChecks);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_FAILED_CHECKS: {
+				evbuffer_add_printf(Buffer, "%d", ((PROXY*)(TableInfo.tableObject))->failedChecks);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_RETRIES: {
+				evbuffer_add_printf(Buffer, "%d", ((PROXY*)(TableInfo.tableObject))->retries);
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_UPROXIES_TABLE_ITEMS_END:
