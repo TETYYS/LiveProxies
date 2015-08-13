@@ -544,6 +544,7 @@ static void InterfaceProxyRecheckStage2(UNCHECKED_PROXY *UProxy)
 		Log(LOG_LEVEL_DEBUG, "Proxy NULL");
 		bufferevent_write(buffEvent, "57\r\n<h3 style=\"text-align:center;color:red\"><span id=\"x\"></span> OFFLINE</h3></body></html>\r\n", 93);
 		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
 		bufferevent_free(buffEvent);
 		return;
 	}
@@ -569,16 +570,16 @@ static void InterfaceProxyRecheckStage2(UNCHECKED_PROXY *UProxy)
 
 	SPAMHAUS_ZEN_ANSWER zen = SpamhausZEN(Proxy->ip);
 	switch (zen) {
-		case SBL:
+		case SPAMHAUS_ZEN_ANSWER_SBL:
 			bufferevent_write(buffEvent, "b5\r\n<p style=\"color:red\"><span id=\"x\"></span> Spamhaus ZEN: <a href=\"http://www.spamhaus.org/sbl/\" target=\"_blank\"><img src=\"http://www.spamhaus.org/images/sbl_badge_hp.gif\" /></a></p>\r\n", 186);
 			break;
-		case CSS:
+		case SPAMHAUS_ZEN_ANSWER_CSS:
 			bufferevent_write(buffEvent, "b5\r\n<p style=\"color:red\"><span id=\"x\"></span> Spamhaus ZEN: <a href=\"http://www.spamhaus.org/css/\" target=\"_blank\"><img src=\"http://www.spamhaus.org/images/css_badge_hp.gif\" /></a></p>\r\n", 186);
 			break;
-		case XBL:
+		case SPAMHAUS_ZEN_ANSWER_XBL:
 			bufferevent_write(buffEvent, "b5\r\n<p style=\"color:red\"><span id=\"x\"></span> Spamhaus ZEN: <a href=\"http://www.spamhaus.org/xbl/\" target=\"_blank\"><img src=\"http://www.spamhaus.org/images/xbl_badge_hp.gif\" /></a></p>\r\n", 186);
 			break;
-		case PBL:
+		case SPAMHAUS_ZEN_ANSWER_PBL:
 			bufferevent_write(buffEvent, "bd\r\n<p style=\"color:GoldenRod\"><span id=\"warn\"></span> Spamhaus ZEN: <a href=\"http://www.spamhaus.org/pbl/\" target=\"_blank\"><img src=\"http://www.spamhaus.org/images/pbl_badge_hp.gif\" /></a></p>\r\n", 195);
 			break;
 		default:
@@ -593,6 +594,7 @@ static void InterfaceProxyRecheckStage2(UNCHECKED_PROXY *UProxy)
 	Log(LOG_LEVEL_DEBUG, "Recheck OK");
 
 	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
+	Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
 	bufferevent_free(buffEvent);
 	return;
 }
@@ -658,6 +660,7 @@ fail:
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_write(BuffEvent, "Proxy not found", 15);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
 		bufferevent_free(BuffEvent);
 		evbuffer_free(headers);
 	} else {
@@ -699,11 +702,6 @@ void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 	struct evbuffer *body = evbuffer_new();
 	INTERFACE_INFO info;
 
-	for (size_t x = 0;x < InterfacePagesSize;x++) {
-		if (InterfacePages[x].page == INTERFACE_PAGE_RECHECK)
-			info.currentPage = &(InterfacePages[x]);
-	}
-
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
@@ -726,16 +724,16 @@ void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 
 	SPAMHAUS_ZEN_ANSWER zen = SpamhausZEN(proxy->ip);
 	switch (zen) {
-		case SBL:
+		case SPAMHAUS_ZEN_ANSWER_SBL:
 			evbuffer_add_reference(body, "sbl", 3 * sizeof(char), NULL, NULL);
 			break;
-		case CSS:
+		case SPAMHAUS_ZEN_ANSWER_CSS:
 			evbuffer_add_reference(body, "css", 3 * sizeof(char), NULL, NULL);
 			break;
-		case XBL:
+		case SPAMHAUS_ZEN_ANSWER_XBL:
 			evbuffer_add_reference(body, "xbl", 3 * sizeof(char), NULL, NULL);
 			break;
-		case PBL:
+		case SPAMHAUS_ZEN_ANSWER_PBL:
 			evbuffer_add_reference(body, "pbl", 3 * sizeof(char), NULL, NULL);
 			break;
 		default:
@@ -744,6 +742,58 @@ void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 	}
 
 	evbuffer_add_printf(headers, "%d", 3); // To Content-Length
+	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+
+	bufferevent_write_buffer(BuffEvent, headers);
+	bufferevent_write_buffer(BuffEvent, body);
+	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+	evbuffer_free(headers);
+	evbuffer_free(body);
+}
+
+void InterfaceRawHttpBL(struct bufferevent *BuffEvent, char *Buff)
+{
+	struct evbuffer *headers = evbuffer_new();
+	struct evbuffer *body = evbuffer_new();
+	INTERFACE_INFO info;
+
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
+		bufferevent_write_buffer(BuffEvent, headers);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(body);
+		evbuffer_free(headers);
+		return;
+	}
+
+	PROXY *proxy = GetProxyFromUidBuff(Buff);
+
+	if (proxy == NULL) {
+		bufferevent_write(BuffEvent, "HTTP/1.1 404 Not found\r\nContent-Length: 15\r\n\r\nProxy not found", 61 * sizeof(char));
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(body);
+		evbuffer_free(headers);
+		return;
+	}
+
+	if (HttpBLAccessKey[0] != 0x00) {
+		HTTPBL_ANSWER answer;
+		HTTP_BL(proxy->ip, HttpBLAccessKey, &answer);
+		if ((answer.crookType & HTTPBL_CROOK_TYPE_COMMENT_SPAMMER) == HTTPBL_CROOK_TYPE_COMMENT_SPAMMER)
+			evbuffer_add_reference(body, "c", 1 * sizeof(char), NULL, NULL);
+		if ((answer.crookType & HTTPBL_CROOK_TYPE_HARVESTER) == HTTPBL_CROOK_TYPE_HARVESTER)
+			evbuffer_add_reference(body, "h", 1 * sizeof(char), NULL, NULL);
+		if ((answer.crookType & HTTPBL_CROOK_TYPE_SUSPICIOUS) == HTTPBL_CROOK_TYPE_SUSPICIOUS)
+			evbuffer_add_reference(body, "s", 1 * sizeof(char), NULL, NULL);
+		if (answer.crookType == HTTPBL_CROOK_TYPE_CLEAN)
+			evbuffer_add_reference(body, "l", 1 * sizeof(char), NULL, NULL);
+		evbuffer_add_printf(body, "%d", answer.score);
+	} else
+		evbuffer_add_reference(body, "N", 1 * sizeof(char), NULL, NULL);
+
+	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
 	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
 
 	bufferevent_write_buffer(BuffEvent, headers);
@@ -786,8 +836,13 @@ void InterfaceRawReverseDNS(struct bufferevent *BuffEvent, char *Buff)
 	}
 
 	char *rDNS = ReverseDNS(proxy->ip);
-	evbuffer_add_printf(headers, "%d", strlen(rDNS)); // To Content-Length
-	evbuffer_add_reference(body, rDNS, strlen(rDNS), free, rDNS);
+	if (rDNS == NULL) {
+		evbuffer_add_reference(headers, "3", 1 * sizeof(char), NULL, NULL); // To Content-Length
+		evbuffer_add_reference(body, "N/A", 3 * sizeof(char), NULL, NULL);
+	} else {
+		evbuffer_add_printf(headers, "%d", strlen(rDNS)); // To Content-Length
+		evbuffer_add_reference(body, rDNS, strlen(rDNS), free, rDNS);
+	}
 
 	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
 
@@ -807,8 +862,9 @@ static void InterfaceRawRecheckStage2(UNCHECKED_PROXY *UProxy)
 
 	if (!UProxy->checkSuccess) {
 		Log(LOG_LEVEL_DEBUG, "Proxy NULL");
-		bufferevent_write(buffEvent, "o", 1 * sizeof(char));
+		bufferevent_write(buffEvent, "20\r\nContent-Type: text/html\r\n\r\n{ \"success\": false }", 51);
 		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
 		bufferevent_free(buffEvent);
 		return;
 	}
@@ -830,7 +886,7 @@ static void InterfaceRawRecheckStage2(UNCHECKED_PROXY *UProxy)
 	char *uid = GenerateUidForProxy(proxy); {
 		char *liveSinceTime = FormatTime(proxy->liveSinceMs); {
 			char *lastCheckedTime = FormatTime(proxy->lastCheckedMs); {
-				evbuffer_add_printf(body, "{ \"anonymity\": \"%c\", \"httpTimeoutMs\": %d, \"timeoutMs\": %d, \"liveSince\": \"%s\", \"lastChecked\": \"%s\", \"retries\": %d, \"successfulChecks\": %d, \"failedChecks\": %d, \"uid\": \"%s\" }",
+				evbuffer_add_printf(body, "{ \"success\": true, \"anonymity\": \"%c\", \"httpTimeoutMs\": %d, \"timeoutMs\": %d, \"liveSince\": \"%s\", \"lastChecked\": \"%s\", \"retries\": %d, \"successfulChecks\": %d, \"failedChecks\": %d, \"uid\": \"%s\" }",
 											anon, proxy->httpTimeoutMs, proxy->timeoutMs, liveSinceTime, lastCheckedTime, proxy->retries, proxy->successfulChecks, proxy->failedChecks, uid);
 			} free(lastCheckedTime);
 		} free(liveSinceTime);
@@ -843,6 +899,7 @@ static void InterfaceRawRecheckStage2(UNCHECKED_PROXY *UProxy)
 	evbuffer_free(body);
 
 	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
+	Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
 	bufferevent_free(buffEvent);
 	return;
 }

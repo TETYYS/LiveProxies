@@ -18,6 +18,8 @@ uint64_t AuthLoginExpiry;
 bool EnableUDP;
 uint64_t ProxySourcesBacklog;
 
+char *HttpBLAccessKey;
+
 struct timeval GlobalTimeoutTV;
 
 bool SSLEnabled;

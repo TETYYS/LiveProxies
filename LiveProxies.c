@@ -178,9 +178,13 @@ int main(int argc, char** argv)
 	CONFIG_INT(cfgRoot, "ServerPortUDP", ServerPortUDP, 8084)
 	CONFIG_BOOL(cfgRoot, "EnableUDP", EnableUDP, true)
 	CONFIG_STRING(cfgRoot, "HarvestersPath", HarvestersPath, "/etc/liveproxies/scripts/")
+	CONFIG_STRING(cfgRoot, "HttpBLAccessKey", HttpBLAccessKey, "")
 
 	GlobalTimeoutTV.tv_sec = GlobalTimeout / 1000;
 	GlobalTimeoutTV.tv_usec = (GlobalTimeout % 1000) * 1000;
+
+	if (HttpBLAccessKey[0] == 0x00)
+		Log(LOG_LEVEL_WARNING, "Project HoneyPot Http:BL access key is not present. Get one at www.projecthoneypot.org/httpbl_configure.php or Http:BL lookups will be disabled.");
 
 	/* SSL */ {
 		config_setting_t *sslGroup = config_setting_get_member(cfgRoot, "SSL");

@@ -264,8 +264,10 @@ freeProxy:
 
 static void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx)
 {
-	if (Event & BEV_EVENT_EOF == BEV_EVENT_EOF || Event & BEV_EVENT_TIMEOUT == BEV_EVENT_TIMEOUT)
-		bufferevent_free(BuffEvent);
+	if ((Event & BEV_EVENT_EOF == BEV_EVENT_EOF || Event & BEV_EVENT_TIMEOUT == BEV_EVENT_TIMEOUT)) {
+		//Log(LOG_LEVEL_DEBUG, "BuffEvent free %p event %x", BuffEvent, Event);
+		//bufferevent_free(BuffEvent); // no
+	}
 }
 
 static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
@@ -298,9 +300,10 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 
 		Log(LOG_LEVEL_DEBUG, "Server -> %s", path);
 
-		if (strncmp(path, "/prxchk", 7) == 0 && pathLen == 7)
+		if (strncmp(path, "/prxchk", 7) == 0 && pathLen == 7) {
+			bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			ProxyCheckLanding(BuffEvent, Buff);
-		else if (strncmp(path, "/ifaceu", 7) == 0 && pathLen == 7)
+		} else if (strncmp(path, "/ifaceu", 7) == 0 && pathLen == 7)
 			InterfaceUncheckedProxies(BuffEvent, Buff);
 		else if (strncmp(path, "/iface", 6) == 0 && pathLen == 6)
 			InterfaceProxies(BuffEvent, Buff);
@@ -310,16 +313,19 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 			InterfaceStats(BuffEvent, Buff);
 		else if (strncmp(path, "/zen", 4) == 0 && pathLen >= 4)
 			InterfaceRawSpamhausZen(BuffEvent, Buff);
+		else if (strncmp(path, "/httpbl", 7) == 0 && pathLen >= 7)
+			InterfaceRawHttpBL(BuffEvent, Buff);
 		else if (strncmp(path, "/rdns", 5) == 0 && pathLen >= 5)
 			InterfaceRawReverseDNS(BuffEvent, Buff);
 		else if (strncmp(path, "/check", 6) == 0 && pathLen >= 6) {
-			freeBufferEvent = false;
+			Log(LOG_LEVEL_DEBUG, "/check on %p", BuffEvent);
+			freeBufferEvent = false; // Free'd in second stage of raw recheck
 			InterfaceRawRecheck(BuffEvent, Buff);
 		} else if (strncmp(path, "/", 1) == 0 && pathLen == 1)
 			InterfaceHome(BuffEvent, Buff);
 		else if (pathLen > 8 && strncmp(path, "/recheck", 8) == 0) {
 			if (HtmlTemplateUseStock)
-				freeBufferEvent = false;
+				freeBufferEvent = false; // Free'd in second stage of stock html recheck
 			InterfaceProxyRecheck(BuffEvent, Buff);
 		} else {
 			if (HtmlTemplateUseStock)
@@ -335,14 +341,14 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 			} /* End ruse filter */
 			char filePath[pathLen + (13 * sizeof(char)) + 1];
 			strcpy(filePath, "./html/files/");
-			strcat(filePath, path); // I WANT TO SEE YOU SWETT
+			strcat(filePath, path);
 
 			FILE *hFile;
 			if ((hFile = fopen(filePath, "r")) == NULL) {
 				char filePath[pathLen + (28 * sizeof(char)) + 1];
 				strcpy(filePath, "/etc/liveproxies/html/files/");
-				strcat(filePath, path); // SWETT SWETT SWETT
-				hFile = fopen(filePath, "r");
+				strcat(filePath, path);
+				hFile = fopen(filePath, "r"); // uwaga
 			}
 			if (hFile != NULL) {
 				fseek(hFile, 0, SEEK_END);
@@ -377,6 +383,7 @@ free:
 	free(Buff);
 
 	if (freeBufferEvent) {
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free on write %p", BuffEvent);
 		if (evbuffer_get_length(bufferevent_get_output(BuffEvent)))
 			bufferevent_setcb(BuffEvent, HTTPRead, bufferevent_free, ServerEvent, NULL);
 		else
@@ -397,6 +404,7 @@ void HTTPRead(struct bufferevent *BuffEvent, void *Ctx)
 	struct evbuffer *evBuff = bufferevent_get_input(BuffEvent);
 	size_t len = evbuffer_get_length(evBuff);
 	if (len < 4) {
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
 		bufferevent_free(BuffEvent);
 		return;
 	}
@@ -407,6 +415,7 @@ void HTTPRead(struct bufferevent *BuffEvent, void *Ctx)
 	for (size_t x = 0;x < len;x++) {
 		// Stop the Ruse man
 		if (buff[x] == 0x00) {
+			Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
 			bufferevent_free(BuffEvent);
 			return;
 		}
@@ -436,7 +445,7 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 		{
 			Log(LOG_LEVEL_DEBUG, "ServerAccept: HTTP");
 			struct bufferevent *bev = bufferevent_socket_new(base, Fd, BEV_OPT_CLOSE_ON_FREE);
-			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
+			//bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			bufferevent_setcb(bev, HTTPRead, NULL, ServerEvent, NULL);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
@@ -446,7 +455,7 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 		{
 			Log(LOG_LEVEL_DEBUG, "ServerAccept: SSL");
 			struct bufferevent *bev = bufferevent_openssl_socket_new(base, Fd, SSL_new(levServerSSL), BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
-			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
+			//bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			bufferevent_setcb(bev, HTTPRead, NULL, ServerEvent, NULL);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;

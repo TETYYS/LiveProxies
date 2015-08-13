@@ -37,8 +37,8 @@ SPAMHAUS_ZEN_ANSWER SpamhausZEN(IPv6Map *In)
 	struct addrinfo *servinfo;
 	IP_TYPE type = GetIPType(In);
 
-	char *query = malloc(type == IPV4 ? 34 : 82); {
-		memset(query, 0, type == IPV4 ? 34 : 82);
+	char *query = malloc(type == IPV4 ? 33 : 82); {
+		memset(query, 0, type == IPV4 ? 33 : 82);
 		if (type == IPV4) {
 			uint8_t a, b, c, d;
 			uint8_t *bytes = ((uint8_t*)&(In->Data[3]));
@@ -49,8 +49,8 @@ SPAMHAUS_ZEN_ANSWER SpamhausZEN(IPv6Map *In)
 			sprintf(query, "%d.%d.%d.%d.zen.spamhaus.org.", d, c, b, a);
 		} else {
 			uint8_t *data = In->Data;
-			for (size_t x = 0;x < IPV6_SIZE;x++) {
-				char format[3];
+			for (size_t x = IPV6_SIZE;x >= 0;x++) {
+				char format[2];
 				sprintf(format, "%x.", data[x]);
 				strcat(query, format);
 			}
@@ -58,7 +58,7 @@ SPAMHAUS_ZEN_ANSWER SpamhausZEN(IPv6Map *In)
 		}
 
 		if (getaddrinfo(query, NULL, NULL, &servinfo) != 0)
-			return CLEAN;
+			return SPAMHAUS_ZEN_ANSWER_CLEAN;
 	} free(query);
 
 	struct sockaddr_in *addr = (struct sockaddr_in*)(servinfo->ai_addr);
@@ -66,16 +66,54 @@ SPAMHAUS_ZEN_ANSWER SpamhausZEN(IPv6Map *In)
 	freeaddrinfo(servinfo);
 	switch (data) {
 		case 2:
-			return SBL;
+			return SPAMHAUS_ZEN_ANSWER_SBL;
 			break;
 		case 3:
-			return CSS;
+			return SPAMHAUS_ZEN_ANSWER_CSS;
 			break;
 		case 10:
 		case 11:
-			return PBL;
+			return SPAMHAUS_ZEN_ANSWER_PBL;
 			break;
 		default:
-			return XBL;
+			return SPAMHAUS_ZEN_ANSWER_XBL;
 	}
+}
+
+void HTTP_BL(IPv6Map *In, char *AccessKey, HTTPBL_ANSWER OUT *Out)
+{
+	struct addrinfo *servinfo;
+	IP_TYPE type = GetIPType(In);
+
+	char *query = malloc(type == IPV4 ? 34 + strlen(AccessKey) : 83 + strlen(AccessKey)); {
+		memset(query, 0, type == IPV4 ? 34 + strlen(AccessKey) : 83 + strlen(AccessKey));
+		if (type == IPV4) {
+			uint8_t a, b, c, d;
+			uint8_t *bytes = ((uint8_t*)&(In->Data[3]));
+			a = bytes[0];
+			b = bytes[1];
+			c = bytes[2];
+			d = bytes[3];
+			sprintf(query, "%s.%d.%d.%d.%d.dnsbl.httpbl.org.", AccessKey, d, c, b, a);
+		} else {
+			uint8_t *data = In->Data;
+			for (size_t x = IPV6_SIZE;x >= 0;x++) {
+				char format[2];
+				sprintf(format, "%x.", data[x]);
+				strcat(query, format);
+			}
+			strcat(query, ".dnsbl.httpbl.org.");
+		}
+
+		if (getaddrinfo(query, NULL, NULL, &servinfo) != 0)
+			return HTTPBL_CROOK_TYPE_CLEAN;
+	} free(query);
+
+	struct sockaddr_in *addr = (struct sockaddr_in*)(servinfo->ai_addr);
+	Out->days = ((uint8_t*)(&(addr->sin_addr.s_addr)))[1];
+	Out->score = ((uint8_t*)(&(addr->sin_addr.s_addr)))[2];
+	Out->crookType = ((uint8_t*)(&(addr->sin_addr.s_addr)))[3];
+	if (Out->crookType == 0)
+		Out->crookType = HTTPBL_CROOK_TYPE_CLEAN;
+	freeaddrinfo(servinfo);
 }

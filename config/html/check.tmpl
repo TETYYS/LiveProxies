@@ -2,42 +2,63 @@
 			<script>
 				$(document).ready(function() {
 					var uid = '{T_CHECK_UID}';
+					function JobDone() {
+						var jobs = $('#jobs');
+						jobs.text(parseInt(jobs.text()) + 1);
+						if (parseInt(jobs.text()) >= 5)
+							$('#jobsIcon').removeClass("fa-refresh fa-spin").addClass("fa-check");
+					}
 					$.ajax({
 						url: '/check?uid=' + uid,
 						dataType: 'json'
 					}).done(function(data) {
-						var anon = $('#anonymity');
-						switch (data.anonymity) {
-							case "t": // Transparent
-								anon.addClass("alert-danger");
-								$('#anonymityText').text("Transparent");
-								$('#anonymityIcon').addClass("fa-close");
-							break;
-							case "a": // Anonymous
-								anon.addClass("alert-warning");
-								$('#anonymityText').text("Anonymous");
-								$('#anonymityIcon').addClass("fa-exclamation");
-							break;
-							case "m": // Max
-								anon.addClass("alert-success");
-								$('#anonymityText').text("Max");
-								$('#anonymityIcon').addClass("fa-check");
-							break;
-							case "n": // None (in case of UDP)
-								anon.addClass("alert-info");
-								$('#anonymityText').text("N/A");
-								$('#anonymityIcon').addClass("fa-question");
-							break;
+						if (data.success) {
+							var anon = $('#anonymity');
+							switch (data.anonymity) {
+								case "t": // Transparent
+									anon.addClass("alert-danger");
+									$('#anonymityText').text("Transparent");
+									$('#anonymityIcon').addClass("fa-close");
+								break;
+								case "a": // Anonymous
+									anon.addClass("alert-warning");
+									$('#anonymityText').text("Anonymous");
+									$('#anonymityIcon').addClass("fa-exclamation");
+								break;
+								case "m": // Max
+									anon.addClass("alert-success");
+									$('#anonymityText').text("Max");
+									$('#anonymityIcon').addClass("fa-check");
+								break;
+								case "n": // None (in case of UDP)
+									anon.addClass("alert-info");
+									$('#anonymityText').text("N/A");
+									$('#anonymityIcon').addClass("fa-question");
+								break;
+							}
+							
+							anon.css({opacity: 0.0, visibility: "visible"}).animate({opacity: 1}, 200);
+							
+							$('#liveSince').text(data.liveSince);
+							$('#lastChecked').text(data.lastChecked);
+							$('#timeoutMs').text(data.timeoutMs);
+							$('#httpTimeoutMs').text(data.httpTimeoutMs);
+							$('#successfulChecks').text(data.successfulChecks);
+							$('#retries').text(data.retries);
+						} else {
+							var anon = $('#anonymity');
+							anon.addClass("alert-danger");
+							$('#anonymityText').text('\u2620');
+							anon.css({opacity: 0.0, visibility: "visible"}).animate({opacity: 1}, 200);
+							$('#liveSince').text('\u2620');
+							var date = new Date();
+							$('#lastChecked').text(date.getFullYear() + '-' + date.getMonth() + '-' + date.getDate() + ' ' + date.getHours() + ':' + date.getMinutes() + ':' + date.getSeconds());
+							$('#timeoutMs').text('\u2620');
+							$('#httpTimeoutMs').text('\u2620');
+							$('#retries').text(parseInt($('#retries').text()) + 1);
+							$('#failedChecks').text(parseInt($('#failedChecks').text()) + 1);
 						}
-						
-						anon.show("slow");
-						
-						$('#liveSince').text(data.liveSince);
-						$('#lastChecked').text(data.lastChecked);
-						$('#timeoutMs').text(data.timeoutMs);
-						$('#httpTimeoutMs').text(data.httpTimeoutMs);
-						$('#successfulChecks').text(data.successfulChecks);
-						$('#retries').text(data.retries);
+						JobDone();
 					});
 					$.ajax({
 						url: '/zen?uid=' + uid
@@ -72,13 +93,104 @@
 							break;
 						}
 						
-						zen.show("slow");
+						zen.css({opacity: 0.0, visibility: "visible"}).animate({opacity: 1}, 200);
+						$('#zenLink').attr('href', '//www.spamhaus.org/query/ip/' + $('#ip').text());
+						JobDone();
 					});
 					$.ajax({
 						url: '/rdns?uid=' + uid
 					}).done(function(data) {
 						$('#rdnsText').text(data);
-						$('#rdns').show("slow");
+						$('#rdns').css({opacity: 0.0, visibility: "visible"}).animate({opacity: 1}, 200);
+						JobDone();
+					});
+					$.ajax({
+                                                url: '//www.stopforumspam.com/api?ip=' + $('#ip').text() + '&f=jsonp',
+                                                dataType: 'jsonp'
+                                        }).done(function(data) {
+						var confidence = data.ip.confidence;
+						var sfs = $('#sfs');
+						
+						if (data.ip.appears == 0) {
+							$('#sfsIcon').addClass("fa-check");
+							$('#sfsText').text("Clean");
+							sfs.addClass("alert-success");
+						} else {
+							if (confidence <= 25)
+								$('#sfsIcon').addClass("fa-exclamation");
+							else if (confidence > 25 && confidence <= 50)
+								$('#sfsIcon').addClass("fa-close");
+							else if (confidence > 50 && confidence <= 75)
+								$('#sfsIcon').addClass("fa-bug");
+							else
+								$('#sfsIcon').addClass("fa-bomb");
+							sfs.addClass("alert-danger");
+							var color = "#ff";
+							var hex = confidence * 2.55;
+							color += hex.toString(16) + hex.toString(16);
+							$('#sfs').css('background-color', color);
+							$('#sfsText').text(confidence + "%");
+						}
+						$('#sfs').css({opacity: 0.0, visibility: "visible"}).animate({opacity: 1}, 200);
+						$('#sfsLink').attr('href', '//www.stopforumspam.com/search?q=' + $('#ip').text());
+						JobDone();
+					}).fail(function() {
+						$('#sfsIcon').addClass("fa-question");
+						$('#sfsText').text("Failed to lookup StopForumSpam");
+						var sfs = $('#sfs');
+						sfs.addClass("alert-info");
+						sfs.css({opacity: 0.0, visibility: "visible"}).animate({opacity: 1}, 200);
+						
+						JobDone();
+					});
+					$.ajax({
+						url: '/httpbl?uid=' + uid
+					}).done(function(data) {
+						var blText = $('#httpblText');
+						if (data[0] == 'N') {
+							$('#httpblIcon').addClass("fa-question");
+							$('#httpbl').addClass("alert-info");
+							blText.text("No access key");
+						} else {
+							var suspicious = false, bomb = false;
+							for (var x = 0;x < data.length;x++) {
+								if (isNaN(data[x])) {
+									var toAppend = (x != 0 ? " / " : "") + "<a href=\"#\" data-toggle=\"tooltip\" title=\"";
+									switch (data[x]) {
+										case "c":
+											toAppend += "Comment spammer\">C</a>";
+											bomb = true;
+										break;
+										case "h":
+											toAppend += "Harvester\">H</a>";
+											bomb = true;
+										break;
+										case "s":
+											toAppend += "Suspicious\">S</a>";
+											suspicious = true;
+										break;
+										case "l":
+											toAppend += "Clean\"><i class=\"fa fa-check\"></i></a>";
+										break;
+									}
+									blText.append(toAppend);
+								} else {
+									if (suspicious || bomb)
+										blText.append(" (" + data.substring(x, data.length) + "%)");
+									break;
+								}
+							}
+							if (bomb)
+								$('#httpbl').addClass("alert-danger");
+							if (suspicious && !bomb)
+								$('#httpbl').addClass("alert-warning");
+							if (!suspicious && !bomb)
+								$('#httpbl').addClass("alert-success");
+							$('[data-toggle="tooltip"]').tooltip();
+							$('#httpblLink').attr('href', '//www.projecthoneypot.org/ip_' + $('#ip').text());
+							$('#httpbl').css({opacity: 0.0, visibility: "visible"}).animate({opacity: 1}, 200);
+							JobDone();
+						}
 					});
 				});
 			</script>
@@ -100,29 +212,37 @@
 						</div>
 					</div>
 					<div class="col-lg-10">
-						<h2>Checking {T_CHECK_IP}:{T_CHECK_PORT} ({T_CHECK_TYPE})...</h2>
+						<h2>Checking <span id="ip">{T_CHECK_IP}</span>:{T_CHECK_PORT} ({T_CHECK_TYPE})... (<span id="jobs">0</span> / 5 <i class="fa fa-refresh fa-spin" id="jobsIcon"></i>)</h2>
 						<div style="position:absolute;bottom:-20px">
 							<i class="fa fa-check"></i> <span id="successfulChecks">{T_CHECK_SUCCESSFUL_CHECKS}</span> / <i class="fa fa-close"></i> <span id="failedChecks">{T_CHECK_FAILED_CHECKS}</span> / <i class="fa fa-refresh"></i> <span id="failedChecks">{T_CHECK_RETRIES}</span>
 						</div>
 					</div>
 					<div class="col-lg-2 text-right">
-						<img style="height:110px" src="/flags/{T_CHECK_COUNTRY_LOWER}.svg">
+						<img style="height:110px; border:1px solid;" src="/flags/{T_CHECK_COUNTRY_LOWER}.svg">
 					</div>
 				</div>
 				<div class="row">
-					<div class="alert fade in col-lg-12 text-center" id="anonymity" style="padding: 0; display: none">
+					<div class="alert fade in col-lg-12 text-center" id="anonymity" style="padding: 0; visibility: hidden">
 						<h2 style="position:absolute;top: 5px;right: 5px;margin:0"><i class="fa fa-user-secret"></i></h2>
 						<h3 style="margin:10px"><i id="anonymityIcon" class="fa"></i> <span id="anonymityText"></span></h3>
 					</div>
 				</div>
 				<div class="row">
-					<div class="alert fade in col-lg-12 text-center" id="zen" style="padding: 0; display: none">
-						<img style="position: absolute; right: 5px; top: 5px;" src="//www.spamhaus.org/images/zen_badge3.gif">
+					<div class="alert fade in col-lg-6 text-center" id="zen" style="padding: 0; margin-right: 15px; visibility: hidden">
+						<a id="zenLink"><img style="position: absolute; right: 5px; top: 5px;" src="/spamhaus/zen.gif"></a>
 						<h3 id="zenImgWrap"><img id="zenImg"></h3>
+					</div>
+					<div class="alert fade in col-lg-3 text-center alert-default" id="sfs" style="padding: 0; margin-right: 15px; height: 68px; width: calc(25% - 15px); visibility: hidden">
+						<a id="sfsLink"><img style="position: absolute; right: 5px; top: 5px;" src="/sfs.png"></a>
+						<h3><i class="fa" id="sfsIcon"></i> <span id="sfsText"></span></h3>
+					</div>
+					<div class="alert fade in col-lg-3 text-center alert-default" id="httpbl" style="padding: 0; height: 68px; width: calc(25% - 15px); visibility: hidden">
+						<a id="httpblLink"><img style="position: absolute; right: 5px; top: 5px;" src="/php.png"></a>
+						<h3><i class="fa" id="httpblIcon"></i> <span id="httpblText"></span></h3>
 					</div>
 				</div>
 				<div class="row">
-					<div class="alert alert-info fade in col-lg-12 text-center" id="rdns" style="padding: 0; display: none">
+					<div class="alert alert-info fade in col-lg-12 text-center" id="rdns" style="padding: 0; visibility: hidden">
 						<h3 style="position:absolute;top: 5px;right: 5px;margin:0">Reverse DNS</h3>
 						<h3 style="margin:10px" id="rdnsText"></h3>
 					</div>

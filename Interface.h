@@ -61,3 +61,4 @@ void InterfaceStats				(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawSpamhausZen	(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawReverseDNS		(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawRecheck		(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceRawHttpBL			(struct bufferevent *BuffEvent, char *Buff);

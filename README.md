@@ -1,6 +1,6 @@
 LiveProxies
 ===================
-Latest Version: **0.6.0** (pre-release)
+Latest Version: **0.6.2** (pre-release)
 
 LiveProxies is a [high-performance](#performance) asynchronous proxy checker.
 
@@ -73,14 +73,12 @@ Currently, program doesn't slow down at all at 7000 simultaneous proxy checks, b
 
 ## TODO
  - Provide more services in full proxy check
- - - ~Spamhaus ZEN~
- - - ~Reverse DNS~
- - - StopForumSpam API
- - - Project Honey Pot Http:BL + access key
+ - - ~~Project Honey Pot Http:BL + access key~~
  - - Test proxy against legit pages
  - - ...
  - Provide more interactivity on interface pages
  - Implement checked proxy checking.
+ - Async DNS operations
  - ...
  
 

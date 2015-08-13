@@ -30,8 +30,10 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 	Log(LOG_LEVEL_DEBUG, "RequestFree");
 	UNCHECKED_PROXY *UProxy = In->UProxy;
 	struct bufferevent *BuffEvent = In->BuffEvent;
-	if (In->freeBufferEvent)
+	if (In->freeBufferEvent) {
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
 		bufferevent_free(BuffEvent);
+	}
 	free(In);
 
 	if (UProxy->timeout != NULL) {

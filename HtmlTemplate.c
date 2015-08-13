@@ -197,10 +197,10 @@ static void HtmlTemplateFindFirst(char *Contents, OUT HTML_TEMPLATE_COMPONENT_ID
 			*Identifier = x;
 		}
 	}
-	if (*Identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_INVALID)
+	/*if (*Identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_INVALID)
 		Log(LOG_LEVEL_DEBUG, "HtmlTemplateFindFirst: %d", *Identifier);
 	else
-		Log(LOG_LEVEL_DEBUG, "HtmlTemplateFindFirst: NULL");
+		Log(LOG_LEVEL_DEBUG, "HtmlTemplateFindFirst: NULL");*/
 }
 
 static void HtmlTemplateComponentPush(HTML_TEMPLATE_COMPONENT **Components, size_t *CurrentSize, HTML_TEMPLATE_COMPONENT Component)
@@ -232,11 +232,11 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 	char *offset;
 
 	while (1) {
-		Log(LOG_LEVEL_DEBUG, "Finding first...");
+		// Log(LOG_LEVEL_DEBUG, "Finding first...");
 		HtmlTemplateFindFirst(curEnd, &identifier, &offset);
 
 		if (identifier == HTML_TEMPLATE_COMPONENT_IDENTIFIER_INVALID) {
-			Log(LOG_LEVEL_DEBUG, "No more components");
+			// Log(LOG_LEVEL_DEBUG, "No more components");
 			// No more components
 			comp.identifier = HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATIC;
 			comp.content = malloc((strlen(curEnd) * sizeof(char)) + 1);
@@ -245,20 +245,20 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 			break;
 		} else {
 			if (offset != curEnd) {
-				Log(LOG_LEVEL_DEBUG, "Pushing static content...");
+				// Log(LOG_LEVEL_DEBUG, "Pushing static content...");
 				// Push static content in front of component
 				comp.identifier = HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATIC;
 				comp.content = malloc(offset - curEnd + 1);
 				strncpy(comp.content, curEnd, offset - curEnd);
 				((char*)(comp.content))[offset - curEnd] = 0x00;
 
-				Log(LOG_LEVEL_DEBUG, "Static content: %s", comp.content);
+				// Log(LOG_LEVEL_DEBUG, "Static content: %s", comp.content);
 
 				HtmlTemplateComponentPush(Template, SizeRef, comp);
 				curEnd = offset;
 			}
 			if (offset == curEnd) {
-				Log(LOG_LEVEL_DEBUG, "Pushing dynamic content...");
+				// Log(LOG_LEVEL_DEBUG, "Pushing dynamic content...");
 				// Push dynamic content
 				comp.identifier = identifier;
 
@@ -324,7 +324,7 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 				curEnd = offset + strlen(HtmlTemplateTags[identifier]);
 			}
 		}
-		Log(LOG_LEVEL_DEBUG, "Size: %d", *SizeRef);
+		// Log(LOG_LEVEL_DEBUG, "Size: %d", *SizeRef);
 	}
 }
 
@@ -363,18 +363,18 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 	if (Info.currentPage->page == INTERFACE_PAGE_CHECK)
 		assert(TableInfo.tableObject != NULL);
 
-	Log(LOG_LEVEL_DEBUG, "TableInfo:");
+	/*Log(LOG_LEVEL_DEBUG, "TableInfo:");
 	Log(LOG_LEVEL_DEBUG, ".x: %d", TableInfo.currentComponentIteration);
 	Log(LOG_LEVEL_DEBUG, ".inTable: %s", TableInfo.inTable ? "true" : "false");
 	Log(LOG_LEVEL_DEBUG, ".iteration: %d", TableInfo.tableObjectIteration);
 	Log(LOG_LEVEL_DEBUG, ".tableObject: %p", TableInfo.tableObject);
 
-	Log(LOG_LEVEL_DEBUG, "Size: %d", Size);
+	Log(LOG_LEVEL_DEBUG, "Size: %d", Size);*/
 
 	for (size_t x = TableInfo.currentComponentIteration;x < Size;x++) {
-		Log(LOG_LEVEL_DEBUG, "Component (%d): ", x);
+		/*Log(LOG_LEVEL_DEBUG, "Component (%d): ", x);
 		Log(LOG_LEVEL_DEBUG, ".content: %s", Components[x].content);
-		Log(LOG_LEVEL_DEBUG, ".identifier: %d", Components[x].identifier);
+		Log(LOG_LEVEL_DEBUG, ".identifier: %d", Components[x].identifier);*/
 
 		switch (Components[x].identifier) {
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CURRENT_PAGE: {
