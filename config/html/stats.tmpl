@@ -1,0 +1,53 @@
+        <div id="page-wrapper">
+            <div class="container-fluid">
+                <!-- Page Heading -->
+                <div class="row">
+                    <div class="col-lg-12">
+                        <h1 class="page-header">Statistics</h1>
+                    </div>
+                </div>
+                <div class="row">
+                <div class="col-lg-12">
+                    <div class="panel panel-default">
+                        <!-- /.panel-heading -->
+                        <div class="panel-heading">
+                            <h3 class="panel-title">
+                                <i class="fa fa-globe"></i>
+                                 Geographical distribution
+                            </h3>
+                        </div>
+                        <div class="panel-body">
+                            <div id="regions_div" style="width: 100%"></div>
+                        </div>
+                        <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+                        <script type="text/javascript">
+                            google.load("visualization", "1", {packages:["geochart"]});
+                            google.setOnLoadCallback(drawRegionsMap);
+                            
+                            function drawRegionsMap() {
+                            
+                                var data = google.visualization.arrayToDataTable([
+                                    ['{T_STATS_GEO_HEAD}', '{T_STATS_GEO_HEAD}'],
+                                    {T_STATS_GEO_TABLE_ITEMS_START}
+                                    ['{T_STATS_GEO_ITEM}', {T_STATS_GEO_ITEM}],
+                                    {T_STATS_GEO_TABLE_ITEMS_END}
+                                ]);
+
+                                var options = {};
+
+                                var chart = new google.visualization.GeoChart(document.getElementById('regions_div'));
+
+                                chart.draw(data, options);
+                            }
+                        </script>
+                        <!-- /.panel-body -->
+                    </div>
+                    <!-- /.panel -->
+                </div>
+                <!-- /.col-lg-12 -->
+            </div>
+            <!-- /.row -->
+            </div>
+            <!-- /.container-fluid -->
+        </div>
+        <!-- /#page-wrapper -->

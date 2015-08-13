@@ -129,6 +129,9 @@ int main(int argc, char** argv)
 	//event_enable_debug_logging(EVENT_DBG_ALL);
 #endif
 
+	if (access("/etc/liveproxies/passwd.conf", F_OK) == -1 || access("./passwd.conf", F_OK) == -1)
+		Log(LOG_LEVEL_WARNING, "No credentials present for interface pages. Access blocked by default.");
+
 	evthread_use_pthreads();
 
 	AuthWebList = NULL;
@@ -321,19 +324,6 @@ int main(int argc, char** argv)
 		"Host: %s\r\n"
 		"User-Agent: LiveProxies Proxy Checker %s (tetyys.com)\r\n"
 		"\r\n", "%s", "%s", VERSION);
-
-	// RequestHeaders = evhtp_headers_new();
-
-	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Connection", "Close", 0, 0));
-	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Cache-Control", "max-age=0", 0, 0));
-	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8", 0, 0));
-	// char *ua = malloc(39 + strlen(VERSION) + 1); {
-	// 	sprintf(ua, "LiveProxies Proxy Checker %s (tetyys.com)", VERSION);
-	// 	evhtp_headers_add_header(RequestHeaders, evhtp_header_new("User-Agent", ua, 0, 1));
-	// } free(ua);
-	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("DNT", "1", 0, 0));
-	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Accept-Encoding", "gzip, deflate, sdch", 0, 0));
-	// evhtp_headers_add_header(RequestHeaders, evhtp_header_new("Accept-Language", "en-US,en;q=0.8", 0, 0));
 
 	const char *pcreError;
 	int pcreErrorOffset;

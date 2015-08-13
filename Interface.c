@@ -815,27 +815,32 @@ static void InterfaceRawRecheckStage2(UNCHECKED_PROXY *UProxy)
 
 	PROXY *proxy = UProxy->associatedProxy;
 
-	struct evbuffer *body = evbuffer_new(); {
-		char anon;
-		if (proxy->anonymity == ANONYMITY_TRANSPARENT)
-			anon = 't';
-		else if (proxy->anonymity == ANONYMITY_ANONYMOUS)
-			anon = 'a';
-		else if (proxy->anonymity == ANONYMITY_MAX)
-			anon = 'm';
-		else
-			anon = 'n';
+	struct evbuffer *http = evbuffer_new();
+	struct evbuffer *body = evbuffer_new();
+	char anon;
+	if (proxy->anonymity == ANONYMITY_TRANSPARENT)
+		anon = 't';
+	else if (proxy->anonymity == ANONYMITY_ANONYMOUS)
+		anon = 'a';
+	else if (proxy->anonymity == ANONYMITY_MAX)
+		anon = 'm';
+	else
+		anon = 'n';
 
-		char *uid = GenerateUidForProxy(proxy); {
-			char *liveSinceTime = FormatTime(proxy->liveSinceMs); {
-				char *lastCheckedTime = FormatTime(proxy->lastCheckedMs); {
-					evbuffer_add_printf(body, "{ \"anonymity\": '%c', \"httpTimeoutMs\": %d, \"timeoutMs\": %d, \"liveSince\": \"%s\", \"lastChecked\": \"%s\", \"retries\": %d, \"successfulChecks\": %d, \"failedChecks\": %d, \"uid\": \"%s\" }",
-												anon, proxy->httpTimeoutMs, proxy->timeoutMs, liveSinceTime, lastCheckedTime, proxy->retries, proxy->successfulChecks, proxy->failedChecks, uid);
-				} free(lastCheckedTime);
-			} free(liveSinceTime);
-		} free(uid);
-		bufferevent_write_buffer(buffEvent, body);
-	} evbuffer_free(body);
+	char *uid = GenerateUidForProxy(proxy); {
+		char *liveSinceTime = FormatTime(proxy->liveSinceMs); {
+			char *lastCheckedTime = FormatTime(proxy->lastCheckedMs); {
+				evbuffer_add_printf(body, "{ \"anonymity\": \"%c\", \"httpTimeoutMs\": %d, \"timeoutMs\": %d, \"liveSince\": \"%s\", \"lastChecked\": \"%s\", \"retries\": %d, \"successfulChecks\": %d, \"failedChecks\": %d, \"uid\": \"%s\" }",
+											anon, proxy->httpTimeoutMs, proxy->timeoutMs, liveSinceTime, lastCheckedTime, proxy->retries, proxy->successfulChecks, proxy->failedChecks, uid);
+			} free(lastCheckedTime);
+		} free(liveSinceTime);
+	} free(uid);
+	evbuffer_add_printf(http, "%d", evbuffer_get_length(body) * sizeof(char)); // To Content-Length
+	evbuffer_add_reference(http, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+	bufferevent_write_buffer(buffEvent, http);
+	bufferevent_write_buffer(buffEvent, body);
+	evbuffer_free(http);
+	evbuffer_free(body);
 
 	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
 	bufferevent_free(buffEvent);
@@ -871,8 +876,6 @@ void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
 	}
 
 	Recheck(proxy, InterfaceRawRecheckStage2, BuffEvent);
-	evbuffer_add_printf(headers, "%d", 1 * sizeof(char)); // To Content-Length
-	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
 
 	bufferevent_write_buffer(BuffEvent, headers);
 	evbuffer_free(headers);

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="LiveProxies interface">
+    <meta name="author" content="TETYYS (https://github.com/TETYYS/LiveProxies)">
+
+    <title>LiveProxies {T_VERSION} interface: {T_CURRENT_PAGE}</title>
+    
+    <script src="//code.jquery.com/jquery-2.1.4.min.js"></script>
+    
+    <link href="//maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css" rel="stylesheet">
+    
+    <link href="css/sb-admin.css" rel="stylesheet">
+    <link href="css/dataTables.bootstrap.css" rel="stylesheet">
+    
+    <link href="//cdnjs.cloudflare.com/ajax/libs/morris.js/0.5.1/morris.css" rel="stylesheet">
+    
+    <link href="//maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css" rel="stylesheet" type="text/css">
+    
+    <!--[if lt IE 9]>
+        <script src="//oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="//oss.maxcdn.com/libs/respond.js/1.4.2/respond.min.js"></script>
+    <![endif]-->
+</head>
+<body>
+    <div id="wrapper">
+        <nav class="navbar navbar-default navbar-fixed-top" style="background-color:#404040" role="navigation">
+            <div class="navbar-header">
+                <a class="navbar-brand" href="index.html"><img height="25px" style="display: inline-block" src="/logo.svg">LiveProxies</a>
+            </div>
+            <div class="navbar" style="margin:0">
+                <ul class="nav navbar-nav side-nav">
+                    <li{T_CFG_HOME_ACTIVE}>
+                        <a href="/"><i class="fa fa-fw fa-home"></i> Home</a>
+                    </li>
+                    <li{T_CFG_UPROXIES_ACTIVE}>
+                        <a href="/ifaceu"><i class="fa fa-fw fa-rotate-right"></i> Unchecked proxies</a>
+                    </li>
+                    <li{T_CFG_PROXIES_ACTIVE}>
+                        <a href="/iface"><i class="fa fa-fw fa-check"></i> Checked proxies</a>
+                    </li>
+                    <li{T_CFG_SOURCES_ACTIVE}>
+                        <a href="/prxsrc"><i class="fa fa-fw fa-files-o"></i> Proxy sources</a>
+                    </li>
+                    <li{T_CFG_STATS_ACTIVE}>
+                        <a href="/stats"><i class="fa fa-fw fa-bar-chart-o"></i> Statistics</a>
+                    </li>
+                </ul>
+            </div>
+        </nav>

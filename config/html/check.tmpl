@@ -1,0 +1,132 @@
+		<div id="page-wrapper">
+			<script>
+				$(document).ready(function() {
+					var uid = '{T_CHECK_UID}';
+					$.ajax({
+						url: '/check?uid=' + uid,
+						dataType: 'json'
+					}).done(function(data) {
+						var anon = $('#anonymity');
+						switch (data.anonymity) {
+							case "t": // Transparent
+								anon.addClass("alert-danger");
+								$('#anonymityText').text("Transparent");
+								$('#anonymityIcon').addClass("fa-close");
+							break;
+							case "a": // Anonymous
+								anon.addClass("alert-warning");
+								$('#anonymityText').text("Anonymous");
+								$('#anonymityIcon').addClass("fa-exclamation");
+							break;
+							case "m": // Max
+								anon.addClass("alert-success");
+								$('#anonymityText').text("Max");
+								$('#anonymityIcon').addClass("fa-check");
+							break;
+							case "n": // None (in case of UDP)
+								anon.addClass("alert-info");
+								$('#anonymityText').text("N/A");
+								$('#anonymityIcon').addClass("fa-question");
+							break;
+						}
+						
+						anon.show("slow");
+						
+						$('#liveSince').text(data.liveSince);
+						$('#lastChecked').text(data.lastChecked);
+						$('#timeoutMs').text(data.timeoutMs);
+						$('#httpTimeoutMs').text(data.httpTimeoutMs);
+						$('#successfulChecks').text(data.successfulChecks);
+						$('#retries').text(data.retries);
+					});
+					$.ajax({
+						url: '/zen?uid=' + uid
+					}).done(function(data) {
+						var zen = $('#zen');
+						var zenImg = $('#zenImg');
+						
+						switch (data) {
+							case "sbl":
+								zen.addClass("alert-danger");
+								zenImg.attr("src", "/spamhaus/sbl.gif");
+								zenImg.attr("alt", "Spamhaus block list");
+							break;
+							case "css":
+								zen.addClass("alert-danger");
+								zenImg.attr("src", "/spamhaus/css.gif");
+								zenImg.attr("alt", "Component of the SBL");
+							break;
+							case "xbl":
+								zen.addClass("alert-danger");
+								zenImg.attr("src", "/spamhaus/xbl.gif");
+								zenImg.attr("alt", "Exploits block list");
+							break;
+							case "pbl":
+								zen.addClass("alert-warning");
+								zenImg.attr("src", "/spamhaus/pbl.gif");
+								zenImg.attr("alt", "Policy block list");
+							break;
+							case "cln":
+								zen.addClass("alert-success");
+								$('#zenImgWrap').html("<i class=\"fa fa-check\"></i>");
+							break;
+						}
+						
+						zen.show("slow");
+					});
+					$.ajax({
+						url: '/rdns?uid=' + uid
+					}).done(function(data) {
+						$('#rdnsText').text(data);
+						$('#rdns').show("slow");
+					});
+				});
+			</script>
+			<div class="container-fluid">
+				<!-- Page Heading -->
+				<div class="row" style="padding-bottom:15px">
+					<div class="row">
+						<div class="col-lg-3">
+							<i class="fa fa-clock-o"></i> Live since <span id="liveSince">{T_CHECK_LIVE_SINCE}</span>
+						</div>
+						<div class="col-lg-3">
+							<i class="fa fa-clock-o"></i> Last checked <span id="lastChecked">{T_CHECK_LAST_CHECKED}</span>
+						</div>
+						<div class="col-lg-3">
+							<i class="fa fa-clock-o"></i> Last connect timeout: <span id="timeoutMs">{T_CHECK_CONNECT_TIMEOUT}</span> ms
+						</div>
+						<div class="col-lg-3">
+							<i class="fa fa-clock-o"></i> Last HTTP/S timeout: <span id="httpTimeoutMs">{T_CHECK_HTTP_S_TIMEOUT}</span> ms
+						</div>
+					</div>
+					<div class="col-lg-10">
+						<h2>Checking {T_CHECK_IP}:{T_CHECK_PORT} ({T_CHECK_TYPE})...</h2>
+						<div style="position:absolute;bottom:-20px">
+							<i class="fa fa-check"></i> <span id="successfulChecks">{T_CHECK_SUCCESSFUL_CHECKS}</span> / <i class="fa fa-close"></i> <span id="failedChecks">{T_CHECK_FAILED_CHECKS}</span> / <i class="fa fa-refresh"></i> <span id="failedChecks">{T_CHECK_RETRIES}</span>
+						</div>
+					</div>
+					<div class="col-lg-2 text-right">
+						<img style="height:110px" src="/flags/{T_CHECK_COUNTRY_LOWER}.svg">
+					</div>
+				</div>
+				<div class="row">
+					<div class="alert fade in col-lg-12 text-center" id="anonymity" style="padding: 0; display: none">
+						<h2 style="position:absolute;top: 5px;right: 5px;margin:0"><i class="fa fa-user-secret"></i></h2>
+						<h3 style="margin:10px"><i id="anonymityIcon" class="fa"></i> <span id="anonymityText"></span></h3>
+					</div>
+				</div>
+				<div class="row">
+					<div class="alert fade in col-lg-12 text-center" id="zen" style="padding: 0; display: none">
+						<img style="position: absolute; right: 5px; top: 5px;" src="//www.spamhaus.org/images/zen_badge3.gif">
+						<h3 id="zenImgWrap"><img id="zenImg"></h3>
+					</div>
+				</div>
+				<div class="row">
+					<div class="alert alert-info fade in col-lg-12 text-center" id="rdns" style="padding: 0; display: none">
+						<h3 style="position:absolute;top: 5px;right: 5px;margin:0">Reverse DNS</h3>
+						<h3 style="margin:10px" id="rdnsText"></h3>
+					</div>
+				</div>
+			</div>
+			<!-- /.container-fluid -->
+		</div>
