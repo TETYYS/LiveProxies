@@ -16,6 +16,7 @@
 #include <assert.h>
 #include "Base64.h"
 #include "Harvester.h"
+#include "GeoIP.h"
 
 char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",				"{T_CFG_HOME_ACTIVE}",			"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",	"{T_CFG_SOURCES_ACTIVE}",
 								"{T_CFG_STATS_ACTIVE}",				"{T_USER}",						"{T_COUNT_UPROXIES}",			"{T_COUNT_PROXIES}",			"{T_UPROXIES_HEAD}",		"{T_UPROXIES_TABLE_ITEMS_START}",
@@ -24,7 +25,7 @@ char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",				"{T_CFG_
 								"{T_PRXSRC_TABLE_ITEMS_START}",		"{T_PRXSRC_TABLE_ITEMS_END}",	"{T_PRXSRC_ITEM}",				NULL,							"{T_TABLE_BREAK}",			"{T_STATS_GEO_HEAD}",
 								"{T_STATS_GEO_TABLE_ITEMS_START}",	"{T_STATS_GEO_TABLE_ITEMS_END}","{T_STATS_GEO_ITEM}",			"{T_CHECK_IP}",					"{T_CHECK_PORT}",			"{T_CHECK_TYPE}",
 								"{T_CHECK_COUNTRY_LOWER}",			"{T_CHECK_COUNTRY_UPPER}",		"{T_CHECK_LIVE_SINCE}",			"{T_CHECK_LAST_CHECKED}",		"{T_CHECK_CONNECT_TIMEOUT}","{T_CHECK_HTTP_S_TIMEOUT}",
-								"{T_CHECK_SUCCESSFUL_CHECKS}",		"{T_CHECK_FAILED_CHECKS}",		"{T_CHECK_RETRIES}",			"{T_CHECK_UID}"
+								"{T_CHECK_SUCCESSFUL_CHECKS}",		"{T_CHECK_FAILED_CHECKS}",		"{T_CHECK_RETRIES}",			"{T_CHECK_UID}",				"{T_CHECK_COUNTRY_FULL}"
 };
 
 static char *StrReplace(char *string, char *substr, char *replacement)
@@ -797,6 +798,10 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_RETRIES: {
 				evbuffer_add_printf(Buffer, "%d", ((PROXY*)(TableInfo.tableObject))->retries);
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_COUNTRY_FULL: {
+				evbuffer_add_printf(Buffer, "%s", GeoIP_name_by_id(GeoIP_id_by_code(((PROXY*)(TableInfo.tableObject))->country)));
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_UPROXIES_TABLE_ITEMS_END:

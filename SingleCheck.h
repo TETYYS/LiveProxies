@@ -3,6 +3,7 @@
 #include "IPv6Map.h"
 #include "ProxyLists.h"
 #include "Global.h"
+#include <event2/bufferevent.h>
 
 typedef enum _SPAMHAUS_ZEN_ANSWER {
 	SPAMHAUS_ZEN_ANSWER_CLEAN,
@@ -29,3 +30,5 @@ void Recheck(PROXY *In, void CALLBACK *FinishedCallback, void *Ex);
 MEM_OUT char *ReverseDNS(IPv6Map *In);
 SPAMHAUS_ZEN_ANSWER SpamhausZEN(IPv6Map *In);
 void HTTP_BL(IPv6Map *In, char *AccessKey, HTTPBL_ANSWER OUT *Out);
+void SpamhausZENAsync(IPv6Map *In, struct bufferevent *BuffEvent);
+void HTTP_BLAsync(IPv6Map *In, char *AccessKey, struct bufferevent *BuffEvent);

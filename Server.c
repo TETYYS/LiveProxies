@@ -311,11 +311,13 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 			InterfaceProxySources(BuffEvent, Buff);
 		else if (strncmp(path, "/stats", 6) == 0 && pathLen == 6)
 			InterfaceStats(BuffEvent, Buff);
-		else if (strncmp(path, "/zen", 4) == 0 && pathLen >= 4)
+		else if (strncmp(path, "/zen", 4) == 0 && pathLen >= 4) {
+			freeBufferEvent = false; // Free'd in second stage of ZEN DNS lookup
 			InterfaceRawSpamhausZen(BuffEvent, Buff);
-		else if (strncmp(path, "/httpbl", 7) == 0 && pathLen >= 7)
+		} else if (strncmp(path, "/httpbl", 7) == 0 && pathLen >= 7) {
+			freeBufferEvent = false; // Free'd in second stage of Http:BL DNS lookup
 			InterfaceRawHttpBL(BuffEvent, Buff);
-		else if (strncmp(path, "/rdns", 5) == 0 && pathLen >= 5)
+		} else if (strncmp(path, "/rdns", 5) == 0 && pathLen >= 5)
 			InterfaceRawReverseDNS(BuffEvent, Buff);
 		else if (strncmp(path, "/check", 6) == 0 && pathLen >= 6) {
 			Log(LOG_LEVEL_DEBUG, "/check on %p", BuffEvent);

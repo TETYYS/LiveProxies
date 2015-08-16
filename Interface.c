@@ -699,14 +699,12 @@ fail:
 void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
-	struct evbuffer *body = evbuffer_new();
 	INTERFACE_INFO info;
 
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
-		evbuffer_free(body);
 		evbuffer_free(headers);
 		return;
 	}
@@ -717,55 +715,34 @@ void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 		bufferevent_write(BuffEvent, "HTTP/1.1 404 Not found\r\nContent-Length: 15\r\n\r\nProxy not found", 61 * sizeof(char));
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
-		evbuffer_free(body);
 		evbuffer_free(headers);
 		return;
-	}
-
-	SPAMHAUS_ZEN_ANSWER zen = SpamhausZEN(proxy->ip);
-	switch (zen) {
-		case SPAMHAUS_ZEN_ANSWER_SBL:
-			evbuffer_add_reference(body, "sbl", 3 * sizeof(char), NULL, NULL);
-			break;
-		case SPAMHAUS_ZEN_ANSWER_CSS:
-			evbuffer_add_reference(body, "css", 3 * sizeof(char), NULL, NULL);
-			break;
-		case SPAMHAUS_ZEN_ANSWER_XBL:
-			evbuffer_add_reference(body, "xbl", 3 * sizeof(char), NULL, NULL);
-			break;
-		case SPAMHAUS_ZEN_ANSWER_PBL:
-			evbuffer_add_reference(body, "pbl", 3 * sizeof(char), NULL, NULL);
-			break;
-		default:
-			evbuffer_add_reference(body, "cln", 3 * sizeof(char), NULL, NULL);
-			break;
 	}
 
 	evbuffer_add_printf(headers, "%d", 3); // To Content-Length
 	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
 
 	bufferevent_write_buffer(BuffEvent, headers);
-	bufferevent_write_buffer(BuffEvent, body);
-	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+	SpamhausZENAsync(proxy->ip, BuffEvent);
 
 	evbuffer_free(headers);
-	evbuffer_free(body);
 }
 
 void InterfaceRawHttpBL(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
-	struct evbuffer *body = evbuffer_new();
 	INTERFACE_INFO info;
 
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
-		evbuffer_free(body);
 		evbuffer_free(headers);
 		return;
 	}
+
+	bufferevent_write_buffer(BuffEvent, headers);
+	evbuffer_free(headers);
 
 	PROXY *proxy = GetProxyFromUidBuff(Buff);
 
@@ -773,35 +750,11 @@ void InterfaceRawHttpBL(struct bufferevent *BuffEvent, char *Buff)
 		bufferevent_write(BuffEvent, "HTTP/1.1 404 Not found\r\nContent-Length: 15\r\n\r\nProxy not found", 61 * sizeof(char));
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
-		evbuffer_free(body);
-		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
 		return;
 	}
 
-	if (HttpBLAccessKey[0] != 0x00) {
-		HTTPBL_ANSWER answer;
-		HTTP_BL(proxy->ip, HttpBLAccessKey, &answer);
-		if ((answer.crookType & HTTPBL_CROOK_TYPE_COMMENT_SPAMMER) == HTTPBL_CROOK_TYPE_COMMENT_SPAMMER)
-			evbuffer_add_reference(body, "c", 1 * sizeof(char), NULL, NULL);
-		if ((answer.crookType & HTTPBL_CROOK_TYPE_HARVESTER) == HTTPBL_CROOK_TYPE_HARVESTER)
-			evbuffer_add_reference(body, "h", 1 * sizeof(char), NULL, NULL);
-		if ((answer.crookType & HTTPBL_CROOK_TYPE_SUSPICIOUS) == HTTPBL_CROOK_TYPE_SUSPICIOUS)
-			evbuffer_add_reference(body, "s", 1 * sizeof(char), NULL, NULL);
-		if (answer.crookType == HTTPBL_CROOK_TYPE_CLEAN)
-			evbuffer_add_reference(body, "l", 1 * sizeof(char), NULL, NULL);
-		evbuffer_add_printf(body, "%d", answer.score);
-	} else
-		evbuffer_add_reference(body, "N", 1 * sizeof(char), NULL, NULL);
-
-	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
-	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
-
-	bufferevent_write_buffer(BuffEvent, headers);
-	bufferevent_write_buffer(BuffEvent, body);
-	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
-
-	evbuffer_free(headers);
-	evbuffer_free(body);
+	HTTP_BLAsync(proxy->ip, HttpBLAccessKey, BuffEvent);
 }
 
 void InterfaceRawReverseDNS(struct bufferevent *BuffEvent, char *Buff)
