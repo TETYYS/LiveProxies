@@ -1,6 +1,8 @@
 #include "Logger.h"
+#include "Global.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define DEBUG 1
 
@@ -12,25 +14,26 @@ void _Log(char *File, int Line, LOG_LEVEL Level, const char *Format, ...)
 #endif
 	}
 
-
-	switch (Level) {
-		case LOG_LEVEL_SUCCESS: {
-			printf("[OK] ");
-			break;
+	char *time = FormatTime(GetUnixTimestampMilliseconds()); {
+		switch (Level) {
+			case LOG_LEVEL_SUCCESS: {
+				printf("[OK]\t%s ", time);
+				break;
+			}
+			case LOG_LEVEL_ERROR: {
+				printf("[ERROR]\t%s ", time);
+				break;
+			}
+			case LOG_LEVEL_WARNING: {
+				printf("[WARN]\t%s ", time);
+				break;
+			}
+			case LOG_LEVEL_DEBUG: {
+				printf("[DEBUG]\t (%s:%d) %s ", File, Line, time);
+				break;
+			}
 		}
-		case LOG_LEVEL_ERROR: {
-			printf("[ERROR] ");
-			break;
-		}
-		case LOG_LEVEL_WARNING: {
-			printf("[WARN] ");
-			break;
-		}
-		case LOG_LEVEL_DEBUG: {
-			printf("[DEBUG] (%s:%d) ", File, Line);
-			break;
-		}
-	}
+	} free(time);
 
 	va_list args;
 	va_start(args, Format); {

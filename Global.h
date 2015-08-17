@@ -15,6 +15,10 @@
 
 #define arrlen(a) sizeof(a)/sizeof(a[0])
 
+#define CLEAR_BIT(m, x) (m & ~(1 << x))
+#define GET_BIT(m, x) ((m >> x) & 1)
+#define SET_BIT(m, x) (m | (1 << x))
+
 size_t CurrentlyChecking;
 
 double GetUnixTimestampMilliseconds();

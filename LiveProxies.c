@@ -21,6 +21,7 @@
 #include <openssl/rand.h>
 #include <math.h>
 #include "HtmlTemplate.h"
+#include "Websocket.h"
 
 static char *StdinDynamic()
 {
@@ -133,17 +134,19 @@ int main(int argc, char** argv)
 		Log(LOG_LEVEL_WARNING, "No credentials present for interface pages. Access blocked by default.");
 
 	evthread_use_pthreads();
-
 	AuthWebList = NULL;
 	pthread_mutex_init(&AuthWebLock, NULL);
+	pthread_mutex_init(&WebSocketUnfinishedPacketsLock, NULL);
+	pthread_mutex_init(&WebSocketSubscribedClientsLock, NULL);
 	AuthWebCount = 0;
-
 	levRequestBase = event_base_new();
-
 	CurrentlyChecking = 0;
 	SizeUncheckedProxies = 0;
 	SizeCheckedProxies = 0;
-
+	WebSocketUnfinishedPackets = NULL;
+	WebSocketUnfinishedPacketsSize = 0;
+	WebSocketSubscribedClients = NULL;
+	WebSocketSubscribedClientsSize = 0;
 	InterfaceInit();
 	HtmlTemplateLoadAll(); // These two must be called in this order
 	HtmlTemplateMimeTypesInit(); // These two must be called in this order

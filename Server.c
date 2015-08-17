@@ -21,8 +21,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <math.h>
-#include <libconfig.h>
 #include "HtmlTemplate.h"
+#include "Websocket.h"
+#if DEBUG
+#include <valgrind/memcheck.h>
+#endif
 
 static const char *GetCountryByIPv6Map(IPv6Map *In)
 {
@@ -262,7 +265,7 @@ freeProxy:
 	}
 }
 
-static void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx)
+void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx)
 {
 	if ((Event & BEV_EVENT_EOF == BEV_EVENT_EOF || Event & BEV_EVENT_TIMEOUT == BEV_EVENT_TIMEOUT)) {
 		//Log(LOG_LEVEL_DEBUG, "BuffEvent free %p event %x", BuffEvent, Event);
@@ -300,35 +303,39 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 
 		Log(LOG_LEVEL_DEBUG, "Server -> %s", path);
 
-		if (strncmp(path, "/prxchk", 7) == 0 && pathLen == 7) {
+		if (pathLen == 7 && strncmp(path, "/prxchk", 7) == 0) {
 			bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			ProxyCheckLanding(BuffEvent, Buff);
-		} else if (strncmp(path, "/ifaceu", 7) == 0 && pathLen == 7)
+		} else if (pathLen == 7 && strncmp(path, "/ifaceu", 7) == 0)
 			InterfaceUncheckedProxies(BuffEvent, Buff);
-		else if (strncmp(path, "/iface", 6) == 0 && pathLen == 6)
+		else if (pathLen == 6 && strncmp(path, "/iface", 6) == 0)
 			InterfaceProxies(BuffEvent, Buff);
-		else if (strncmp(path, "/prxsrc", 7) == 0 && pathLen == 7)
+		else if (pathLen == 7 && strncmp(path, "/prxsrc", 7) == 0)
 			InterfaceProxySources(BuffEvent, Buff);
-		else if (strncmp(path, "/stats", 6) == 0 && pathLen == 6)
+		else if (pathLen == 6 && strncmp(path, "/stats", 6) == 0)
 			InterfaceStats(BuffEvent, Buff);
-		else if (strncmp(path, "/zen", 4) == 0 && pathLen >= 4) {
+		else if (pathLen > 4 && strncmp(path, "/zen", 4) == 0) {
 			freeBufferEvent = false; // Free'd in second stage of ZEN DNS lookup
 			InterfaceRawSpamhausZen(BuffEvent, Buff);
-		} else if (strncmp(path, "/httpbl", 7) == 0 && pathLen >= 7) {
+		} else if (pathLen > 7 && strncmp(path, "/httpbl", 7) == 0) {
 			freeBufferEvent = false; // Free'd in second stage of Http:BL DNS lookup
 			InterfaceRawHttpBL(BuffEvent, Buff);
-		} else if (strncmp(path, "/rdns", 5) == 0 && pathLen >= 5)
+		} else if (pathLen > 5 && strncmp(path, "/rdns", 5) == 0)
 			InterfaceRawReverseDNS(BuffEvent, Buff);
-		else if (strncmp(path, "/check", 6) == 0 && pathLen >= 6) {
+		else if (pathLen > 6 && strncmp(path, "/check", 6) == 0) {
 			Log(LOG_LEVEL_DEBUG, "/check on %p", BuffEvent);
 			freeBufferEvent = false; // Free'd in second stage of raw recheck
 			InterfaceRawRecheck(BuffEvent, Buff);
-		} else if (strncmp(path, "/", 1) == 0 && pathLen == 1)
+		} else if (pathLen == 1 && strncmp(path, "/", 1) == 0)
 			InterfaceHome(BuffEvent, Buff);
 		else if (pathLen > 8 && strncmp(path, "/recheck", 8) == 0) {
 			if (HtmlTemplateUseStock)
 				freeBufferEvent = false; // Free'd in second stage of stock html recheck
 			InterfaceProxyRecheck(BuffEvent, Buff);
+		} else if (pathLen == 4 && strncmp(path, "/wsn", 4) == 0) {
+			// Websocket notifications
+			WebsocketSwitch(BuffEvent, Buff);
+			freeBufferEvent = false; // Handled by websocket file
 		} else {
 			if (HtmlTemplateUseStock)
 				goto free;
@@ -387,7 +394,7 @@ free:
 	if (freeBufferEvent) {
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free on write %p", BuffEvent);
 		if (evbuffer_get_length(bufferevent_get_output(BuffEvent)))
-			bufferevent_setcb(BuffEvent, HTTPRead, bufferevent_free, ServerEvent, NULL);
+			bufferevent_setcb(BuffEvent, ServerRead, bufferevent_free, ServerEvent, NULL);
 		else
 			bufferevent_free(BuffEvent);
 	}
@@ -400,19 +407,86 @@ typedef enum _SERVER_TYPE {
 	SSL6
 } SERVER_TYPE;
 
-void HTTPRead(struct bufferevent *BuffEvent, void *Ctx)
+static void HexDump(char *desc, void *addr, int len)
+{
+	int i;
+	unsigned char buff[17];
+	unsigned char *pc = (unsigned char*)addr;
+
+	// Output description if given.
+	if (desc != NULL)
+		printf("%s:\n", desc);
+
+	// Process every byte in the data.
+	for (i = 0; i < len; i++) {
+		// Multiple of 16 means new line (with line offset).
+
+		if ((i % 16) == 0) {
+			// Just don't print ASCII for the zeroth line.
+			if (i != 0)
+				printf("  %s\n", buff);
+
+			// Output the offset.
+			printf("  %04x ", i);
+		}
+
+		// Now the hex code for the specific character.
+		printf(" %02x", pc[i]);
+
+		// And store a printable ASCII character for later.
+		if ((pc[i] < 0x20) || (pc[i] > 0x7e))
+			buff[i % 16] = '.';
+		else
+			buff[i % 16] = pc[i];
+		buff[(i % 16) + 1] = '\0';
+	}
+
+	// Pad out last line if not exactly 16 characters.
+	while ((i % 16) != 0) {
+		printf("   ");
+		i++;
+	}
+
+	// And print the final ASCII bit.
+	printf("  %s\n", buff);
+}
+
+void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 {
 	Log(LOG_LEVEL_DEBUG, "HTTPRead");
 	struct evbuffer *evBuff = bufferevent_get_input(BuffEvent);
+
 	size_t len = evbuffer_get_length(evBuff);
-	if (len < 4) {
+	Log(LOG_LEVEL_DEBUG, "HTTPRead len %d", len);
+	if (len <= 3) {
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
 		bufferevent_free(BuffEvent);
 		return;
 	}
 
 	char *buff = malloc(len + 1);
-	evbuffer_remove(evBuff, buff, len);
+	evbuffer_copyout(evBuff, buff, len);
+	HexDump("Server buffer", buff, len);
+
+#if DEBUG
+	VALGRIND_MAKE_MEM_DEFINED(buff, len + 1);
+#endif
+
+	// Websockets
+	uint8_t opcode = (*buff & 0xF); // get rid of 4 bits on left
+	Log(LOG_LEVEL_DEBUG, "Server read websocket opcode %x", opcode);
+	if ((opcode == WEBSOCKET_OPCODE_CONTINUATION || opcode == WEBSOCKET_OPCODE_CLOSE || opcode == WEBSOCKET_OPCODE_PING || opcode == WEBSOCKET_OPCODE_PONG || opcode == WEBSOCKET_OPCODE_UNICODE) &&
+		!GET_BIT(*buff, 6) && !GET_BIT(*buff, 5) && !GET_BIT(*buff, 4)) {
+		// Websocket message (probably)
+		Log(LOG_LEVEL_DEBUG, "Server read detected websocket");
+		evbuffer_drain(evBuff, len); // No clear data function?
+		buff = realloc(buff, len);
+		Log(LOG_LEVEL_DEBUG, "Server read REALLOC");
+		WebsocketLanding(BuffEvent, buff, len);
+		free(buff);
+		Log(LOG_LEVEL_DEBUG, "Server read landing done");
+		return;
+	}
 
 	for (size_t x = 0;x < len;x++) {
 		// Stop the Ruse man
@@ -427,11 +501,15 @@ void HTTPRead(struct bufferevent *BuffEvent, void *Ctx)
 	if (buff[len - 1] == '\n' && buff[len - 2] == '\r' && buff[len - 3] == '\n' && buff[len - 4] == '\r')
 		valid = true;
 	if (!valid) {
-		if (buff[len - 1] != '\n' || buff[len - 2] != '\n')
+		if (buff[len - 1] != '\n' || buff[len - 2] != '\n') {
+			// Not full message
+			// We got data in evbuffer, just return and wait for remaining data
 			return;
+		}
 	}
 
 	buff[len] = 0x00;
+	evbuffer_drain(evBuff, len); // No clear data function?
 
 	ServerLanding(BuffEvent, buff);
 }
@@ -448,7 +526,7 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 			Log(LOG_LEVEL_DEBUG, "ServerAccept: HTTP");
 			struct bufferevent *bev = bufferevent_socket_new(base, Fd, BEV_OPT_CLOSE_ON_FREE);
 			//bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
-			bufferevent_setcb(bev, HTTPRead, NULL, ServerEvent, NULL);
+			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, NULL);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
 		}
@@ -458,7 +536,7 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 			Log(LOG_LEVEL_DEBUG, "ServerAccept: SSL");
 			struct bufferevent *bev = bufferevent_openssl_socket_new(base, Fd, SSL_new(levServerSSL), BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
 			//bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
-			bufferevent_setcb(bev, HTTPRead, NULL, ServerEvent, NULL);
+			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, NULL);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
 		}

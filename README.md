@@ -73,12 +73,10 @@ Currently, program doesn't slow down at all at 7000 simultaneous proxy checks, b
 
 ## TODO
  - Provide more services in full proxy check
- - - ~~Project Honey Pot Http:BL + access key~~
- - - Test proxy against legit pages
- - - ...
  - Provide more interactivity on interface pages
  - Implement checked proxy checking.
- - Async DNS operations
+ - ~~Async DNS operations~~
+ - Revise proxy timeout system
  - ...
  
 
