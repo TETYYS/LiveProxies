@@ -1,6 +1,6 @@
 LiveProxies
 ===================
-Latest Version: **0.6.4** (pre-release)
+Latest Version: **0.7.0** (pre-release)
 
 LiveProxies is a [high-performance](#performance) asynchronous proxy checker.
 
