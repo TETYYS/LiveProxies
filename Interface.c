@@ -53,11 +53,74 @@ void InterfaceInit()
 	InterfacePages[8].page = INTERFACE_PAGE_CHECK;
 }
 
+// Please lock AuthWebLock
+static void AuthWebRemove(size_t Index)
+{
+	free(AuthWebList[Index]->username);
+	free(AuthWebList[Index]->rndVerify);
+	free(AuthWebList[Index]->ip);
+	free(AuthWebList[Index]);
+	AuthWebCount--;
+	if (AuthWebCount > 0)
+		AuthWebList[Index] = AuthWebList[AuthWebCount];
+	AuthWebList = realloc(AuthWebList, AuthWebCount * sizeof(*AuthWebList));
+}
+
 static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, INTERFACE_INFO *InterfaceInfo, bool AllowOnlyCookie)
 {
 	InterfaceInfo->user = NULL;
 	if (AuthLocalList == NULL)
 		goto end;
+
+	/* Authorize by cookie */ {
+		if (AuthWebList == NULL)
+			goto endCookie;
+
+		char *cookie;
+
+		if (!ServerFindHeader("Cookie: ", Buff, &cookie, NULL, NULL))
+			goto endCookie;
+
+		char *lpAuth; // not this is not long pointer
+		char *cookieLpAuth = strstr(cookie, AUTH_COOKIE);
+		if (cookieLpAuth == NULL)
+			goto endCookie;
+
+		char *cookieDelimiter = strchr(cookieLpAuth, '=');
+		if (cookieDelimiter == NULL)
+			goto endCookie;
+
+		*cookieDelimiter = 0x00;
+		lpAuth = cookieDelimiter + 1;
+		char *nextCookie = strchr(lpAuth, ';');
+		if (nextCookie != NULL)
+			nextCookie = 0x00;
+
+		pthread_mutex_lock(&AuthWebLock); {
+			for (size_t x = 0; x < AuthWebCount; x++) {
+				if (strcmp(AuthWebList[x]->rndVerify, lpAuth) != 0) {
+					if (AuthWebList[x]->expiry < (GetUnixTimestampMilliseconds() / 1000))
+						AuthWebRemove(x);
+					continue;
+				}
+				if (AuthWebList[x]->expiry >= (GetUnixTimestampMilliseconds() / 1000)) {
+					free(cookie);
+					if (!AllowOnlyCookie)
+						evbuffer_add_reference(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char), NULL, NULL);
+					InterfaceInfo->user = AuthWebList[x]->username;
+					AuthWebList[x]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
+					pthread_mutex_unlock(&AuthWebLock);
+					return true;
+				} else {
+					AuthWebRemove(x);
+					pthread_mutex_unlock(&AuthWebLock);
+					goto endCookie; // Auth token expired
+				}
+				break;
+			}
+		}
+	} /* End authorize by cookie */
+endCookie:
 
 	if (!AllowOnlyCookie) { /* Authorize by login */
 		char *username, *password;
@@ -92,138 +155,89 @@ static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, INTERFACE_I
 				username = authStr;
 			}
 
-			pthread_mutex_lock(&AuthLocalLock); {
-				for (size_t x = 0; x < AuthLocalCount; x++) {
-					if (strcmp(AuthLocalList[x]->username, username) != 0)
-						continue;
+			pthread_mutex_lock(&AuthLocalLock);
+			for (size_t x = 0; x < AuthLocalCount; x++) {
+				if (strcmp(AuthLocalList[x]->username, username) != 0)
+					continue;
 
-					char *saltb64;
-					uint8_t *salt;
-					size_t saltLen;
-					char *firstDelimiter = strchr(AuthLocalList[x]->password, '$');
-					char *secondDelimiter = strchr(firstDelimiter + (1 * sizeof(char)), '$');
+				char *saltb64;
+				uint8_t *salt;
+				size_t saltLen;
+				char *firstDelimiter = strchr(AuthLocalList[x]->password, '$');
+				char *secondDelimiter = strchr(firstDelimiter + (1 * sizeof(char)), '$');
 
-					size_t iterations = atoll(AuthLocalList[x]->password);
-					size_t saltb64Len = (secondDelimiter - (firstDelimiter + 1)) * (sizeof(char));
+				size_t iterations = atoll(AuthLocalList[x]->password);
+				size_t saltb64Len = (secondDelimiter - (firstDelimiter + 1)) * (sizeof(char));
 
-					saltb64 = malloc(saltb64Len + 1 /* NUL */); {
-						memcpy(saltb64, firstDelimiter + (1 * sizeof(char)), saltb64Len);
-						saltb64[saltb64Len] = 0x00;
-						Base64Decode(saltb64, &salt, &saltLen);
-					} free(saltb64);
+				saltb64 = malloc(saltb64Len + 1 /* NUL */); {
+					memcpy(saltb64, firstDelimiter + (1 * sizeof(char)), saltb64Len);
+					saltb64[saltb64Len] = 0x00;
+					Base64Decode(saltb64, &salt, &saltLen);
+				} free(saltb64);
 
-					char *pbkdf2 = PBKDF2_HMAC_SHA_512Ex(password, strlen(password), salt, saltLen, iterations); // TODO: Possible DoS, needs login limit
-					free(salt);
+				char *pbkdf2 = PBKDF2_HMAC_SHA_512Ex(password, strlen(password), salt, saltLen, iterations); // TODO: Possible DoS, needs login limit
+				free(salt);
 
-					if (strcmp(AuthLocalList[x]->password, pbkdf2) == 0) {
-						free(pbkdf2);
+				if (strcmp(AuthLocalList[x]->password, pbkdf2) == 0) {
+					pthread_mutex_unlock(&AuthLocalLock);
+					free(pbkdf2);
 
-						IPv6Map *ip = GetIPFromHSock(Fd);
+					IPv6Map *ip = GetIPFromHSock(Fd);
 
-						pthread_mutex_lock(&AuthWebLock); {
-							for (size_t x = 0; x < AuthWebCount; x++) {
-								if (IPv6MapCompare(ip, AuthWebList[x]->ip)) {
-									free(ip);
-									free(authStr);
+					pthread_mutex_lock(&AuthWebLock); {
+						for (size_t x = 0; x < AuthWebCount; x++) {
+							if (IPv6MapCompare(ip, AuthWebList[x]->ip)) {
+								free(ip);
+								free(authStr);
 
-									if (AuthWebList[x]->expiry > (GetUnixTimestampMilliseconds() / 1000)) {
-										pthread_mutex_unlock(&AuthLocalLock);
-										pthread_mutex_unlock(&AuthWebLock);
-										evbuffer_add_reference(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char), NULL, NULL);
-										InterfaceInfo->user = AuthWebList[x]->username;
-										return true;
-									} else {
-										free(AuthWebList[x]->username);
-										free(AuthWebList[x]->rndVerify);
-										free(AuthWebList[x]->ip);
-										free(AuthWebList[x]);
-										AuthWebList[x] = AuthWebList[AuthWebCount];
+								if (AuthWebList[x]->expiry >= (GetUnixTimestampMilliseconds() / 1000)) {
+									AuthWebList[x]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
+									InterfaceInfo->user = AuthWebList[x]->username;
+									pthread_mutex_unlock(&AuthWebLock);
+									evbuffer_add_reference(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char), NULL, NULL);
+									return true;
+								} else {
+									AuthWebRemove(x);
 
-										pthread_mutex_unlock(&AuthLocalLock);
-										pthread_mutex_unlock(&AuthWebLock);
-										goto end; // Auth expired
-									}
+									pthread_mutex_unlock(&AuthWebLock);
+									goto end; // Auth expired
+								}
+							} else {
+								if (AuthWebList[x]->expiry < (GetUnixTimestampMilliseconds() / 1000)) {
+									AuthWebRemove(x);
 								}
 							}
+						}
 
-							if (AuthWebList == NULL)
-								AuthWebList = malloc(++AuthWebCount * sizeof(AuthWebList));
+						if (AuthWebList == NULL)
+							AuthWebList = malloc(++AuthWebCount * sizeof(*AuthWebList));
 
-							AuthWebList[AuthWebCount - 1] = malloc(sizeof(AUTH_WEB));
-							AuthWebList[AuthWebCount - 1]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
-							AuthWebList[AuthWebCount - 1]->username = malloc(strlen(username) + 1 /* NUL */);
-							AuthWebList[AuthWebCount - 1]->ip = ip;
-							strcpy(AuthWebList[AuthWebCount - 1]->username, username);
-							InterfaceInfo->user = AuthWebList[AuthWebCount - 1]->username;
+						AuthWebList[AuthWebCount - 1] = malloc(sizeof(AUTH_WEB));
+						AuthWebList[AuthWebCount - 1]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
+						AuthWebList[AuthWebCount - 1]->username = malloc(strlen(username) + 1 /* NUL */);
+						AuthWebList[AuthWebCount - 1]->ip = ip;
+						strcpy(AuthWebList[AuthWebCount - 1]->username, username);
+						InterfaceInfo->user = AuthWebList[AuthWebCount - 1]->username;
 
-							free(authStr); // invalidates username and password from headers
+						free(authStr); // invalidates username and password from headers
 
-							uint8_t randBytes[64];
-							RAND_pseudo_bytes(randBytes, 64);
-							size_t b64VerifyLen = Base64Encode(randBytes, 64, &(AuthWebList[AuthWebCount - 1]->rndVerify));
+						uint8_t randBytes[SIZE_RND_VERIFY];
+						RAND_pseudo_bytes(randBytes, SIZE_RND_VERIFY);
+						size_t b64VerifyLen = Base64Encode(randBytes, SIZE_RND_VERIFY, &(AuthWebList[AuthWebCount - 1]->rndVerify));
 
-							evbuffer_add_printf(OutBuff, "HTTP/1.1 200 OK\r\nSet-Cookie: LPAuth=%s\r\nContent-Length: ", AuthWebList[AuthWebCount - 1]->rndVerify);
-						} pthread_mutex_unlock(&AuthWebLock);
-
-						pthread_mutex_unlock(&AuthLocalLock);
-						return true;
-					} else
-						free(pbkdf2);
+						evbuffer_add_printf(OutBuff, "HTTP/1.1 200 OK\r\nSet-Cookie: "AUTH_COOKIE"=%s\r\nContent-Length: ", AuthWebList[AuthWebCount - 1]->rndVerify);
+					} pthread_mutex_unlock(&AuthWebLock);
+					return true;
+				} else {
+					pthread_mutex_unlock(&AuthLocalLock);
+					free(pbkdf2);
 				}
-			} pthread_mutex_unlock(&AuthLocalLock);
+				break;
+			}
 
 			free(authStr);
 		}
 	} /* End authorize by login */
-
-	/* Authorize by cookie */ {
-		if (AuthWebList == NULL)
-			goto end;
-
-		char *cookie;
-
-		if (!ServerFindHeader("Cookie: ", Buff, &cookie, NULL, NULL))
-			goto end;
-
-		char *lpAuth; // not this is not long pointer
-		char *cookieLpAuth = strstr(cookie, "LPAuth");
-		if (cookieLpAuth == NULL)
-			goto end;
-
-		char *cookieDelimiter = strchr(cookieLpAuth, '=');
-		if (cookieDelimiter == NULL)
-			goto end;
-
-		*cookieDelimiter = 0x00;
-		lpAuth = cookieDelimiter + 1;
-		char *nextCookie = strchr(lpAuth, ';');
-		if (nextCookie != NULL)
-			nextCookie = 0x00;
-
-		pthread_mutex_lock(&AuthWebLock); {
-			for (size_t x = 0; x < AuthWebCount; x++) {
-				if (strcmp(AuthWebList[x]->rndVerify, lpAuth) != 0)
-					continue;
-				if (AuthWebList[x]->expiry > (GetUnixTimestampMilliseconds() / 1000)) {
-					free(cookie);
-					pthread_mutex_unlock(&AuthWebLock);
-					if (!AllowOnlyCookie)
-						evbuffer_add_reference(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char), NULL, NULL);
-					InterfaceInfo->user = AuthWebList[x]->username;
-					return true;
-				} else {
-					free(cookie);
-					free(AuthWebList[x]->username);
-					free(AuthWebList[x]->rndVerify);
-					free(AuthWebList[x]->ip);
-					free(AuthWebList[x]);
-					AuthWebList[x] = AuthWebList[AuthWebCount];
-					pthread_mutex_unlock(&AuthWebLock);
-					goto end; // Auth token expired
-				}
-			}
-		}
-	} /* End authorize by cookie */
 
 end:
 	evbuffer_add_printf(OutBuff, "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"%s\"\r\nContent-Length: 0\r\n\r\n", HTTP_AUTHORIZATION_REALM);
@@ -307,7 +321,7 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 		pthread_mutex_lock(&LockCheckedProxies); {
 			evbuffer_add_printf(body, "<center>Checked proxies: %d, currently checking: %d</center><br /><table><tbody><tr><th>IP:Port</th><th>Type</th><th>Country</th><th>Anonymity</th><th>Connection latency (ms)</th><th>HTTP/S latency (ms)</th><th>Live since</th><th>Last checked</th><th>Retries</th><th>Successful checks</th><th>Failed checks</th><th>Full check</th></tr>", SizeCheckedProxies, CurrentlyChecking);
 
-			for (size_t x = 0; x < SizeCheckedProxies; x++) {
+			for (uint64_t x = 0; x < SizeCheckedProxies; x++) {
 				evbuffer_add_reference(body, "<tr>", 4 * sizeof(char), NULL, NULL);
 
 				char *ip = IPv6MapToString2(CheckedProxies[x]->ip); {
@@ -394,7 +408,7 @@ void InterfaceUncheckedProxies(struct bufferevent *BuffEvent, char *Buff)
 
 		pthread_mutex_lock(&LockUncheckedProxies); {
 			evbuffer_add_printf(body, "<center>Unchecked proxies: %d, currently checking: %d</center><br /><table><tbody><tr><th>IP:Port</th><th>Type</th>\n<th>Currently checking</th><th>Retries</th><th>Rechecking</th></tr>", SizeUncheckedProxies, CurrentlyChecking);
-			for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+			for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 				evbuffer_add_reference(body, "<tr>", 4 * sizeof(char), NULL, NULL);
 
 				char *ip = IPv6MapToString2(UncheckedProxies[x]->ip); {

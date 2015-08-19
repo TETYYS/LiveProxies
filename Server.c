@@ -134,7 +134,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 		free(keyRaw);
 
 		pthread_mutex_lock(&LockUncheckedProxies); {
-			for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+			for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 				if (memcmp(key, UncheckedProxies[x]->hash, 512 / 8) == 0) {
 					UProxy = UncheckedProxies[x];
 					pthread_mutex_lock(&(UProxy->processing));
@@ -466,26 +466,29 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 
 	char *buff = malloc(len + 1);
 	evbuffer_copyout(evBuff, buff, len);
-	HexDump("Server buffer", buff, len);
 
 #if DEBUG
 	VALGRIND_MAKE_MEM_DEFINED(buff, len + 1);
 #endif
 
+	// HexDump("Server buffer", buff, len);
+
 	// Websockets
-	uint8_t opcode = (*buff & 0xF); // get rid of 4 bits on left
-	Log(LOG_LEVEL_DEBUG, "Server read websocket opcode %x", opcode);
-	if ((opcode == WEBSOCKET_OPCODE_CONTINUATION || opcode == WEBSOCKET_OPCODE_CLOSE || opcode == WEBSOCKET_OPCODE_PING || opcode == WEBSOCKET_OPCODE_PONG || opcode == WEBSOCKET_OPCODE_UNICODE) &&
-		!GET_BIT(*buff, 6) && !GET_BIT(*buff, 5) && !GET_BIT(*buff, 4)) {
-		// Websocket message (probably)
-		Log(LOG_LEVEL_DEBUG, "Server read detected websocket");
-		evbuffer_drain(evBuff, len); // No clear data function?
-		buff = realloc(buff, len);
-		Log(LOG_LEVEL_DEBUG, "Server read REALLOC");
-		WebsocketLanding(BuffEvent, buff, len);
-		free(buff);
-		Log(LOG_LEVEL_DEBUG, "Server read landing done");
-		return;
+	if (!HtmlTemplateUseStock) {
+		uint8_t opcode = (*buff & 0xF); // get rid of 4 bits on left
+		Log(LOG_LEVEL_DEBUG, "Server read websocket opcode %x", opcode);
+		if ((opcode == WEBSOCKET_OPCODE_CONTINUATION || opcode == WEBSOCKET_OPCODE_CLOSE || opcode == WEBSOCKET_OPCODE_PING || opcode == WEBSOCKET_OPCODE_PONG || opcode == WEBSOCKET_OPCODE_UNICODE) &&
+			!GET_BIT(*buff, 6) && !GET_BIT(*buff, 5) && !GET_BIT(*buff, 4)) {
+			// Websocket message (probably)
+			Log(LOG_LEVEL_DEBUG, "Server read detected websocket");
+			evbuffer_drain(evBuff, len); // No clear data function?
+			buff = realloc(buff, len);
+			Log(LOG_LEVEL_DEBUG, "Server read REALLOC");
+			WebsocketLanding(BuffEvent, buff, len);
+			free(buff);
+			Log(LOG_LEVEL_DEBUG, "Server read landing done");
+			return;
+		}
 	}
 
 	for (size_t x = 0;x < len;x++) {
@@ -671,7 +674,7 @@ static void ServerUDP(int hSock)
 
 		IPv6Map *ip = RawToIPv6Map(&remote); {
 			pthread_mutex_lock(&LockUncheckedProxies); {
-				for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+				for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 					if (memcmp(buff, UncheckedProxies[x]->hash, 512 / 8) == 0 && IPv6MapCompare(ip, UncheckedProxies[x]->ip)) {
 						UProxy = UncheckedProxies[x];
 						pthread_mutex_lock(&(UProxy->processing));

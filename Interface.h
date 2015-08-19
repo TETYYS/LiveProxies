@@ -5,6 +5,8 @@
 #include "IPv6Map.h"
 
 #define HTTP_AUTHORIZATION_REALM "Live Proxies interface - private access"
+#define SIZE_RND_VERIFY 64
+#define AUTH_COOKIE "LPAuth"
 
 typedef enum _INTERFACE_PAGES {
 	INTERFACE_PAGE_HOME = 0,
@@ -33,7 +35,7 @@ typedef struct _INTERFACE_INFO {
 
 typedef struct _AUTH_WEB {
 	char *username;
-	char *rndVerify;
+	uint8_t *rndVerify;
 	uint64_t expiry;
 	IPv6Map *ip;
 } AUTH_WEB;

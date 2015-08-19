@@ -453,7 +453,7 @@ void CheckLoop()
 		pthread_mutex_lock(&LockUncheckedProxies); {
 			Log(LOG_LEVEL_DEBUG, "CheckLoop: Looping through UProxies...");
 
-			for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+			for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 				if (CurrentlyChecking > SimultaneousChecks)
 					break;
 				if (!(UncheckedProxies[x]->checking) && UncheckedProxies[x]->singleCheckCallback == NULL) {

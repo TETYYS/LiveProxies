@@ -27,3 +27,5 @@ char *SSLPublicKey;
 char *SSLPrivateKey;
 char *SSLCipherList;
 uint16_t SSLServerPort;
+
+uint64_t WSMessageIntervalMs;

@@ -13,6 +13,7 @@
 #include <event2/event.h>
 #include <assert.h>
 #include "Base64.h"
+#include "Websocket.h"
 
 static bool MultiFlag(uint64_t Flag)
 {
@@ -45,7 +46,7 @@ char *ProxyGetTypeString(PROXY_TYPE In)
 bool ProxyAdd(PROXY *Proxy)
 {
 	pthread_mutex_lock(&LockCheckedProxies); {
-		for (uint32_t x = 0; x < SizeCheckedProxies; x++) {
+		for (uint64_t x = 0; x < SizeCheckedProxies; x++) {
 			if (memcmp(Proxy->ip->Data, CheckedProxies[x]->ip->Data, IPV6_SIZE) == 0 && Proxy->port == CheckedProxies[x]->port && Proxy->type == CheckedProxies[x]->type) {
 				CheckedProxies[x]->anonymity = Proxy->anonymity;
 				CheckedProxies[x]->failedChecks = Proxy->failedChecks;
@@ -59,9 +60,14 @@ bool ProxyAdd(PROXY *Proxy)
 				return false;
 			}
 		}
-		CheckedProxies = (PROXY**)realloc(CheckedProxies, ++SizeCheckedProxies * sizeof(CheckedProxies));
+		SizeCheckedProxies++;
+		CheckedProxies = realloc(CheckedProxies, sizeof(CheckedProxies) * SizeCheckedProxies);
 		CheckedProxies[SizeCheckedProxies - 1] = Proxy;
 	} pthread_mutex_unlock(&LockCheckedProxies);
+
+	uint64_t network = htobe64(SizeCheckedProxies);
+	WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES);
+
 	return true;
 }
 
@@ -69,7 +75,7 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 {
 	uint8_t ret = 0;
 	pthread_mutex_lock(&LockUncheckedProxies); {
-		for (uint32_t x = 0; x < SizeUncheckedProxies; x++) {
+		for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 			if (memcmp(UProxy->hash, UncheckedProxies[x]->hash, 512 / 8) == 0) {
 				char *ip = IPv6MapToString2(UProxy->ip); {
 					Log(LOG_LEVEL_WARNING, "Warning: tried to add already added unchecked proxy (%s:%d) (type %d)", ip, UProxy->port, UProxy->type);
@@ -91,9 +97,14 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 		}
 	} else {
 		pthread_mutex_lock(&LockUncheckedProxies); {
-			UncheckedProxies = (UNCHECKED_PROXY**)realloc(UncheckedProxies, sizeof(UncheckedProxies) * ++SizeUncheckedProxies);
+			SizeUncheckedProxies++;
+			UncheckedProxies = realloc(UncheckedProxies, sizeof(UncheckedProxies) * SizeUncheckedProxies);
 			UncheckedProxies[SizeUncheckedProxies - 1] = UProxy;
 		} pthread_mutex_unlock(&LockUncheckedProxies);
+
+		uint64_t network = htobe64(SizeUncheckedProxies);
+		WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES);
+
 		ret++;
 	}
 	return ret;
@@ -104,17 +115,22 @@ bool UProxyRemove(UNCHECKED_PROXY *UProxy)
 	bool found = false;
 
 	pthread_mutex_lock(&LockUncheckedProxies); {
-		for (uint32_t x = 0; x < SizeUncheckedProxies; x++) {
+		for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 			if (UProxy == UncheckedProxies[x]) {
 				UProxyFree(UncheckedProxies[x]);
 				SizeUncheckedProxies--;
-				UncheckedProxies[x] = UncheckedProxies[SizeUncheckedProxies];
-				UncheckedProxies = (UNCHECKED_PROXY**)realloc(UncheckedProxies, SizeUncheckedProxies * sizeof(UncheckedProxies));
+				if (SizeUncheckedProxies > 0)
+					UncheckedProxies[x] = UncheckedProxies[SizeUncheckedProxies];
+				UncheckedProxies = realloc(UncheckedProxies, SizeUncheckedProxies * sizeof(UncheckedProxies));
 				found = true;
 				break;
 			}
 		}
 	} pthread_mutex_unlock(&LockUncheckedProxies);
+
+	uint64_t network = htobe64(SizeUncheckedProxies);
+	WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES);
+
 	Log(LOG_LEVEL_DEBUG, "UProxyRemove: size %d", SizeUncheckedProxies);
 	return found;
 }
@@ -124,17 +140,22 @@ bool ProxyRemove(PROXY *Proxy)
 	bool found = false;
 
 	pthread_mutex_lock(&LockCheckedProxies); {
-		for (uint32_t x = 0; x < SizeCheckedProxies; x++) {
+		for (uint64_t x = 0; x < SizeCheckedProxies; x++) {
 			if (Proxy == CheckedProxies[x]) {
 				ProxyFree(CheckedProxies[x]);
 				SizeCheckedProxies--;
-				CheckedProxies[x] = CheckedProxies[SizeCheckedProxies];
-				CheckedProxies = (PROXY**)realloc(CheckedProxies, SizeCheckedProxies * sizeof(CheckedProxies));
+				if (SizeCheckedProxies > 0)
+					CheckedProxies[x] = CheckedProxies[SizeCheckedProxies];
+				CheckedProxies = realloc(CheckedProxies, SizeCheckedProxies * sizeof(CheckedProxies));
 				found = true;
 				break;
 			}
 		}
 	} pthread_mutex_unlock(&LockCheckedProxies);
+
+	uint64_t network = htobe64(SizeCheckedProxies);
+	WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES);
+
 	return found;
 }
 
@@ -207,7 +228,7 @@ PROXY *GetProxyFromUid(char *Uid)
 		}
 
 		pthread_mutex_lock(&LockCheckedProxies); {
-			for (size_t x = 0;x < SizeCheckedProxies;x++) {
+			for (uint64_t x = 0;x < SizeCheckedProxies;x++) {
 				if (memcmp(uid, CheckedProxies[x]->ip->Data, IPV6_SIZE) == 0 && *((uint16_t*)(uid + IPV6_SIZE)) == CheckedProxies[x]->port && *((PROXY_TYPE*)(uid + IPV6_SIZE + sizeof(uint16_t))) == CheckedProxies[x]->type) {
 					proxy = CheckedProxies[x];
 					break;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IPv6Map.h"
+#include "Interface.h"
 #include <event2/bufferevent.h>
 #include <event2/event.h>
 #include <pthread.h>
@@ -15,15 +16,24 @@ typedef struct _WEB_SOCKET_UNFINISHED_PACKET {
 	struct event *timeout;
 } WEB_SOCKET_UNFINISHED_PACKET;
 
+#define WEBSOCKET_TOTAL_SERVER_COMMANDS 2
+
 typedef enum _WEBSOCKET_SERVER_COMMANDS {
 	WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES = 0x01,
 	WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES = 0x02
-} WEBSOCKET_SERVER_NOTIFICATION_COMMANDS;
+} WEBSOCKET_SERVER_COMMANDS;
+
+typedef struct _WEB_SOCKET_MESSAGE_INTERVAL {
+	uint64_t lastMessageMs;
+	uint32_t subscription;
+} WEB_SOCKET_MESSAGE_INTERVAL;
 
 typedef struct _WEB_SOCKET_SUBSCRIBED_CLIENT {
 	struct bufferevent *buffEvent;
-	WEBSOCKET_SERVER_NOTIFICATION_COMMANDS subscriptions;
+	uint32_t subscriptions;
 	struct event *timer;
+	WEB_SOCKET_MESSAGE_INTERVAL *lastMessages;
+	size_t lastMessagesSize;
 } WEB_SOCKET_SUBSCRIBED_CLIENT;
 
 typedef enum _WEBSOCKET_OPCODES {
@@ -45,6 +55,8 @@ size_t WebSocketUnfinishedPacketsSize;
 
 void WebsocketSwitch(struct bufferevent *BuffEvent, char *Buff);
 void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t BuffLen);
-void WebsocketTimeout(struct bufferevent *BuffEvent, short Event, void *Ctx);
+void WebsocketUnfinishedPacketTimeout(struct bufferevent *BuffEvent, short Event, void *Ctx);
 void WebsocketClientTimeout(struct bufferevent *BuffEvent, short Event, void *Ctx);
 void WebsocketClientPing(evutil_socket_t fd, short Event, void *BuffEvent);
+
+void WebsocketClientsNotify(void *Message, size_t MessageLen, uint32_t Command);

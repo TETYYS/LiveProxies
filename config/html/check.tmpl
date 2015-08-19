@@ -169,9 +169,6 @@
 											toAppend += "Suspicious\">S</a>";
 											suspicious = true;
 										break;
-										case "l":
-											toAppend += "Clean\"><i class=\"fa fa-check\"></i></a>";
-										break;
 									}
 									blText.append(toAppend);
 								} else {
@@ -184,8 +181,10 @@
 								$('#httpbl').addClass("alert-danger");
 							if (suspicious && !bomb)
 								$('#httpbl').addClass("alert-warning");
-							if (!suspicious && !bomb)
+							if (!suspicious && !bomb) {
 								$('#httpbl').addClass("alert-success");
+								$('#httpblText').append("<a href=\"#\" data-toggle=\"tooltip\" title=\"Clean\"><i class=\"fa fa-check\"></i></a>");
+							}
 							$('[data-toggle="tooltip"]').tooltip();
 							$('#httpblLink').attr('href', '//www.projecthoneypot.org/ip_' + $('#ip').text());
 							$('#httpbl').css({opacity: 0.0, visibility: "visible"}).animate({opacity: 1}, 200);
@@ -218,7 +217,7 @@
 						</div>
 					</div>
 					<div class="col-lg-2 text-right">
-						<img style="height:110px; border:1px solid;" src="/flags/{T_CHECK_COUNTRY_LOWER}.svg">
+						<spam class="flag flag-{T_CHECK_COUNTRY_LOWER} flag-6x" title="{T_CHECK_COUNTRY_FULL}"></span>
 					</div>
 				</div>
 				<div class="row">

@@ -8,6 +8,9 @@
 #include <openssl/sha.h>
 #include <assert.h>
 #include "Config.h"
+#include "Interface.h"
+#include "ProxyLists.h"
+#include "HtmlTemplate.h"
 
 static void HexDump(char *desc, void *addr, int len)
 {
@@ -53,13 +56,39 @@ static void HexDump(char *desc, void *addr, int len)
 	printf("  %s\n", buff);
 }
 
-static uint8_t *WebsocketConstructPacket(uint8_t Opcode, uint8_t *MaskingKey, bool Mask, uint8_t *Payload, uint32_t PayloadLen, OUT size_t *Length)
+static size_t WebsocketPacketLen(bool Mask, uint32_t PayloadLen)
+{
+	uint8_t len7 = 0;
+	uint16_t len16 = 0;
+	uint32_t len32 = 0;
+	size_t maskingKeyOffset;
+	size_t payloadOffset;
+	if (PayloadLen < UINT16_MAX) {
+		len7 = PayloadLen;
+		len16 = 0;
+		len32 = 0;
+		maskingKeyOffset = 2;
+	} else if (PayloadLen >= UINT8_MAX && PayloadLen < UINT16_MAX) {
+		len7 = 126;
+		len16 = PayloadLen;
+		len32 = 0;
+		maskingKeyOffset = 4;
+	} else if (PayloadLen >= UINT16_MAX) {
+		len7 = 127;
+		len16 = 0;
+		len32 = PayloadLen;
+		maskingKeyOffset = 6;
+	} else {
+		assert(false);
+	}
+	payloadOffset = Mask ? maskingKeyOffset + 4 : maskingKeyOffset;
+	return payloadOffset + PayloadLen;
+}
+
+static void WebsocketConstructPacket(uint8_t Opcode, uint8_t *MaskingKey, bool Mask, uint8_t *Payload, uint32_t PayloadLen, OUT uint8_t *Packet)
 {
 	uint8_t binBlock0 = 0;
 	binBlock0 += (1 << 7) /* push FIN */ + Opcode;
-	Log(LOG_LEVEL_DEBUG, "Websocket PACKET CONSTRUCT opcode %x", Opcode);
-	Log(LOG_LEVEL_DEBUG, "Websocket PACKET CONSTRUCT binblock0 %x", binBlock0);
-	HexDump("Payload", Payload, PayloadLen);
 	uint8_t len7 = 0;
 	uint16_t len16 = 0;
 	uint32_t len32 = 0;
@@ -85,35 +114,73 @@ static uint8_t *WebsocketConstructPacket(uint8_t Opcode, uint8_t *MaskingKey, bo
 	}
 	payloadOffset = Mask ? maskingKeyOffset + 4 : maskingKeyOffset;
 
-	Log(LOG_LEVEL_DEBUG, "Websocket PACKET CONSTRUCT maskingKeyOffset %d", maskingKeyOffset);
-	Log(LOG_LEVEL_DEBUG, "Websocket PACKET CONSTRUCT payloadOffset %d", payloadOffset);
-
 	uint8_t binBlock1 = len7;
 	binBlock1 = Mask ? SET_BIT(binBlock1, 7) : CLEAR_BIT(binBlock1, 7);
 
-	uint8_t *packet = malloc(payloadOffset + PayloadLen);
-	packet[0] = binBlock0;
-	packet[1] = binBlock1;
-	if (len7 >= 126)
-		*((uint16_t*)(&packet[2])) = len16;
-	if (len7 == 127)
-		*((uint32_t*)(&packet[6])) = len32;
-	if (Mask)
-		*((uint32_t*)(&packet[maskingKeyOffset])) = *((uint32_t*)MaskingKey);
+	Log(LOG_LEVEL_DEBUG, "binBlock0 %x", binBlock0);
 
-	// TODO: fire up valgrind becaus eit seems that Payload[] is being corrupted at this point
+	Packet[0] = binBlock0;
+	Packet[1] = binBlock1;
+	if (len7 >= 126)
+		*((uint16_t*)(&Packet[2])) = len16;
+	if (len7 == 127)
+		*((uint32_t*)(&Packet[6])) = len32;
+	if (Mask)
+		*((uint32_t*)(&Packet[maskingKeyOffset])) = *((uint32_t*)MaskingKey);
 
 	for (size_t x = 0; x < PayloadLen; x++) {
-		Log(LOG_LEVEL_DEBUG, "Websocket PACKET CONSTRUCT Payload[x] %c, XOR %c", Payload[x], (Payload[x] ^ (Mask ? MaskingKey[x % 4] : 0)));
-		packet[payloadOffset + x] = Payload[x] ^ (Mask ? MaskingKey[x % 4] : 0);
+		Packet[payloadOffset + x] = Payload[x] ^ (Mask ? MaskingKey[x % 4] : 0);
 	}
+}
 
-	HexDump("Payload 2", Payload, PayloadLen);
+void WebsocketClientsNotifyClient(struct bufferevent *BuffEvent, void *Message, size_t MessageLen, uint32_t Command)
+{
+	if (HtmlTemplateUseStock)
+		return;
 
-	HexDump("Websocket out payload", packet + payloadOffset, PayloadLen);
+	uint32_t cmd = htonl(Command);
+	uint8_t packet[WebsocketPacketLen(false, sizeof(cmd) + MessageLen)];
+	uint8_t payload[4 + MessageLen];
+	memcpy(payload, &cmd, sizeof(cmd));
+	memcpy(payload + sizeof(cmd), Message, MessageLen);
 
-	*Length = payloadOffset + PayloadLen;
-	return packet;
+	WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, 0, false, payload, sizeof(cmd) + MessageLen, packet);
+	bufferevent_write(BuffEvent, packet, sizeof(packet));
+
+	Log(LOG_LEVEL_DEBUG, "Client notify sent");
+}
+
+void WebsocketClientsNotify(void *Message, size_t MessageLen, uint32_t Command)
+{
+	if (HtmlTemplateUseStock)
+		return;
+
+	uint32_t cmd = htonl(Command);
+	pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
+		for (size_t x = 0;x < WebSocketSubscribedClientsSize;x++) {
+			if ((WebSocketSubscribedClients[x]->subscriptions & Command) == Command) {
+				WEB_SOCKET_MESSAGE_INTERVAL *msgInterval;
+				for (size_t i = 0;i < WebSocketSubscribedClients[x]->lastMessagesSize;i++) {
+					if (WebSocketSubscribedClients[x]->lastMessages[i].subscription == Command) {
+						if (WebSocketSubscribedClients[x]->lastMessages[i].lastMessageMs + WSMessageIntervalMs > GetUnixTimestampMilliseconds()) {
+							pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
+							return;
+						} else
+							msgInterval = &(WebSocketSubscribedClients[x]->lastMessages[i]);
+					}
+				}
+				uint8_t packet[WebsocketPacketLen(false, sizeof(cmd) + MessageLen)];
+				uint8_t payload[4 + MessageLen];
+				memcpy(payload, &cmd, sizeof(cmd));
+				memcpy(payload + sizeof(cmd), Message, MessageLen);
+
+				WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, 0, false, payload, sizeof(cmd) + MessageLen, packet);
+				bufferevent_write(WebSocketSubscribedClients[x]->buffEvent, packet, sizeof(packet));
+				msgInterval->lastMessageMs = GetUnixTimestampMilliseconds();
+				Log(LOG_LEVEL_DEBUG, "Client notify sent");
+			}
+		}
+	} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
 }
 
 void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t BuffLen)
@@ -138,6 +205,7 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 	|                     Payload Data continued ...                |
 	+---------------------------------------------------------------+
 	*/
+
 	HexDump("WebSocket", Buff, BuffLen);
 
 	uint8_t opcode = (*Buff & 0xF); // get rid of 4 bits on left
@@ -170,16 +238,12 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 		maskingKey = (uint8_t*)(&Buff[2]);
 		payload = (uint8_t*)(&Buff[6]);
 	}
-	Log(LOG_LEVEL_DEBUG, "Websocket PACKET lenEx %d", lenExtended);
-	Log(LOG_LEVEL_DEBUG, "Websocket PACKET len calc %d", ((Buff + BuffLen) - payload));
+
 	if (lenExtended != ((Buff + BuffLen) - payload)) {
 		// stop the ruse man
-		Log(LOG_LEVEL_DEBUG, "Websocket PACKET stopped ruse man");
 		bufferevent_free(BuffEvent);
 		return;
 	}
-
-	Log(LOG_LEVEL_DEBUG, "Websocket PACKET masking key %04x", *maskingKey);
 
 	uint8_t *payLoadDecoded = malloc(lenExtended);
 	for (uint32_t x = 0; x < lenExtended; x++)
@@ -201,15 +265,13 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 			if (WebSocketUnfinishedPackets[foundIndex]->pieceCount > WEB_SOCKETS_MAX_PIECE_COUNT) {
 				// Ok, that's enough, you're out
 				Log(LOG_LEVEL_DEBUG, "Websocket PACKET stopped ruse man");
-				event_active(WebSocketUnfinishedPackets[foundIndex]->timeout, EV_TIMEOUT, 0);
+				event_active(WebSocketUnfinishedPackets[foundIndex]->timeout, EV_TIMEOUT, 0); // stop the ruse man
 				return;
 			}
 
 			WebSocketUnfinishedPackets[foundIndex]->dataLen += lenExtended;
-			pthread_mutex_lock(&WebSocketUnfinishedPacketsLock); {
-				WebSocketUnfinishedPackets[foundIndex]->data = realloc(WebSocketUnfinishedPackets[foundIndex]->data,
-																	   WebSocketUnfinishedPackets[foundIndex]->dataLen);
-			} pthread_mutex_unlock(&WebSocketUnfinishedPacketsLock);
+			WebSocketUnfinishedPackets[foundIndex]->data = realloc(WebSocketUnfinishedPackets[foundIndex]->data,
+																   WebSocketUnfinishedPackets[foundIndex]->dataLen);
 			memcpy(WebSocketUnfinishedPackets[foundIndex]->data + lenExtended, payLoadDecoded, lenExtended);
 			WebSocketUnfinishedPackets[foundIndex]->pieceCount++;
 			Log(LOG_LEVEL_DEBUG, "Websocket PACKET extended unfinished packet");
@@ -219,64 +281,47 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 				assert(WebSocketUnfinishedPacketsSize == 0);
 #endif
 			pthread_mutex_lock(&WebSocketUnfinishedPacketsLock); {
+				WebSocketUnfinishedPacketsSize++;
+
 				WebSocketUnfinishedPackets = WebSocketUnfinishedPackets == NULL ?
 					malloc(sizeof(*WebSocketUnfinishedPackets)) :
-					realloc(WebSocketUnfinishedPackets, sizeof(*WebSocketUnfinishedPackets) * ++WebSocketUnfinishedPacketsSize);
+					realloc(WebSocketUnfinishedPackets, sizeof(*WebSocketUnfinishedPackets) * WebSocketUnfinishedPacketsSize);
 			} pthread_mutex_unlock(&WebSocketUnfinishedPacketsLock);
 			WEB_SOCKET_UNFINISHED_PACKET *unfinishedPacket = WebSocketUnfinishedPackets[WebSocketUnfinishedPacketsSize - 1];
 			unfinishedPacket = malloc(sizeof(WEB_SOCKET_UNFINISHED_PACKET));
 			unfinishedPacket->data = payLoadDecoded;
 			unfinishedPacket->dataLen = lenExtended;
 			unfinishedPacket->pieceCount = 0;
-			bufferevent_setcb(BuffEvent, ServerRead, NULL, WebsocketTimeout, unfinishedPacket);
+			bufferevent_setcb(BuffEvent, ServerRead, NULL, WebsocketUnfinishedPacketTimeout, unfinishedPacket);
 			Log(LOG_LEVEL_DEBUG, "Websocket PACKET registered unfinished packet");
+
 		}
 		return;
 	}
 
-	// Remove client unfinised packet struct
+	// Remove client unfinished packet struct
 	pthread_mutex_lock(&WebSocketUnfinishedPacketsLock); {
 		for (size_t x = 0;x < WebSocketUnfinishedPacketsSize;x++) {
 			if (WebSocketUnfinishedPackets[x]->buffEvent == BuffEvent) {
 				free(WebSocketUnfinishedPackets[x]->data);
 				free(WebSocketUnfinishedPackets[x]);
 				event_del(WebSocketUnfinishedPackets[x]->timeout);
-				WebSocketUnfinishedPackets[x] = WebSocketUnfinishedPackets[WebSocketUnfinishedPacketsSize];
-				WebSocketUnfinishedPackets = realloc(WebSocketUnfinishedPackets, sizeof(*WebSocketUnfinishedPackets) * --WebSocketUnfinishedPacketsSize);
+
+				WebSocketUnfinishedPacketsSize--;
+				if (WebSocketUnfinishedPacketsSize > 0)
+					WebSocketUnfinishedPackets[x] = WebSocketUnfinishedPackets[WebSocketUnfinishedPacketsSize];
+				WebSocketUnfinishedPackets = realloc(WebSocketUnfinishedPackets, sizeof(*WebSocketUnfinishedPackets) * WebSocketUnfinishedPacketsSize);
 				break;
 			}
 		}
 	} pthread_mutex_unlock(&WebSocketUnfinishedPacketsLock);
+	// After this, no freeing is required at further opcode processing
 
 	switch (opcode) {
-		case WEBSOCKET_OPCODE_UNICODE: {
-			Log(LOG_LEVEL_DEBUG, "Websocket PACKET payload %.*s", lenExtended, payLoadDecoded);
+		HexDump("Binary payload", payLoadDecoded, lenExtended);
 
-			/*
-
-
-			TODO: Add 'cookie' auth
-
-
-			*/
-
-			WEBSOCKET_SERVER_NOTIFICATION_COMMANDS subscriptions = 0;
-
-			/*if (lenExtended == 1 && *payLoadDecoded == WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES) {
-				subscriptions = WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES;
-			} else {
-#ifdef DEBUG
-				// Send go 2 hell
-				size_t len;
-				uint8_t *packet = WebsocketConstructPacket(WEBSOCKET_OPCODE_UNICODE, maskingKey, false, "go 2 hell", 9, &len); {
-					Log(LOG_LEVEL_DEBUG, "Websocket PACKET sent go 2 hell");
-					bufferevent_write(BuffEvent, packet, len);
-				} free(packet);
-#endif
-				bufferevent_free(BuffEvent);
-				return;
-			}*/
-
+		case WEBSOCKET_OPCODE_UNICODE:
+		case WEBSOCKET_OPCODE_BINARY: {
 			ssize_t foundIndex = -1;
 			pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
 				for (size_t x = 0;x < WebSocketSubscribedClientsSize;x++) {
@@ -287,11 +332,69 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 				}
 			} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
 
-			WEB_SOCKET_SUBSCRIBED_CLIENT *client;
+			AUTH_WEB *authWeb;
 
 			if (foundIndex != -1) {
-				client = WebSocketSubscribedClients[foundIndex];
+				// Already authed
+				Log(LOG_LEVEL_DEBUG, "Already authed");
+
+				// Pull data on demand
+				if (*payLoadDecoded == 'P') {
+					uint32_t sub = *(uint32_t*)(payLoadDecoded + 1);
+					switch (sub) {
+						case WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES:
+						case WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES: {
+							if (lenExtended < 1 + sizeof(uint32_t) + sizeof(uint64_t)) {
+								Log(LOG_LEVEL_DEBUG, "Ruse man on pull data on demand");
+								WebsocketClientTimeout(BuffEvent, EV_TIMEOUT, WebSocketSubscribedClients[foundIndex]); // ruse man
+								goto end;
+							}
+							uint64_t val = *(uint64_t*)(payLoadDecoded + 1 + sizeof(uint32_t));
+							uint64_t target = sub == WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES ? SizeCheckedProxies : SizeUncheckedProxies;
+
+							if (val != target) {
+								uint64_t network = htobe64(target);
+								Log(LOG_LEVEL_DEBUG, "Sent on pull data on demand");
+								WebsocketClientsNotifyClient(BuffEvent, &network, sizeof(network), sub);
+							}
+							break;
+						}
+					}
+				}
+
+				free(payLoadDecoded);
+				return;
 			} else {
+				bool authed = false;
+				pthread_mutex_lock(&AuthWebLock); {
+					for (size_t x = 0;x < AuthWebCount;x++) {
+						if (lenExtended - sizeof(uint32_t) == strlen(AuthWebList[x]->rndVerify) && strncmp(AuthWebList[x]->rndVerify, payLoadDecoded + sizeof(uint32_t), lenExtended - sizeof(uint32_t)) == 0) {
+							authed = true;
+							break;
+						}
+					}
+				} pthread_mutex_unlock(&AuthWebLock);
+				if (!authed) {
+					// Wrong 'password'
+					Log(LOG_LEVEL_DEBUG, "Key mismatch");
+					uint8_t packet[WebsocketPacketLen(false, 1)];
+					WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, maskingKey, false, "\x00", 1, packet);
+					bufferevent_write(BuffEvent, packet, sizeof(packet));
+
+					bufferevent_free(BuffEvent); // this is actually ruse man, so stop him
+					goto end;
+				} else {
+					// Welcome
+					Log(LOG_LEVEL_DEBUG, "AUTHED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+					uint8_t packet[WebsocketPacketLen(false, 1)];
+					WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, maskingKey, false, "\x01", 1, packet);
+					bufferevent_write(BuffEvent, packet, sizeof(packet));
+				}
+			}
+
+			WEB_SOCKET_SUBSCRIBED_CLIENT *client;
+
+			// Register client
 				pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
 					WebSocketSubscribedClientsSize++;
 
@@ -305,14 +408,31 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 
 				client->buffEvent = BuffEvent;
 				client->timer = event_new(bufferevent_get_base(BuffEvent), -1, EV_PERSIST, WebsocketClientPing, BuffEvent);
+				if (*(uint32_t*)payLoadDecoded > (WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES + WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES)) {
+					// Ruse man!!
+					WebsocketClientTimeout(BuffEvent, EV_TIMEOUT, client); // this is actually ruse man, so stop him
+					goto end;
+					return;
+				}
 
-				struct timeval sec = { 1, 0 };
+				client->subscriptions = *(uint32_t*)payLoadDecoded;
+				client->lastMessagesSize = 0;
+				client->lastMessages = NULL;
+				for (size_t x = 0; x < WEBSOCKET_TOTAL_SERVER_COMMANDS;x++) {
+					if (((1 << x) & client->subscriptions) == (1 << x)) {
+						client->lastMessagesSize++;
+						client->lastMessages = client->lastMessages == NULL ? malloc(sizeof(WEB_SOCKET_MESSAGE_INTERVAL)) : realloc(client->lastMessages, sizeof(WEB_SOCKET_MESSAGE_INTERVAL) * client->lastMessagesSize);
+						client->lastMessages[client->lastMessagesSize - 1].lastMessageMs = 0;
+						client->lastMessages[client->lastMessagesSize - 1].subscription = (1 << x);
+					}
+				}
+
+				struct timeval sec = { GlobalTimeoutTV.tv_sec / 2, GlobalTimeoutTV.tv_usec / 2 };
 				event_add(client->timer, &sec);
 
 				bufferevent_setcb(BuffEvent, ServerRead, NULL, WebsocketClientTimeout, client);
-			}
 
-			client->subscriptions = subscriptions;
+
 			bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
 
 			break;
@@ -322,42 +442,39 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 				// nope
 				Log(LOG_LEVEL_DEBUG, "Websocket PACKET stopped ruse man");
 				bufferevent_free(BuffEvent);
+				free(payLoadDecoded);
 				return;
 			}
-			size_t len;
-			uint8_t *packet = WebsocketConstructPacket(WEBSOCKET_OPCODE_PONG, maskingKey, false, payLoadDecoded, lenExtended, &len); {
-				Log(LOG_LEVEL_DEBUG, "Websocket PACKET PONG!");
-				bufferevent_write(BuffEvent, packet, len);
-			} free(packet);
+			uint8_t packet[WebsocketPacketLen(false, lenExtended)];
+			WebsocketConstructPacket(WEBSOCKET_OPCODE_PONG, maskingKey, false, payLoadDecoded, lenExtended, packet);
+			Log(LOG_LEVEL_DEBUG, "Websocket PACKET PONG!");
+			bufferevent_write(BuffEvent, packet, sizeof(packet));
 			break;
 		}
 		case WEBSOCKET_OPCODE_PONG: {
-			bool found = false;
 			pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
 				for (size_t x = 0;x < WebSocketSubscribedClientsSize;x++) {
 					if (WebSocketSubscribedClients[x]->buffEvent == BuffEvent) {
 						bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV); // reset timeouts
-						found = true;
 						break;
 					}
 				}
 			} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
-			assert(found);
 			break;
 		}
 	}
 
+end:
 	free(payLoadDecoded);
 }
 
 void WebsocketClientPing(evutil_socket_t fd, short Event, void *BuffEvent)
 {
-	Log(LOG_LEVEL_DEBUG, "Websocket CLIENT PING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-	size_t len;
-	uint8_t *packet = WebsocketConstructPacket(WEBSOCKET_OPCODE_PING, 0, false, "PING!", 5, &len); {
-		Log(LOG_LEVEL_DEBUG, "Websocket PING!");
-		bufferevent_write(BuffEvent, packet, len);
-	} free(packet);
+	Log(LOG_LEVEL_DEBUG, "Websocket CLIENT PING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! LEN %d", WebsocketPacketLen(false, 5 * sizeof(char)));
+	uint8_t packet[WebsocketPacketLen(false, 5 * sizeof(char))];
+	WebsocketConstructPacket(WEBSOCKET_OPCODE_PING, 0, false, "PING!", 5 * sizeof(char), packet);
+	Log(LOG_LEVEL_DEBUG, "Websocket PACKET PING!");
+	bufferevent_write(BuffEvent, packet, sizeof(packet));
 }
 
 void WebsocketClientTimeout(struct bufferevent *BuffEvent, short Event, void *Ctx)
@@ -367,13 +484,20 @@ void WebsocketClientTimeout(struct bufferevent *BuffEvent, short Event, void *Ct
 	event_free(client->timer);
 	free(client);
 	pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
-		client = WebSocketSubscribedClients[WebSocketSubscribedClientsSize];
-		WebSocketSubscribedClients = realloc(WebSocketSubscribedClients, sizeof(*WebSocketSubscribedClients) * --WebSocketSubscribedClientsSize);
+		WebSocketSubscribedClientsSize--;
+		if (WebSocketSubscribedClientsSize > 0) {
+			for (size_t x = 0;x < WebSocketSubscribedClientsSize;x++) {
+				if (WebSocketSubscribedClients[x] == client) {
+					WebSocketSubscribedClients[x] = WebSocketSubscribedClients[WebSocketSubscribedClientsSize];
+				}
+			}
+		}
+		WebSocketSubscribedClients = realloc(WebSocketSubscribedClients, sizeof(*WebSocketSubscribedClients) * WebSocketSubscribedClientsSize);
 	} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
 	bufferevent_free(BuffEvent);
 }
 
-void WebsocketTimeout(struct bufferevent *BuffEvent, short Event, void *Ctx)
+void WebsocketUnfinishedPacketTimeout(struct bufferevent *BuffEvent, short Event, void *Ctx)
 {
 	Log(LOG_LEVEL_DEBUG, "Websocket timeout ev %x!!!!!!!!!!!!!!!!!!!!!!!!!!!!", Event);
 	if (Ctx != NULL) {
@@ -381,8 +505,19 @@ void WebsocketTimeout(struct bufferevent *BuffEvent, short Event, void *Ctx)
 		free(unfinishedPacket->data);
 		free(unfinishedPacket);
 		event_del(unfinishedPacket->timeout);
-		unfinishedPacket = WebSocketUnfinishedPackets[WebSocketUnfinishedPacketsSize];
-		WebSocketUnfinishedPackets = realloc(WebSocketUnfinishedPackets, sizeof(*WebSocketUnfinishedPackets) * --WebSocketUnfinishedPacketsSize);
+
+		pthread_mutex_lock(&WebSocketUnfinishedPacketsLock); {
+			WebSocketUnfinishedPacketsSize--;
+			if (WebSocketUnfinishedPacketsSize > 0) {
+				for (size_t x = 0;x < WebSocketUnfinishedPacketsSize;x++) {
+					if (WebSocketUnfinishedPackets[x] == unfinishedPacket) {
+						WebSocketUnfinishedPackets[x] = WebSocketUnfinishedPackets[WebSocketUnfinishedPacketsSize];
+						break;
+					}
+				}
+			}
+			WebSocketUnfinishedPackets = realloc(WebSocketUnfinishedPackets, sizeof(*WebSocketUnfinishedPackets) * WebSocketUnfinishedPacketsSize);
+		} pthread_mutex_unlock(&WebSocketUnfinishedPacketsLock);
 	}
 	bufferevent_free(BuffEvent);
 }
@@ -417,6 +552,6 @@ void WebsocketSwitch(struct bufferevent *BuffEvent, char *Buff)
 		bufferevent_write(BuffEvent, "\r\n\r\n", 4 * sizeof(char));
 	} free(b64);
 	Log(LOG_LEVEL_DEBUG, "Websocket switched protocols");
-	bufferevent_setcb(BuffEvent, ServerRead, NULL, WebsocketTimeout, NULL);
+	bufferevent_setcb(BuffEvent, ServerRead, NULL, WebsocketUnfinishedPacketTimeout, NULL);
 	bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
 }

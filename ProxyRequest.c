@@ -66,7 +66,6 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 			UProxyRemove(UProxy);
 		} else {
 			UProxy->checking = false;
-			pthread_mutex_unlock(&(UProxy->processing));
 		}
 	} else {
 		char *ip = IPv6MapToString(UProxy->ip); {
@@ -83,6 +82,8 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 
 		UProxyRemove(UProxy);
 	}
+
+	pthread_mutex_unlock(&(UProxy->processing));
 }
 
 typedef enum _SOCKS_TYPE {
@@ -481,7 +482,7 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 	Log(LOG_LEVEL_DEBUG, "EVEvent %02x", Event);
 	pthread_mutex_lock(&LockUncheckedProxies); {
 		bool found = false;
-		for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+		for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 			if (UncheckedProxies[x] == UProxy) {
 				found = true;
 				break;
@@ -496,7 +497,7 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 
 	if (Event == BEV_EVENT_CONNECTED) {
 		char *ip = IPv6MapToString(UProxy->ip); {
-			Log(LOG_LEVEL_DEBUG, "EVEvent: event connected %s", ip);
+			Log(LOG_LEVEL_DEBUG, "EVEvent: event connected %s (size %d)", ip, SizeUncheckedProxies);
 		} free(ip);
 
 		ProxyHandleData(UProxy, BuffEvent, EV_TYPE_CONNECT);
@@ -520,7 +521,7 @@ void CALLBACK EVRead(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
 {
 	pthread_mutex_lock(&LockUncheckedProxies); {
 		bool found = false;
-		for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+		for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 			if (UncheckedProxies[x] == UProxy) {
 				found = true;
 				break;
@@ -542,7 +543,7 @@ void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy)
 
 	pthread_mutex_lock(&LockUncheckedProxies); {
 		bool found = false;
-		for (size_t x = 0; x < SizeUncheckedProxies; x++) {
+		for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 			if (UncheckedProxies[x] == UProxy) {
 				found = true;
 				break;

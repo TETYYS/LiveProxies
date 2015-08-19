@@ -15,7 +15,7 @@ void RemoveThread()
 		PROXY *proxy = NULL;
 		pthread_mutex_lock(&LockCheckedProxies); {
 			uint64_t low = UINT64_MAX;
-			for (uint32_t x = 0; x < SizeCheckedProxies; x++) {
+			for (uint64_t x = 0; x < SizeCheckedProxies; x++) {
 				if (!CheckedProxies[x]->rechecking && CheckedProxies[x]->lastCheckedMs < low) {
 					proxy = CheckedProxies[x];
 					low = proxy->lastCheckedMs;

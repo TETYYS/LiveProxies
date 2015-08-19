@@ -14,9 +14,10 @@
 #include <libconfig.h>
 #include <event2/buffer.h>
 #include <assert.h>
-#include "Base64.h"
 #include "Harvester.h"
 #include "GeoIP.h"
+#include "Websocket.h"
+#include "Config.h"
 
 char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",				"{T_CFG_HOME_ACTIVE}",			"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",	"{T_CFG_SOURCES_ACTIVE}",
 								"{T_CFG_STATS_ACTIVE}",				"{T_USER}",						"{T_COUNT_UPROXIES}",			"{T_COUNT_PROXIES}",			"{T_UPROXIES_HEAD}",		"{T_UPROXIES_TABLE_ITEMS_START}",
@@ -25,7 +26,8 @@ char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",				"{T_CFG_
 								"{T_PRXSRC_TABLE_ITEMS_START}",		"{T_PRXSRC_TABLE_ITEMS_END}",	"{T_PRXSRC_ITEM}",				NULL,							"{T_TABLE_BREAK}",			"{T_STATS_GEO_HEAD}",
 								"{T_STATS_GEO_TABLE_ITEMS_START}",	"{T_STATS_GEO_TABLE_ITEMS_END}","{T_STATS_GEO_ITEM}",			"{T_CHECK_IP}",					"{T_CHECK_PORT}",			"{T_CHECK_TYPE}",
 								"{T_CHECK_COUNTRY_LOWER}",			"{T_CHECK_COUNTRY_UPPER}",		"{T_CHECK_LIVE_SINCE}",			"{T_CHECK_LAST_CHECKED}",		"{T_CHECK_CONNECT_TIMEOUT}","{T_CHECK_HTTP_S_TIMEOUT}",
-								"{T_CHECK_SUCCESSFUL_CHECKS}",		"{T_CHECK_FAILED_CHECKS}",		"{T_CHECK_RETRIES}",			"{T_CHECK_UID}",				"{T_CHECK_COUNTRY_FULL}"
+								"{T_CHECK_SUCCESSFUL_CHECKS}",		"{T_CHECK_FAILED_CHECKS}",		"{T_CHECK_RETRIES}",			"{T_CHECK_UID}",				"{T_CHECK_COUNTRY_FULL}",	"{T_SUB_SIZE_UPROXIES}",
+								"{T_SUB_SIZE_PROXIES}",				"{T_SUB_AUTH_COOKIE}",			"{T_SUB_MSG_INTERVAL}"
 };
 
 static char *StrReplace(char *string, char *substr, char *replacement)
@@ -263,7 +265,8 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 				// Push dynamic content
 				comp.identifier = identifier;
 
-#define CONFIG_STRING(cfg, svar, var) const char *val; if (config_setting_lookup_string(cfg, svar, &val) == CONFIG_FALSE) { Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %s...", svar); HtmlTemplateUseStock = true; return; } else { var = malloc((strlen(val) * sizeof(char)) + 1); strcpy(var, val); }
+#define CONFIG_STRING(cfg, svar, var) const char *val; if (config_setting_lookup_string(cfg, svar, &(val)) == CONFIG_FALSE) { Log(LOG_LEVEL_ERROR, "Failed to lookup %s, using stock template...", svar); HtmlTemplateUseStock = true; return; } else { var = malloc((strlen(val) * sizeof(char)) + 1); strcpy(var, val); }
+#define CONFIG_INT(cfg, svar, var) if (config_setting_lookup_int(cfg, svar, &(var)) == CONFIG_FALSE) { Log(LOG_LEVEL_ERROR, "Failed to lookup %s, using stock template...", svar); HtmlTemplateUseStock = true; return; }
 
 				switch (identifier) {
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_VERSION: {
@@ -310,12 +313,30 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 						CONFIG_STRING(CfgRoot, "TableError", comp.content);
 						break;
 					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_MSG_INTERVAL: {
+						config_setting_t *wsGroup = config_setting_get_member(CfgRoot, "WS");
+						CONFIG_INT(wsGroup, "MessageIntervalMs", WSMessageIntervalMs);
+						comp.content = WSMessageIntervalMs;
+						break;
+					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_COUNT_PROXIES: {
 						comp.content = &SizeCheckedProxies;
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_COUNT_UPROXIES: {
 						comp.content = &SizeUncheckedProxies;
+						break;
+					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_SIZE_PROXIES: {
+						comp.content = WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES;
+						break;
+					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_SIZE_UPROXIES: {
+						comp.content = WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES;
+						break;
+					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_AUTH_COOKIE: {
+						comp.content = AUTH_COOKIE;
 						break;
 					}
 				}
@@ -439,6 +460,12 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_COUNT_UPROXIES:
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_COUNT_PROXIES: {
 				evbuffer_add_printf(Buffer, "%d", *((size_t*)(Components[x].content)));
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_SIZE_PROXIES:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_SIZE_UPROXIES:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_MSG_INTERVAL: {
+				evbuffer_add_printf(Buffer, "%d", Components[x].content);
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_UPROXIES_HEAD:
@@ -658,7 +685,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_UPROXIES_TABLE_ITEMS_START: {
 				pthread_mutex_lock(&LockUncheckedProxies); {
-					for (size_t i = 0;i < SizeUncheckedProxies;i++) {
+					for (uint64_t i = 0;i < SizeUncheckedProxies;i++) {
 						HTML_TEMPALTE_TABLE_INFO tableInfo;
 						tableInfo.inTable = true;
 						tableInfo.currentComponentIteration = x + 1;
@@ -674,7 +701,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_PROXIES_TABLE_ITEMS_START: {
 				pthread_mutex_lock(&LockCheckedProxies); {
-					for (size_t i = 0;i < SizeCheckedProxies;i++) {
+					for (uint64_t i = 0;i < SizeCheckedProxies;i++) {
 						HTML_TEMPALTE_TABLE_INFO tableInfo;
 						tableInfo.inTable = true;
 						tableInfo.currentComponentIteration = x + 1;
@@ -708,7 +735,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				HTML_TEMPLATE_TABLE_STATS_GEO *statsGeo = NULL;
 				size_t statsGeoSize = 0;
 				pthread_mutex_lock(&LockCheckedProxies); {
-					for (size_t i = 0;i < SizeCheckedProxies;i++) {
+					for (uint64_t i = 0;i < SizeCheckedProxies;i++) {
 						ssize_t foundIndex = -1;
 						for (size_t a = 0;a < statsGeoSize;a++) {
 							if (strncmp(statsGeo[a].countryCode, CheckedProxies[i]->country, 2 * sizeof(char)) == 0) {
@@ -828,7 +855,8 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_EVEN:
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_OK:
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_WARN:
-			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_ERR: {
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_ERR:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_AUTH_COOKIE: {
 				evbuffer_add_reference(Buffer, Components[x].content, strlen(Components[x].content), NULL, NULL);
 				break;
 			}

@@ -114,11 +114,11 @@ typedef struct _UNCHECKED_PROXY {
 } UNCHECKED_PROXY;
 
 UNCHECKED_PROXY	**UncheckedProxies;
-uint32_t		SizeUncheckedProxies;
+uint64_t		SizeUncheckedProxies;
 pthread_mutex_t	LockUncheckedProxies;
 
 PROXY	 		**CheckedProxies;
-uint32_t		SizeCheckedProxies;
+uint64_t		SizeCheckedProxies;
 pthread_mutex_t	LockCheckedProxies;
 
 bool ProxyIsSSL(PROXY_TYPE In);
