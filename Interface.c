@@ -106,7 +106,7 @@ static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, INTERFACE_I
 				if (AuthWebList[x]->expiry >= (GetUnixTimestampMilliseconds() / 1000)) {
 					free(cookie);
 					if (!AllowOnlyCookie)
-						evbuffer_add_reference(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char), NULL, NULL);
+						evbuffer_add(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char));
 					InterfaceInfo->user = AuthWebList[x]->username;
 					AuthWebList[x]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
 					pthread_mutex_unlock(&AuthWebLock);
@@ -118,7 +118,7 @@ static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, INTERFACE_I
 				}
 				break;
 			}
-		}
+		} pthread_mutex_unlock(&AuthWebLock);
 	} /* End authorize by cookie */
 endCookie:
 
@@ -186,7 +186,7 @@ endCookie:
 
 					pthread_mutex_lock(&AuthWebLock); {
 						for (size_t x = 0; x < AuthWebCount; x++) {
-							if (IPv6MapCompare(ip, AuthWebList[x]->ip)) {
+							if (IPv6MapEqual(ip, AuthWebList[x]->ip)) {
 								free(ip);
 								free(authStr);
 
@@ -194,7 +194,7 @@ endCookie:
 									AuthWebList[x]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
 									InterfaceInfo->user = AuthWebList[x]->username;
 									pthread_mutex_unlock(&AuthWebLock);
-									evbuffer_add_reference(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char), NULL, NULL);
+									evbuffer_add(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char));
 									return true;
 								} else {
 									AuthWebRemove(x);
@@ -286,7 +286,7 @@ void InterfaceHome(struct bufferevent *BuffEvent, char *Buff)
 	}
 
 	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
-	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 
 	bufferevent_write_buffer(BuffEvent, headers);
 	bufferevent_write_buffer(BuffEvent, body);
@@ -322,7 +322,7 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 			evbuffer_add_printf(body, "<center>Checked proxies: %d, currently checking: %d</center><br /><table><tbody><tr><th>IP:Port</th><th>Type</th><th>Country</th><th>Anonymity</th><th>Connection latency (ms)</th><th>HTTP/S latency (ms)</th><th>Live since</th><th>Last checked</th><th>Retries</th><th>Successful checks</th><th>Failed checks</th><th>Full check</th></tr>", SizeCheckedProxies, CurrentlyChecking);
 
 			for (uint64_t x = 0; x < SizeCheckedProxies; x++) {
-				evbuffer_add_reference(body, "<tr>", 4 * sizeof(char), NULL, NULL);
+				evbuffer_add(body, "<tr>", 4 * sizeof(char));
 
 				char *ip = IPv6MapToString2(CheckedProxies[x]->ip); {
 					evbuffer_add_printf(body, "<td>%s:%d</td>", ip, CheckedProxies[x]->port);
@@ -331,13 +331,13 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 				evbuffer_add_printf(body, "<td>%s</td>", CheckedProxies[x]->country);
 
 				if (CheckedProxies[x]->anonymity == ANONYMITY_MAX)
-					evbuffer_add_reference(body, "<td class=\"g\">Max</td>", 22 * sizeof(char), NULL, NULL);
+					evbuffer_add(body, "<td class=\"g\">Max</td>", 22 * sizeof(char));
 				else if (CheckedProxies[x]->anonymity == ANONYMITY_ANONYMOUS)
-					evbuffer_add_reference(body, "<td class=\"y\">Anonymous</td>", 28 * sizeof(char), NULL, NULL);
+					evbuffer_add(body, "<td class=\"y\">Anonymous</td>", 28 * sizeof(char));
 				else if (CheckedProxies[x]->anonymity == ANONYMITY_TRANSPARENT)
-					evbuffer_add_reference(body, "<td class=\"r\">Transparent</td>", 30 * sizeof(char), NULL, NULL);
+					evbuffer_add(body, "<td class=\"r\">Transparent</td>", 30 * sizeof(char));
 				else
-					evbuffer_add_reference(body, "<td class=\"n\">N/A</td>", 23 * sizeof(char), NULL, NULL);
+					evbuffer_add(body, "<td class=\"n\">N/A</td>", 23 * sizeof(char));
 
 				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(GlobalTimeout, CheckedProxies[x]->timeoutMs), CheckedProxies[x]->timeoutMs);
 
@@ -361,7 +361,7 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 			}
 		} pthread_mutex_unlock(&LockCheckedProxies);
 
-		evbuffer_add_reference(body, "</body></html>\n", 15 * sizeof(char), NULL, NULL);
+		evbuffer_add(body, "</body></html>\n", 15 * sizeof(char));
 	} else {
 		HTML_TEMPALTE_TABLE_INFO tableInfo;
 		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
@@ -373,7 +373,7 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 	}
 
 	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
-	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 
 	bufferevent_write_buffer(BuffEvent, headers);
 	bufferevent_write_buffer(BuffEvent, body);
@@ -409,7 +409,7 @@ void InterfaceUncheckedProxies(struct bufferevent *BuffEvent, char *Buff)
 		pthread_mutex_lock(&LockUncheckedProxies); {
 			evbuffer_add_printf(body, "<center>Unchecked proxies: %d, currently checking: %d</center><br /><table><tbody><tr><th>IP:Port</th><th>Type</th>\n<th>Currently checking</th><th>Retries</th><th>Rechecking</th></tr>", SizeUncheckedProxies, CurrentlyChecking);
 			for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
-				evbuffer_add_reference(body, "<tr>", 4 * sizeof(char), NULL, NULL);
+				evbuffer_add(body, "<tr>", 4 * sizeof(char));
 
 				char *ip = IPv6MapToString2(UncheckedProxies[x]->ip); {
 					evbuffer_add_printf(body, "<td>%s:%d</td>", ip, UncheckedProxies[x]->port);
@@ -421,11 +421,11 @@ void InterfaceUncheckedProxies(struct bufferevent *BuffEvent, char *Buff)
 				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(AcceptableSequentialFails, UncheckedProxies[x]->retries), UncheckedProxies[x]->retries);
 				evbuffer_add_printf(body, "<td><span id=\"%s\"></span></td>", UncheckedProxies[x]->associatedProxy != NULL ? "check" : "x");
 
-				evbuffer_add_reference(body, "</tr>", 5 * sizeof(char), NULL, NULL);
+				evbuffer_add(body, "</tr>", 5 * sizeof(char));
 			}
 		} pthread_mutex_unlock(&LockUncheckedProxies);
 
-		evbuffer_add_reference(body, "</tbody></table></body></html>", 30 * sizeof(char), NULL, NULL);
+		evbuffer_add(body, "</tbody></table></body></html>", 30 * sizeof(char));
 	} else {
 		HTML_TEMPALTE_TABLE_INFO tableInfo;
 		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
@@ -437,7 +437,7 @@ void InterfaceUncheckedProxies(struct bufferevent *BuffEvent, char *Buff)
 	}
 
 	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
-	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 
 	bufferevent_write_buffer(BuffEvent, headers);
 	bufferevent_write_buffer(BuffEvent, body);
@@ -473,17 +473,17 @@ void InterfaceProxySources(struct bufferevent *BuffEvent, char *Buff)
 		pthread_mutex_lock(&LockHarvesterPrxsrcStats); {
 			evbuffer_add_printf(body, "<table><tbody><tr><th>Name</th><th>New proxies</th>\n<th>Total proxies</th></tr>", SizeUncheckedProxies, CurrentlyChecking);
 			for (size_t x = 0; x < SizeHarvesterPrxsrcStats; x++) {
-				evbuffer_add_reference(body, "<tr>", 4 * sizeof(char), NULL, NULL);
+				evbuffer_add(body, "<tr>", 4 * sizeof(char));
 
 				evbuffer_add_printf(body, "<td>%s</td>", HarvesterPrxsrcStats[x].name);
 				evbuffer_add_printf(body, "<td>%d</td>", HarvesterPrxsrcStats[x].addedNew);
 				evbuffer_add_printf(body, "<td>%d</td>", HarvesterPrxsrcStats[x].added);
 
-				evbuffer_add_reference(body, "</tr>", 5 * sizeof(char), NULL, NULL);
+				evbuffer_add(body, "</tr>", 5 * sizeof(char));
 			}
 		} pthread_mutex_unlock(&LockHarvesterPrxsrcStats);
 
-		evbuffer_add_reference(body, "</tbody></table></body></html>", 30 * sizeof(char), NULL, NULL);
+		evbuffer_add(body, "</tbody></table></body></html>", 30 * sizeof(char));
 	} else {
 		HTML_TEMPALTE_TABLE_INFO tableInfo;
 		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
@@ -495,7 +495,7 @@ void InterfaceProxySources(struct bufferevent *BuffEvent, char *Buff)
 	}
 
 	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
-	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 
 	bufferevent_write_buffer(BuffEvent, headers);
 	bufferevent_write_buffer(BuffEvent, body);
@@ -538,7 +538,7 @@ void InterfaceStats(struct bufferevent *BuffEvent, char *Buff)
 	}
 
 	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
-	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 
 	bufferevent_write_buffer(BuffEvent, headers);
 	bufferevent_write_buffer(BuffEvent, body);
@@ -686,6 +686,13 @@ fail:
 			evbuffer_free(headers);
 			return;
 		}
+		if (proxy->rechecking) {
+			bufferevent_write(BuffEvent, "HTTP/1.1 403 Forbidden\r\nContent-Length: 18\r\n\r\nAlready rechecking", 64 * sizeof(char));
+			bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+			evbuffer_free(headers);
+			return;
+		}
 
 		struct evbuffer *body = evbuffer_new();
 
@@ -699,7 +706,7 @@ fail:
 		HtmlTemplateBufferInsert(body, HtmlTemplateFoot, HtmlTemplateFootSize, info, tableInfo);
 
 		evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
-		evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+		evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_write_buffer(BuffEvent, body);
@@ -734,7 +741,7 @@ void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 	}
 
 	evbuffer_add_printf(headers, "%d", 3); // To Content-Length
-	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 
 	bufferevent_write_buffer(BuffEvent, headers);
 	SpamhausZENAsync(proxy->ip, BuffEvent);
@@ -804,14 +811,14 @@ void InterfaceRawReverseDNS(struct bufferevent *BuffEvent, char *Buff)
 
 	char *rDNS = ReverseDNS(proxy->ip);
 	if (rDNS == NULL) {
-		evbuffer_add_reference(headers, "3", 1 * sizeof(char), NULL, NULL); // To Content-Length
-		evbuffer_add_reference(body, "N/A", 3 * sizeof(char), NULL, NULL);
+		evbuffer_add(headers, "3", 1 * sizeof(char)); // To Content-Length
+		evbuffer_add(body, "N/A", 3 * sizeof(char));
 	} else {
 		evbuffer_add_printf(headers, "%d", strlen(rDNS)); // To Content-Length
 		evbuffer_add_reference(body, rDNS, strlen(rDNS), free, rDNS);
 	}
 
-	evbuffer_add_reference(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 
 	bufferevent_write_buffer(BuffEvent, headers);
 	bufferevent_write_buffer(BuffEvent, body);
@@ -859,7 +866,7 @@ static void InterfaceRawRecheckStage2(UNCHECKED_PROXY *UProxy)
 		} free(liveSinceTime);
 	} free(uid);
 	evbuffer_add_printf(http, "%d", evbuffer_get_length(body) * sizeof(char)); // To Content-Length
-	evbuffer_add_reference(http, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char), NULL, NULL);
+	evbuffer_add(http, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 	bufferevent_write_buffer(buffEvent, http);
 	bufferevent_write_buffer(buffEvent, body);
 	evbuffer_free(http);
@@ -893,6 +900,13 @@ void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
 
 	if (proxy == NULL) {
 		bufferevent_write(BuffEvent, "HTTP/1.1 404 Not found\r\nContent-Length: 15\r\n\r\nProxy not found", 61 * sizeof(char));
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(headers);
+		return;
+	}
+	if (proxy->rechecking) {
+		bufferevent_write(BuffEvent, "HTTP/1.1 403 Forbidden\r\nContent-Length: 18\r\n\r\nAlready rechecking", 64 * sizeof(char));
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 		evbuffer_free(headers);

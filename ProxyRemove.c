@@ -37,9 +37,12 @@ void UProxyFailUpdateParentInfo(UNCHECKED_PROXY *In)
 	In->associatedProxy->httpTimeoutMs = 0;
 	In->associatedProxy->lastCheckedMs = GetUnixTimestampMilliseconds();
 	In->associatedProxy->retries++;
+	In->associatedProxy->rechecking = false;
 
-	if (In->associatedProxy->retries >= AcceptableSequentialFails)
+	if (In->associatedProxy->retries >= AcceptableSequentialFails) {
 		ProxyRemove(In->associatedProxy);
+		In->associatedProxy = NULL;
+	}
 }
 
 void UProxySuccessUpdateParentInfo(UNCHECKED_PROXY *In)

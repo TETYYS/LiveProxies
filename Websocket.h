@@ -16,11 +16,15 @@ typedef struct _WEB_SOCKET_UNFINISHED_PACKET {
 	struct event *timeout;
 } WEB_SOCKET_UNFINISHED_PACKET;
 
-#define WEBSOCKET_TOTAL_SERVER_COMMANDS 2
+#define WEBSOCKET_TOTAL_SERVER_COMMANDS 6
 
 typedef enum _WEBSOCKET_SERVER_COMMANDS {
 	WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES = 0x01,
-	WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES = 0x02
+	WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES = 0x02,
+	WEBSOCKET_SERVER_COMMAND_PROXY_ADD = 0x04,
+	WEBSOCKET_SERVER_COMMAND_UPROXY_ADD = 0x08,
+	WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE = 0x10,
+	WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE = 0x20
 } WEBSOCKET_SERVER_COMMANDS;
 
 typedef struct _WEB_SOCKET_MESSAGE_INTERVAL {
@@ -60,3 +64,4 @@ void WebsocketClientTimeout(struct bufferevent *BuffEvent, short Event, void *Ct
 void WebsocketClientPing(evutil_socket_t fd, short Event, void *BuffEvent);
 
 void WebsocketClientsNotify(void *Message, size_t MessageLen, uint32_t Command);
+void WebsocketClientsNotifySingle(struct bufferevent *BuffEvent, void *Message, size_t MessageLen, uint32_t Command);

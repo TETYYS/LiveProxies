@@ -25,7 +25,7 @@ bool ProxyIsSSL(PROXY_TYPE In)
 	return In == PROXY_TYPE_HTTPS || In == PROXY_TYPE_SOCKS4_TO_SSL || In == PROXY_TYPE_SOCKS4A_TO_SSL || In == PROXY_TYPE_SOCKS5_TO_SSL;
 }
 
-static char *ProxyTypes[] = { "HTTP", "HTTPS", "SOCKS4", "SOCKS4A", "SOCKS5", "SOCKS4 -> SSL", "SOCKS4A -> SSL", "SOCKS5 -> SSL", "SOCKS5 UDP", "N/A"};
+static char *ProxyTypes[] = { "HTTP", "HTTPS", "SOCKS4", "SOCKS4A", "SOCKS5", "SOCKS4 -> SSL", "SOCKS4A -> SSL", "SOCKS5 -> SSL", "SOCKS5 UDP", "N/A" };
 
 char *ProxyGetTypeString(PROXY_TYPE In)
 {
@@ -47,7 +47,9 @@ bool ProxyAdd(PROXY *Proxy)
 {
 	pthread_mutex_lock(&LockCheckedProxies); {
 		for (uint64_t x = 0; x < SizeCheckedProxies; x++) {
-			if (memcmp(Proxy->ip->Data, CheckedProxies[x]->ip->Data, IPV6_SIZE) == 0 && Proxy->port == CheckedProxies[x]->port && Proxy->type == CheckedProxies[x]->type) {
+			if (Proxy->type == CheckedProxies[x]->type &&
+				Proxy->port == CheckedProxies[x]->port &&
+				IPv6MapEqual(Proxy->ip, CheckedProxies[x]->ip)) {
 				CheckedProxies[x]->anonymity = Proxy->anonymity;
 				CheckedProxies[x]->failedChecks = Proxy->failedChecks;
 				CheckedProxies[x]->httpTimeoutMs = Proxy->httpTimeoutMs;
@@ -68,6 +70,40 @@ bool ProxyAdd(PROXY *Proxy)
 	uint64_t network = htobe64(SizeCheckedProxies);
 	WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES);
 
+	uint8_t ipType = GetIPType(Proxy->ip) == IPV4 ? 0x04 : 0x06;
+	char *uid = GenerateUidForProxy(Proxy); {
+		size_t offset = 0;
+		uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+			(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
+			sizeof(uint16_t) + /* port */
+			sizeof(uint16_t) + /* type */
+			(2 * sizeof(char)) + /* country */
+			sizeof(uint8_t) + /* anonymity */
+			(sizeof(uint64_t) * 4) + /* Connection, HTTP/S timeouts, live since and last checked */
+			sizeof(uint8_t) + /* retries */
+			(sizeof(uint32_t) * 2) + /* successful and failed checks */
+			strlen(uid) /* uid */];
+
+#define MAP_TYPE(x, type) *((type*)(&(x)))
+
+		buffer[offset] = ipType; offset += sizeof(uint8_t);
+		memcpy(buffer + offset, ipType == 0x04 ? &(Proxy->ip->Data[3]) : Proxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+		MAP_TYPE(buffer[offset], uint16_t) = htons(Proxy->port); offset += sizeof(uint16_t);
+		MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)Proxy->type); offset += sizeof(uint16_t);
+		memcpy(buffer + offset, Proxy->country, 2 * sizeof(char)); offset += 2 * sizeof(char);
+		buffer[offset] = (uint8_t)Proxy->anonymity; offset += sizeof(uint8_t);
+		MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->timeoutMs); offset += sizeof(uint64_t);
+		MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->httpTimeoutMs); offset += sizeof(uint64_t);
+		MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->liveSinceMs); offset += sizeof(uint64_t);
+		MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->lastCheckedMs); offset += sizeof(uint64_t);
+		buffer[offset] = Proxy->retries; offset += sizeof(uint8_t);
+		MAP_TYPE(buffer[offset], uint32_t) = htonl(Proxy->successfulChecks); offset += sizeof(uint32_t);
+		MAP_TYPE(buffer[offset], uint32_t) = htonl(Proxy->failedChecks); offset += sizeof(uint32_t);
+		memcpy(buffer + offset, uid, strlen(uid));
+
+		WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_PROXY_ADD);
+	} free(uid);
+
 	return true;
 }
 
@@ -76,7 +112,7 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 	uint8_t ret = 0;
 	pthread_mutex_lock(&LockUncheckedProxies); {
 		for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
-			if (memcmp(UProxy->hash, UncheckedProxies[x]->hash, 512 / 8) == 0) {
+			if (MemEqual(UProxy->hash, UncheckedProxies[x]->hash, 512 / 8)) {
 				char *ip = IPv6MapToString2(UProxy->ip); {
 					Log(LOG_LEVEL_WARNING, "Warning: tried to add already added unchecked proxy (%s:%d) (type %d)", ip, UProxy->port, UProxy->type);
 				} free(ip);
@@ -105,6 +141,28 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 		uint64_t network = htobe64(SizeUncheckedProxies);
 		WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES);
 
+		uint8_t ipType = GetIPType(UProxy->ip) == IPV4 ? 0x04 : 0x06;
+		size_t offset = 0;
+		uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+			(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
+			sizeof(uint16_t) + /* port */
+			sizeof(uint16_t) + /* type */
+			sizeof(bool) + /* currently checking */
+			sizeof(uint8_t) + /* retries */
+			sizeof(bool) /* rechecking */];
+
+#define MAP_TYPE(x, type) *((type*)(&(x)))
+
+		buffer[offset] = ipType; offset += sizeof(uint8_t);
+		memcpy(buffer + offset, ipType == 0x04 ? &(UProxy->ip->Data[3]) : UProxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+		MAP_TYPE(buffer[offset], uint16_t) = htons(UProxy->port); offset += sizeof(uint16_t);
+		MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)UProxy->type); offset += sizeof(uint16_t);
+		buffer[offset] = UProxy->checking; offset += sizeof(bool);
+		buffer[offset] = UProxy->retries; offset += sizeof(uint8_t);
+		buffer[offset] = UProxy->associatedProxy != NULL;
+
+		WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_UPROXY_ADD);
+
 		ret++;
 	}
 	return ret;
@@ -114,9 +172,38 @@ bool UProxyRemove(UNCHECKED_PROXY *UProxy)
 {
 	bool found = false;
 
+	uint8_t ipType = GetIPType(UProxy->ip) == IPV4 ? 0x04 : 0x06;
+	size_t offset = 0;
+	uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+		(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
+		sizeof(uint16_t) + /* port */
+		sizeof(uint16_t) /* type */];
+
+#define MAP_TYPE(x, type) *((type*)(&(x)))
+
+	buffer[offset] = ipType; offset += sizeof(uint8_t);
+	memcpy(buffer + offset, ipType == 0x04 ? &(UProxy->ip->Data[3]) : UProxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+	MAP_TYPE(buffer[offset], uint16_t) = htons(UProxy->port); offset += sizeof(uint16_t);
+	MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)UProxy->type); offset += sizeof(uint16_t);
+
+	WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE);
+
 	pthread_mutex_lock(&LockUncheckedProxies); {
 		for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 			if (UProxy == UncheckedProxies[x]) {
+				uint8_t ipType = GetIPType(UProxy->ip) == IPV4 ? 0x04 : 0x06;
+				size_t offset = 0;
+				uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+					(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
+					sizeof(uint16_t) + /* port */
+					sizeof(uint16_t) /* type */];
+				buffer[offset] = ipType; offset += sizeof(uint8_t);
+				memcpy(buffer + offset, UProxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+				buffer[offset] = htons(UProxy->port); offset += sizeof(uint16_t);
+				buffer[offset] = htons((uint16_t)UProxy->type); offset += sizeof(uint16_t);
+
+				WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE);
+
 				UProxyFree(UncheckedProxies[x]);
 				SizeUncheckedProxies--;
 				if (SizeUncheckedProxies > 0)
@@ -126,12 +213,11 @@ bool UProxyRemove(UNCHECKED_PROXY *UProxy)
 				break;
 			}
 		}
+		uint64_t network = htobe64(SizeUncheckedProxies);
+		WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES);
+
+		Log(LOG_LEVEL_DEBUG, "UProxyRemove: size %d", SizeUncheckedProxies);
 	} pthread_mutex_unlock(&LockUncheckedProxies);
-
-	uint64_t network = htobe64(SizeUncheckedProxies);
-	WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES);
-
-	Log(LOG_LEVEL_DEBUG, "UProxyRemove: size %d", SizeUncheckedProxies);
 	return found;
 }
 
@@ -139,9 +225,38 @@ bool ProxyRemove(PROXY *Proxy)
 {
 	bool found = false;
 
+	uint8_t ipType = GetIPType(Proxy->ip) == IPV4 ? 0x04 : 0x06;
+	size_t offset = 0;
+	uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+		(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
+		sizeof(uint16_t) + /* port */
+		sizeof(uint16_t) /* type */];
+
+#define MAP_TYPE(x, type) *((type*)(&(x)))
+
+	buffer[offset] = ipType; offset += sizeof(uint8_t);
+	memcpy(buffer + offset, ipType == 0x04 ? &(Proxy->ip->Data[3]) : Proxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+	MAP_TYPE(buffer[offset], uint16_t) = htons(Proxy->port); offset += sizeof(uint16_t);
+	MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)Proxy->type); offset += sizeof(uint16_t);
+
+	WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE);
+
 	pthread_mutex_lock(&LockCheckedProxies); {
 		for (uint64_t x = 0; x < SizeCheckedProxies; x++) {
 			if (Proxy == CheckedProxies[x]) {
+				uint8_t ipType = GetIPType(Proxy->ip) == IPV4 ? 0x04 : 0x06;
+				size_t offset = 0;
+				uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+					(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
+					sizeof(uint16_t) + /* port */
+					sizeof(uint16_t) /* type */];
+				buffer[offset] = ipType; offset += sizeof(uint8_t);
+				memcpy(buffer + offset, Proxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+				buffer[offset] = htons(Proxy->port); offset += sizeof(uint16_t);
+				buffer[offset] = htons((uint16_t)Proxy->type); offset += sizeof(uint16_t);
+
+				WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE);
+
 				ProxyFree(CheckedProxies[x]);
 				SizeCheckedProxies--;
 				if (SizeCheckedProxies > 0)
@@ -151,10 +266,10 @@ bool ProxyRemove(PROXY *Proxy)
 				break;
 			}
 		}
-	} pthread_mutex_unlock(&LockCheckedProxies);
 
-	uint64_t network = htobe64(SizeCheckedProxies);
-	WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES);
+		uint64_t network = htobe64(SizeCheckedProxies);
+		WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES);
+	} pthread_mutex_unlock(&LockCheckedProxies);
 
 	return found;
 }
@@ -187,13 +302,13 @@ UNCHECKED_PROXY *UProxyFromProxy(PROXY *In)
 
 void GenerateHashForUProxy(UNCHECKED_PROXY *In)
 {
-	size_t dataSize = IPV6_SIZE + sizeof(uint16_t)+sizeof(In->type) + sizeof(hashSalt);
+	size_t dataSize = IPV6_SIZE + sizeof(uint16_t) + sizeof(In->type) + sizeof(hashSalt);
 
 	char *data = malloc(dataSize); {
 		memcpy(data, In->ip->Data, IPV6_SIZE);
 		memcpy(data + IPV6_SIZE, &(In->port), sizeof(uint16_t));
 		memcpy(data + IPV6_SIZE + sizeof(uint16_t), &(In->type), sizeof(In->type));
-		memcpy(data + IPV6_SIZE + sizeof(uint16_t)+sizeof(In->type), hashSalt, sizeof(hashSalt));
+		memcpy(data + IPV6_SIZE + sizeof(uint16_t) + sizeof(In->type), hashSalt, sizeof(hashSalt));
 
 		SHA512(data, dataSize, In->hash);
 	} free(data);
@@ -229,7 +344,7 @@ PROXY *GetProxyFromUid(char *Uid)
 
 		pthread_mutex_lock(&LockCheckedProxies); {
 			for (uint64_t x = 0;x < SizeCheckedProxies;x++) {
-				if (memcmp(uid, CheckedProxies[x]->ip->Data, IPV6_SIZE) == 0 && *((uint16_t*)(uid + IPV6_SIZE)) == CheckedProxies[x]->port && *((PROXY_TYPE*)(uid + IPV6_SIZE + sizeof(uint16_t))) == CheckedProxies[x]->type) {
+				if (MemEqual(uid, CheckedProxies[x]->ip->Data, IPV6_SIZE) && *((uint16_t*)(uid + IPV6_SIZE)) == CheckedProxies[x]->port && *((PROXY_TYPE*)(uid + IPV6_SIZE + sizeof(uint16_t))) == CheckedProxies[x]->type) {
 					proxy = CheckedProxies[x];
 					break;
 				}

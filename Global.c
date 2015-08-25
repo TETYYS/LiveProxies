@@ -49,3 +49,14 @@ MEM_OUT char *FormatTime(uint64_t TimeMs)
 
 	return timeBuff;
 }
+
+bool MemEqual(void *A, void *B, size_t Size)
+{
+	while (--Size) {
+		if (*((uint8_t*)A) != *((uint8_t*)B))
+			return false;
+		A++;
+		B++;
+	}
+	return true;
+}

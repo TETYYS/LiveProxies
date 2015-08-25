@@ -27,7 +27,8 @@ char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",				"{T_CFG_
 								"{T_STATS_GEO_TABLE_ITEMS_START}",	"{T_STATS_GEO_TABLE_ITEMS_END}","{T_STATS_GEO_ITEM}",			"{T_CHECK_IP}",					"{T_CHECK_PORT}",			"{T_CHECK_TYPE}",
 								"{T_CHECK_COUNTRY_LOWER}",			"{T_CHECK_COUNTRY_UPPER}",		"{T_CHECK_LIVE_SINCE}",			"{T_CHECK_LAST_CHECKED}",		"{T_CHECK_CONNECT_TIMEOUT}","{T_CHECK_HTTP_S_TIMEOUT}",
 								"{T_CHECK_SUCCESSFUL_CHECKS}",		"{T_CHECK_FAILED_CHECKS}",		"{T_CHECK_RETRIES}",			"{T_CHECK_UID}",				"{T_CHECK_COUNTRY_FULL}",	"{T_SUB_SIZE_UPROXIES}",
-								"{T_SUB_SIZE_PROXIES}",				"{T_SUB_AUTH_COOKIE}",			"{T_SUB_MSG_INTERVAL}"
+								"{T_SUB_SIZE_PROXIES}",				"{T_SUB_AUTH_COOKIE}",			"{T_SUB_MSG_INTERVAL}",			"{T_SUB_PROXY_ADD}",			"{T_SUB_UPROXY_ADD}",		"{T_SUB_PROXY_REMOVE}",
+								"{T_SUB_UPROXY_REMOVE}",			"{T_CFG_ENABLED}",				"{T_CFG_DISABLED}"
 };
 
 static char *StrReplace(char *string, char *substr, char *replacement)
@@ -59,6 +60,8 @@ static char *StrReplace(char *string, char *substr, char *replacement)
 void HtmlTemplateLoadAll()
 {
 	HtmlTemplateUseStock = false;
+	HtmlComponentEnabled = NULL;
+	HtmlComponentDisabled = NULL;
 
 	DIR *d;
 	struct dirent *dir;
@@ -200,10 +203,6 @@ static void HtmlTemplateFindFirst(char *Contents, OUT HTML_TEMPLATE_COMPONENT_ID
 			*Identifier = x;
 		}
 	}
-	/*if (*Identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_INVALID)
-		Log(LOG_LEVEL_DEBUG, "HtmlTemplateFindFirst: %d", *Identifier);
-	else
-		Log(LOG_LEVEL_DEBUG, "HtmlTemplateFindFirst: NULL");*/
 }
 
 static void HtmlTemplateComponentPush(HTML_TEMPLATE_COMPONENT **Components, size_t *CurrentSize, HTML_TEMPLATE_COMPONENT Component)
@@ -235,11 +234,9 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 	char *offset;
 
 	while (1) {
-		// Log(LOG_LEVEL_DEBUG, "Finding first...");
 		HtmlTemplateFindFirst(curEnd, &identifier, &offset);
 
 		if (identifier == HTML_TEMPLATE_COMPONENT_IDENTIFIER_INVALID) {
-			// Log(LOG_LEVEL_DEBUG, "No more components");
 			// No more components
 			comp.identifier = HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATIC;
 			comp.content = malloc((strlen(curEnd) * sizeof(char)) + 1);
@@ -248,20 +245,16 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 			break;
 		} else {
 			if (offset != curEnd) {
-				// Log(LOG_LEVEL_DEBUG, "Pushing static content...");
 				// Push static content in front of component
 				comp.identifier = HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATIC;
 				comp.content = malloc(offset - curEnd + 1);
 				strncpy(comp.content, curEnd, offset - curEnd);
 				((char*)(comp.content))[offset - curEnd] = 0x00;
 
-				// Log(LOG_LEVEL_DEBUG, "Static content: %s", comp.content);
-
 				HtmlTemplateComponentPush(Template, SizeRef, comp);
 				curEnd = offset;
 			}
 			if (offset == curEnd) {
-				// Log(LOG_LEVEL_DEBUG, "Pushing dynamic content...");
 				// Push dynamic content
 				comp.identifier = identifier;
 
@@ -313,6 +306,20 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 						CONFIG_STRING(CfgRoot, "TableError", comp.content);
 						break;
 					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_ENABLED: {
+						if (HtmlComponentEnabled == NULL) {
+							CONFIG_STRING(CfgRoot, "Enabled", HtmlComponentEnabled);
+						}
+						comp.content = HtmlComponentEnabled;
+						break;
+					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_DISABLED: {
+						if (HtmlComponentDisabled == NULL) {
+							CONFIG_STRING(CfgRoot, "Disabled", HtmlComponentDisabled);
+						}
+						comp.content = HtmlComponentDisabled;
+						break;
+					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_MSG_INTERVAL: {
 						config_setting_t *wsGroup = config_setting_get_member(CfgRoot, "WS");
 						CONFIG_INT(wsGroup, "MessageIntervalMs", WSMessageIntervalMs);
@@ -333,6 +340,22 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_SIZE_UPROXIES: {
 						comp.content = WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES;
+						break;
+					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_PROXY_ADD: {
+						comp.content = WEBSOCKET_SERVER_COMMAND_PROXY_ADD;
+						break;
+					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_UPROXY_ADD: {
+						comp.content = WEBSOCKET_SERVER_COMMAND_UPROXY_ADD;
+						break;
+					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_PROXY_REMOVE: {
+						comp.content = WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE;
+						break;
+					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_UPROXY_REMOVE: {
+						comp.content = WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE;
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_AUTH_COOKIE: {
@@ -400,7 +423,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 
 		switch (Components[x].identifier) {
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CURRENT_PAGE: {
-				evbuffer_add_reference(Buffer, Info.currentPage->name, strlen(Info.currentPage->name), NULL, NULL);
+				evbuffer_add(Buffer, Info.currentPage->name, strlen(Info.currentPage->name));
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_HOME_ACTIVE: {
@@ -429,32 +452,32 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_ODD: {
-				if (!TableInfo.inTable || TableInfo.tableObjectIteration % 2 == 0)
+				if (TableInfo.inTable && TableInfo.tableObjectIteration % 2 == 0)
 					continue;
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_EVEN: {
-				if (!TableInfo.inTable || TableInfo.tableObjectIteration % 2 != 0)
+				if (TableInfo.inTable && TableInfo.tableObjectIteration % 2 != 0)
 					continue;
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_OK: {
-				if (!TableInfo.inTable || rowStatus != 1)
+				if (TableInfo.inTable && rowStatus != 1)
 					continue;
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_WARN: {
-				if (!TableInfo.inTable || rowStatus != 2)
+				if (TableInfo.inTable && rowStatus != 2)
 					continue;
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_ERR: {
-				if (!TableInfo.inTable || rowStatus != 3)
+				if (TableInfo.inTable && rowStatus != 3)
 					continue;
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_USER: {
-				evbuffer_add_reference(Buffer, Info.user, strlen(Info.user), NULL, NULL);
+				evbuffer_add(Buffer, Info.user, strlen(Info.user));
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_COUNT_UPROXIES:
@@ -464,7 +487,11 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_SIZE_PROXIES:
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_SIZE_UPROXIES:
-			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_MSG_INTERVAL: {
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_MSG_INTERVAL:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_UPROXY_ADD:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_PROXY_ADD:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_UPROXY_REMOVE:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_PROXY_REMOVE: {
 				evbuffer_add_printf(Buffer, "%d", Components[x].content);
 				break;
 			}
@@ -480,35 +507,35 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 								evbuffer_add_printf(Buffer, "%s:%d", ip, uproxy->port);
 							} free(ip);
 						} else
-							evbuffer_add_reference(Buffer, "IP:Port", 7 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "IP:Port", 7 * sizeof(char));
 						break;
 					}
 					case 1: {
 						if (item)
 							evbuffer_add_printf(Buffer, "%s", ProxyGetTypeString(uproxy->type));
 						else
-							evbuffer_add_reference(Buffer, "Type", 4 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Type", 4 * sizeof(char));
 						break;
 					}
 					case 2: {
 						if (item)
-							evbuffer_add_reference(Buffer, uproxy->checking ? "check" : "x", (uproxy->checking ? 5 : 1) * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, uproxy->checking ? HtmlComponentEnabled : HtmlComponentDisabled, (uproxy->checking ? strlen(HtmlComponentEnabled) : strlen(HtmlComponentDisabled)) * sizeof(char));
 						else
-							evbuffer_add_reference(Buffer, "Currently checking", 18 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Currently checking", 18 * sizeof(char));
 						break;
 					}
 					case 3: {
 						if (item)
 							evbuffer_add_printf(Buffer, "%d", uproxy->retries);
 						else
-							evbuffer_add_reference(Buffer, "Retries", 7 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Retries", 7 * sizeof(char));
 						break;
 					}
 					case 4: {
 						if (item)
-							evbuffer_add_reference(Buffer, uproxy->associatedProxy != NULL ? "check" : "x", (uproxy->associatedProxy != NULL ? 5 : 1) * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, uproxy->associatedProxy != NULL ? HtmlComponentEnabled : HtmlComponentDisabled, (uproxy->associatedProxy != NULL ? strlen(HtmlComponentEnabled) : strlen(HtmlComponentDisabled)) * sizeof(char));
 						else
-							evbuffer_add_reference(Buffer, "Rechecking", 10 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Rechecking", 10 * sizeof(char));
 						TableInfo.tableHeadOrItemIteration = -1; // line+4 sets it to 0
 						break;
 					}
@@ -528,49 +555,49 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 								evbuffer_add_printf(Buffer, "%s:%d", ip, proxy->port);
 							} free(ip);
 						} else
-							evbuffer_add_reference(Buffer, "IP:Port", 7 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "IP:Port", 7 * sizeof(char));
 						break;
 					}
 					case 1: {
 						if (item)
 							evbuffer_add_printf(Buffer, "%s", ProxyGetTypeString(proxy->type));
 						else
-							evbuffer_add_reference(Buffer, "Type", 4 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Type", 4 * sizeof(char));
 						break;
 					}
 					case 2: {
 						if (item)
-							evbuffer_add_reference(Buffer, proxy->country, 2 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, proxy->country, 2 * sizeof(char));
 						else
-							evbuffer_add_reference(Buffer, "Country", 7 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Country", 7 * sizeof(char));
 						break;
 					}
 					case 3: {
 						if (item) {
 							if (proxy->anonymity == ANONYMITY_MAX)
-								evbuffer_add_reference(Buffer, "Max", 3 * sizeof(char), NULL, NULL);
+								evbuffer_add(Buffer, "Max", 3 * sizeof(char));
 							else if (proxy->anonymity == ANONYMITY_ANONYMOUS)
-								evbuffer_add_reference(Buffer, "Anonymous", 9 * sizeof(char), NULL, NULL);
+								evbuffer_add(Buffer, "Anonymous", 9 * sizeof(char));
 							else if (proxy->anonymity == ANONYMITY_TRANSPARENT)
-								evbuffer_add_reference(Buffer, "Transparent", 11 * sizeof(char), NULL, NULL);
+								evbuffer_add(Buffer, "Transparent", 11 * sizeof(char));
 							else
-								evbuffer_add_reference(Buffer, "N/A", 3 * sizeof(char), NULL, NULL);
+								evbuffer_add(Buffer, "N/A", 3 * sizeof(char));
 						} else
-							evbuffer_add_reference(Buffer, "Anonymity", 9 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Anonymity", 9 * sizeof(char));
 						break;
 					}
 					case 4: {
 						if (item) {
 							evbuffer_add_printf(Buffer, "%d", proxy->timeoutMs);
 						} else
-							evbuffer_add_reference(Buffer, "Connection latency (ms)", 23 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Connection latency (ms)", 23 * sizeof(char));
 						break;
 					}
 					case 5: {
 						if (item)
 							evbuffer_add_printf(Buffer, "%d", proxy->httpTimeoutMs);
 						else
-							evbuffer_add_reference(Buffer, "HTTP/S latency (ms)", 19 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "HTTP/S latency (ms)", 19 * sizeof(char));
 						break;
 					}
 					case 6: {
@@ -579,7 +606,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 								evbuffer_add_printf(Buffer, "%s", time);
 							} free(time);
 						} else
-							evbuffer_add_reference(Buffer, "Live since", 10 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Live since", 10 * sizeof(char));
 						break;
 					}
 					case 7: {
@@ -588,28 +615,28 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 								evbuffer_add_printf(Buffer, "%s", time);
 							} free(time);
 						} else
-							evbuffer_add_reference(Buffer, "Last checked", 12 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Last checked", 12 * sizeof(char));
 						break;
 					}
 					case 8: {
 						if (item)
 							evbuffer_add_printf(Buffer, "%d", proxy->retries);
 						else
-							evbuffer_add_reference(Buffer, "Retries", 7 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Retries", 7 * sizeof(char));
 						break;
 					}
 					case 9: {
 						if (item)
 							evbuffer_add_printf(Buffer, "%d", proxy->successfulChecks);
 						else
-							evbuffer_add_reference(Buffer, "Successful checks", 17 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Successful checks", 17 * sizeof(char));
 						break;
 					}
 					case 10: {
 						if (item)
 							evbuffer_add_printf(Buffer, "%d", proxy->failedChecks);
 						else
-							evbuffer_add_reference(Buffer, "Failed checks", 13 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Failed checks", 13 * sizeof(char));
 						break;
 					}
 					case 11: {
@@ -618,7 +645,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 								evbuffer_add_printf(Buffer, "<a href=\"/recheck?uid=%s\">Check</a>", uid);
 							} free(uid);
 						} else
-							evbuffer_add_reference(Buffer, "Full check", 10 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Full check", 10 * sizeof(char));
 						TableInfo.tableHeadOrItemIteration = -1; // line+4 sets it to 0
 						break;
 					}
@@ -634,23 +661,23 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				switch (TableInfo.tableHeadOrItemIteration) {
 					case 0: {
 						if (item) {
-							evbuffer_add_reference(Buffer, entry->name, strlen(entry->name) * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, entry->name, strlen(entry->name) * sizeof(char));
 						} else
-							evbuffer_add_reference(Buffer, "Name", 4 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Name", 4 * sizeof(char));
 						break;
 					}
 					case 1: {
 						if (item)
 							evbuffer_add_printf(Buffer, "%d", entry->addedNew);
 						else
-							evbuffer_add_reference(Buffer, "New proxies", 11 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "New proxies", 11 * sizeof(char));
 						break;
 					}
 					case 2: {
 						if (item)
 							evbuffer_add_printf(Buffer, "%d", entry->added);
 						else
-							evbuffer_add_reference(Buffer, "Total proxies", 13 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Total proxies", 13 * sizeof(char));
 						TableInfo.tableHeadOrItemIteration = -1; // line+4 sets it to 0
 						break;
 					}
@@ -666,16 +693,16 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				switch (TableInfo.tableHeadOrItemIteration) {
 					case 0: {
 						if (item) {
-							evbuffer_add_reference(Buffer, entry->countryCode, 2 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, entry->countryCode, 2 * sizeof(char));
 						} else
-							evbuffer_add_reference(Buffer, "Country", 7 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Country", 7 * sizeof(char));
 						break;
 					}
 					case 1: {
 						if (item)
 							evbuffer_add_printf(Buffer, "%d", entry->count);
 						else
-							evbuffer_add_reference(Buffer, "Proxies", 7 * sizeof(char), NULL, NULL);
+							evbuffer_add(Buffer, "Proxies", 7 * sizeof(char));
 						TableInfo.tableHeadOrItemIteration = -1; // line+4 sets it to 0
 						break;
 					}
@@ -856,8 +883,10 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_OK:
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_WARN:
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_ERR:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_ENABLED:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_DISABLED:
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_AUTH_COOKIE: {
-				evbuffer_add_reference(Buffer, Components[x].content, strlen(Components[x].content), NULL, NULL);
+				evbuffer_add(Buffer, Components[x].content, strlen(Components[x].content));
 				break;
 			}
 		}

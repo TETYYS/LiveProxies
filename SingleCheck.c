@@ -20,6 +20,7 @@ void Recheck(PROXY *In, void CALLBACK *FinishedCallback, void *Ex)
 	UProxy->singleCheckCallbackExtraData = Ex;
 
 	UProxyAdd(UProxy);
+	In->rechecking = true;
 	RequestAsync(UProxy);
 }
 

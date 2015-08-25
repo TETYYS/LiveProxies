@@ -3,7 +3,7 @@
 #include "IPv6Map.h"
 #include <stddef.h>
 
-#define VERSION "0.7.0"
+#define VERSION "0.7.1"
 #define CALLBACK
 #define OUT
 #define MEM_OUT
@@ -25,3 +25,4 @@ double GetUnixTimestampMilliseconds();
 char *GetHost(IP_TYPE Preffered, bool SSL);
 IP_TYPE GetIPTypePreffered(IP_TYPE Preffered);
 MEM_OUT char *FormatTime(uint64_t TimeMs);
+bool MemEqual(void *A, void *B, size_t Size);

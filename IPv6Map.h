@@ -30,5 +30,5 @@ char *IPv6MapToString2(IPv6Map *In);
 IP_TYPE GetIPType(IPv6Map *In);
 IPv6Map *GetIPFromHSock(int hSock);
 struct sockaddr *IPv6MapToRaw(IPv6Map *In, uint16_t Port);
-bool IPv6MapCompare(IPv6Map *a, IPv6Map *b);
+bool IPv6MapEqual(IPv6Map *a, IPv6Map *b);
 IPv6Map *RawToIPv6Map(struct sockaddr *In);

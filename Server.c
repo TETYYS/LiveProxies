@@ -135,7 +135,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 
 		pthread_mutex_lock(&LockUncheckedProxies); {
 			for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
-				if (memcmp(key, UncheckedProxies[x]->hash, 512 / 8) == 0) {
+				if (MemEqual(key, UncheckedProxies[x]->hash, 512 / 8)) {
 					UProxy = UncheckedProxies[x];
 					pthread_mutex_lock(&(UProxy->processing));
 				}
@@ -218,7 +218,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 							pcre_get_substring(Buff, subStrVec, regexRet, x, &(foundIpStr));
 							if (foundIpStr != NULL) {
 								IPv6Map *foundIp = StringToIPv6Map(foundIpStr);
-								if (foundIp != NULL && IPv6MapCompare(i == 0 ? GlobalIp4 : GlobalIp6, foundIp)) {
+								if (foundIp != NULL && IPv6MapEqual(i == 0 ? GlobalIp4 : GlobalIp6, foundIp)) {
 									Log(LOG_LEVEL_DEBUG, "WServer: switch to transparent proxy on (type %d)", UProxy->type);
 									proxy->anonymity = ANONYMITY_TRANSPARENT;
 									free(foundIp);
@@ -243,7 +243,8 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 		if (UProxy->associatedProxy == NULL) {
 			Log(LOG_LEVEL_DEBUG, "WServer: Final proxy add type %d anonimity %d", proxy->type, proxy->anonymity);
 			ProxyAdd(proxy);
-		}
+		} else
+			UProxy->associatedProxy->rechecking = false;
 	} /* End process headers */
 
 	if (UProxy->timeout != NULL)
@@ -389,8 +390,6 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 	} /* End page dispatch */
 
 free:
-	free(Buff);
-
 	if (freeBufferEvent) {
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free on write %p", BuffEvent);
 		if (evbuffer_get_length(bufferevent_get_output(BuffEvent)))
@@ -454,6 +453,7 @@ static void HexDump(char *desc, void *addr, int len)
 void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 {
 	Log(LOG_LEVEL_DEBUG, "HTTPRead");
+
 	struct evbuffer *evBuff = bufferevent_get_input(BuffEvent);
 
 	size_t len = evbuffer_get_length(evBuff);
@@ -495,6 +495,7 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 		// Stop the Ruse man
 		if (buff[x] == 0x00) {
 			Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
+			free(buff);
 			bufferevent_free(BuffEvent);
 			return;
 		}
@@ -507,6 +508,7 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 		if (buff[len - 1] != '\n' || buff[len - 2] != '\n') {
 			// Not full message
 			// We got data in evbuffer, just return and wait for remaining data
+			free(buff);
 			return;
 		}
 	}
@@ -515,6 +517,8 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 	evbuffer_drain(evBuff, len); // No clear data function?
 
 	ServerLanding(BuffEvent, buff);
+
+	free(buff);
 }
 
 static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct sockaddr *Address, int Socklen, void *Ctx)
@@ -529,7 +533,7 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 			Log(LOG_LEVEL_DEBUG, "ServerAccept: HTTP");
 			struct bufferevent *bev = bufferevent_socket_new(base, Fd, BEV_OPT_CLOSE_ON_FREE);
 			//bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
-			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, NULL);
+			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, false);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
 		}
@@ -539,7 +543,7 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 			Log(LOG_LEVEL_DEBUG, "ServerAccept: SSL");
 			struct bufferevent *bev = bufferevent_openssl_socket_new(base, Fd, SSL_new(levServerSSL), BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
 			//bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
-			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, NULL);
+			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, true);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
 		}
@@ -675,7 +679,7 @@ static void ServerUDP(int hSock)
 		IPv6Map *ip = RawToIPv6Map(&remote); {
 			pthread_mutex_lock(&LockUncheckedProxies); {
 				for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
-					if (memcmp(buff, UncheckedProxies[x]->hash, 512 / 8) == 0 && IPv6MapCompare(ip, UncheckedProxies[x]->ip)) {
+					if (MemEqual(buff, UncheckedProxies[x]->hash, 512 / 8) && IPv6MapEqual(ip, UncheckedProxies[x]->ip)) {
 						UProxy = UncheckedProxies[x];
 						pthread_mutex_lock(&(UProxy->processing));
 					}
@@ -713,7 +717,8 @@ static void ServerUDP(int hSock)
 		if (UProxy->associatedProxy == NULL) {
 			Log(LOG_LEVEL_DEBUG, "WServerUDP: Final proxy");
 			ProxyAdd(proxy);
-		}
+		} else
+			UProxy->associatedProxy->rechecking = false;
 
 		if (UProxy->timeout != NULL)
 			event_active(UProxy->timeout, EV_TIMEOUT, 0);

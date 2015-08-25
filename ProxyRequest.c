@@ -32,6 +32,16 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 	struct bufferevent *BuffEvent = In->BuffEvent;
 	if (In->freeBufferEvent) {
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
+		if (ProxyIsSSL(UProxy->type)) { // ???
+			SSL *ssl = bufferevent_openssl_get_ssl(BuffEvent);
+			if (ssl != NULL) {
+				Log(LOG_LEVEL_DEBUG, "SSL NOT NULL");
+				SSL_CTX_free(ssl->ctx);
+				SSL_free(ssl);
+			} else {
+				Log(LOG_LEVEL_DEBUG, "SSL NULL");
+			}
+		}
 		bufferevent_free(BuffEvent);
 	}
 	free(In);
@@ -65,6 +75,7 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 			} free(ip);
 			UProxyRemove(UProxy);
 		} else {
+			pthread_mutex_unlock(&(UProxy->processing));
 			UProxy->checking = false;
 		}
 	} else {
@@ -82,8 +93,6 @@ static void RequestFree(evutil_socket_t fd, short what, REQUEST_FREE_STRUCT *In)
 
 		UProxyRemove(UProxy);
 	}
-
-	pthread_mutex_unlock(&(UProxy->processing));
 }
 
 typedef enum _SOCKS_TYPE {
@@ -431,6 +440,23 @@ static void ProxyHandleData(UNCHECKED_PROXY *UProxy, struct bufferevent *BuffEve
 		}
 		case 7: {
 			EVTYPE_CASE_NOT(EV_TYPE_WRITE);
+
+			if (ProxyIsSSL(UProxy->type)) {
+				// SSL
+				SSL *ssl = bufferevent_openssl_get_ssl(BuffEvent);
+				X509 *cert = SSL_get_peer_certificate(ssl);
+
+				EVP_MD *digest = EVP_get_digestbyname("sha1");
+				unsigned char         md[EVP_MAX_MD_SIZE];
+				unsigned int          n;
+				int                   pos;
+				X509_digest(cert, digest, md, &n);
+				printf("Fingerprint: ");
+				for (pos = 0; pos < 19; pos++)
+					printf("%02x:", md[pos]);
+				printf("%02x\n", md[19]);
+				X509_free(cert);
+			}
 
 			UProxy->requestTimeHttpMs = GetUnixTimestampMilliseconds();
 			Log(LOG_LEVEL_DEBUG, "Sending HTTP request");

@@ -133,7 +133,7 @@ static void WebsocketConstructPacket(uint8_t Opcode, uint8_t *MaskingKey, bool M
 	}
 }
 
-void WebsocketClientsNotifyClient(struct bufferevent *BuffEvent, void *Message, size_t MessageLen, uint32_t Command)
+void WebsocketClientsNotifySingle(struct bufferevent *BuffEvent, void *Message, size_t MessageLen, uint32_t Command)
 {
 	if (HtmlTemplateUseStock)
 		return;
@@ -162,7 +162,9 @@ void WebsocketClientsNotify(void *Message, size_t MessageLen, uint32_t Command)
 				WEB_SOCKET_MESSAGE_INTERVAL *msgInterval;
 				for (size_t i = 0;i < WebSocketSubscribedClients[x]->lastMessagesSize;i++) {
 					if (WebSocketSubscribedClients[x]->lastMessages[i].subscription == Command) {
-						if (WebSocketSubscribedClients[x]->lastMessages[i].lastMessageMs + WSMessageIntervalMs > GetUnixTimestampMilliseconds()) {
+						if (WebSocketSubscribedClients[x]->lastMessages[i].lastMessageMs + WSMessageIntervalMs > GetUnixTimestampMilliseconds()
+							&& Command != WEBSOCKET_SERVER_COMMAND_PROXY_ADD && Command != WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE
+							&& Command != WEBSOCKET_SERVER_COMMAND_UPROXY_ADD && Command != WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE) {
 							pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
 							return;
 						} else
@@ -355,7 +357,7 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 							if (val != target) {
 								uint64_t network = htobe64(target);
 								Log(LOG_LEVEL_DEBUG, "Sent on pull data on demand");
-								WebsocketClientsNotifyClient(BuffEvent, &network, sizeof(network), sub);
+								WebsocketClientsNotifySingle(BuffEvent, &network, sizeof(network), sub);
 							}
 							break;
 						}
@@ -395,42 +397,43 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 			WEB_SOCKET_SUBSCRIBED_CLIENT *client;
 
 			// Register client
-				pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
-					WebSocketSubscribedClientsSize++;
+			pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
+				WebSocketSubscribedClientsSize++;
 
-					WebSocketSubscribedClients = WebSocketSubscribedClients == NULL ?
-						malloc(sizeof(*WebSocketSubscribedClients)) :
-						realloc(WebSocketSubscribedClients, sizeof(*WebSocketSubscribedClients));
-				} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
+				WebSocketSubscribedClients = WebSocketSubscribedClients == NULL ?
+					malloc(sizeof(*WebSocketSubscribedClients)) :
+					realloc(WebSocketSubscribedClients, sizeof(*WebSocketSubscribedClients));
+			} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
 
-				client = malloc(sizeof(WEB_SOCKET_UNFINISHED_PACKET));
-				WebSocketSubscribedClients[WebSocketSubscribedClientsSize - 1] = client;
+			client = malloc(sizeof(WEB_SOCKET_UNFINISHED_PACKET));
+			WebSocketSubscribedClients[WebSocketSubscribedClientsSize - 1] = client;
 
-				client->buffEvent = BuffEvent;
-				client->timer = event_new(bufferevent_get_base(BuffEvent), -1, EV_PERSIST, WebsocketClientPing, BuffEvent);
-				if (*(uint32_t*)payLoadDecoded > (WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES + WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES)) {
-					// Ruse man!!
-					WebsocketClientTimeout(BuffEvent, EV_TIMEOUT, client); // this is actually ruse man, so stop him
-					goto end;
-					return;
+			client->buffEvent = BuffEvent;
+			client->timer = event_new(bufferevent_get_base(BuffEvent), -1, EV_PERSIST, WebsocketClientPing, BuffEvent);
+			if (*(uint32_t*)payLoadDecoded > (	WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES +	WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES + WEBSOCKET_SERVER_COMMAND_PROXY_ADD + WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE +
+												WEBSOCKET_SERVER_COMMAND_UPROXY_ADD +		WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE)) {
+				// Ruse man!!
+				WebsocketClientTimeout(BuffEvent, EV_TIMEOUT, client); // this is actually ruse man, so stop him
+				goto end;
+				return;
+			}
+
+			client->subscriptions = *(uint32_t*)payLoadDecoded;
+			client->lastMessagesSize = 0;
+			client->lastMessages = NULL;
+			for (size_t x = 0; x < WEBSOCKET_TOTAL_SERVER_COMMANDS;x++) {
+				if (((1 << x) & client->subscriptions) == (1 << x)) {
+					client->lastMessagesSize++;
+					client->lastMessages = client->lastMessages == NULL ? malloc(sizeof(WEB_SOCKET_MESSAGE_INTERVAL)) : realloc(client->lastMessages, sizeof(WEB_SOCKET_MESSAGE_INTERVAL) * client->lastMessagesSize);
+					client->lastMessages[client->lastMessagesSize - 1].lastMessageMs = 0;
+					client->lastMessages[client->lastMessagesSize - 1].subscription = (1 << x);
 				}
+			}
 
-				client->subscriptions = *(uint32_t*)payLoadDecoded;
-				client->lastMessagesSize = 0;
-				client->lastMessages = NULL;
-				for (size_t x = 0; x < WEBSOCKET_TOTAL_SERVER_COMMANDS;x++) {
-					if (((1 << x) & client->subscriptions) == (1 << x)) {
-						client->lastMessagesSize++;
-						client->lastMessages = client->lastMessages == NULL ? malloc(sizeof(WEB_SOCKET_MESSAGE_INTERVAL)) : realloc(client->lastMessages, sizeof(WEB_SOCKET_MESSAGE_INTERVAL) * client->lastMessagesSize);
-						client->lastMessages[client->lastMessagesSize - 1].lastMessageMs = 0;
-						client->lastMessages[client->lastMessagesSize - 1].subscription = (1 << x);
-					}
-				}
+			struct timeval sec = { GlobalTimeoutTV.tv_sec / 2, GlobalTimeoutTV.tv_usec / 2 };
+			event_add(client->timer, &sec);
 
-				struct timeval sec = { GlobalTimeoutTV.tv_sec / 2, GlobalTimeoutTV.tv_usec / 2 };
-				event_add(client->timer, &sec);
-
-				bufferevent_setcb(BuffEvent, ServerRead, NULL, WebsocketClientTimeout, client);
+			bufferevent_setcb(BuffEvent, ServerRead, NULL, WebsocketClientTimeout, client);
 
 
 			bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
@@ -452,14 +455,14 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 			break;
 		}
 		case WEBSOCKET_OPCODE_PONG: {
-			pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
+			/*pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
 				for (size_t x = 0;x < WebSocketSubscribedClientsSize;x++) {
-					if (WebSocketSubscribedClients[x]->buffEvent == BuffEvent) {
+					if (WebSocketSubscribedClients[x]->buffEvent == BuffEvent) {*/
 						bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV); // reset timeouts
-						break;
+						/*break;
 					}
 				}
-			} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
+			} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);*/
 			break;
 		}
 	}

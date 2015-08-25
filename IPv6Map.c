@@ -141,12 +141,16 @@ MEM_OUT IPv6Map *GetIPFromHSock(int hSock)
 	return ret;
 }
 
-bool IPv6MapCompare(IPv6Map *a, IPv6Map *b)
+bool IPv6MapEqual(IPv6Map *a, IPv6Map *b)
 {
 	IP_TYPE type;
 	if (GetIPType(a) != GetIPType(b))
 		return false;
 	type = GetIPType(a);
 
-	return memcmp(a->Data, b->Data, type == IPV4 ? IPV4_SIZE : IPV6_SIZE) == 0;
+	if (type == IPV4) {
+		return MemEqual(&(a->Data[3]), &(b->Data[3]), IPV4_SIZE);
+	}
+
+	return MemEqual(a->Data, b->Data, IPV6_SIZE);
 }
