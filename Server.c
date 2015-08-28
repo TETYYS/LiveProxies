@@ -266,18 +266,24 @@ freeProxy:
 	}
 }
 
+int sslFree = 0;
+
 void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx)
 {
-	if ((Event & BEV_EVENT_EOF == BEV_EVENT_EOF || Event & BEV_EVENT_TIMEOUT == BEV_EVENT_TIMEOUT)) {
-		//Log(LOG_LEVEL_DEBUG, "BuffEvent free %p event %x", BuffEvent, Event);
-		//bufferevent_free(BuffEvent); // no
+	if (Event & BEV_EVENT_CONNECTED != BEV_EVENT_CONNECTED) {
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p event %x", BuffEvent, Event);
+		bufferevent_free(BuffEvent);
+		Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
 	}
 }
 
-static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
+static void ServerLanding(struct bufferevent *BuffEvent, char *Buff, bool IsSSL)
 {
 	UNCHECKED_PROXY *UProxy = NULL;
 	bool freeBufferEvent = true;
+
+	bufferevent_set_timeouts(BuffEvent, NULL, NULL);
+	bufferevent_disable(BuffEvent, EV_READ);
 
 	Log(LOG_LEVEL_DEBUG, "Server landing");
 	/* Page dispatch */ {
@@ -359,6 +365,8 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 				strcpy(filePath, "/etc/liveproxies/html/files/");
 				strcat(filePath, path);
 				hFile = fopen(filePath, "r"); // uwaga
+
+				// evbuffer_add_file() or evbuffer_add_file_segment
 			}
 			if (hFile != NULL) {
 				fseek(hFile, 0, SEEK_END);
@@ -392,6 +400,16 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff)
 free:
 	if (freeBufferEvent) {
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free on write %p", BuffEvent);
+		if (IsSSL) { // ???
+			SSL *ssl = bufferevent_openssl_get_ssl(BuffEvent);
+			if (ssl != NULL) {
+				Log(LOG_LEVEL_DEBUG, "SSL NOT NULL2");
+				//SSL_free(ssl);
+			} else {
+				Log(LOG_LEVEL_DEBUG, "SSL NULL2");
+			}
+		}
+		Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
 		if (evbuffer_get_length(bufferevent_get_output(BuffEvent)))
 			bufferevent_setcb(BuffEvent, ServerRead, bufferevent_free, ServerEvent, NULL);
 		else
@@ -460,6 +478,7 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 	Log(LOG_LEVEL_DEBUG, "HTTPRead len %d", len);
 	if (len <= 3) {
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
+		Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
 		bufferevent_free(BuffEvent);
 		return;
 	}
@@ -497,6 +516,7 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 			Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
 			free(buff);
 			bufferevent_free(BuffEvent);
+			Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
 			return;
 		}
 	}
@@ -516,23 +536,25 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 	buff[len] = 0x00;
 	evbuffer_drain(evBuff, len); // No clear data function?
 
-	ServerLanding(BuffEvent, buff);
+	ServerLanding(BuffEvent, buff, Ctx);
 
 	free(buff);
 }
+
+int sslCreated = 0;
 
 static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct sockaddr *Address, int Socklen, void *Ctx)
 {
 	SERVER_TYPE type = (SERVER_TYPE)Ctx;
 	struct event_base *base = evconnlistener_get_base(List);
-	Log(LOG_LEVEL_DEBUG, "ServerAccept");
+
 	switch (type) {
 		case HTTP4:
 		case HTTP6:
 		{
 			Log(LOG_LEVEL_DEBUG, "ServerAccept: HTTP");
 			struct bufferevent *bev = bufferevent_socket_new(base, Fd, BEV_OPT_CLOSE_ON_FREE);
-			//bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
+			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, false);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
@@ -542,7 +564,8 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 		{
 			Log(LOG_LEVEL_DEBUG, "ServerAccept: SSL");
 			struct bufferevent *bev = bufferevent_openssl_socket_new(base, Fd, SSL_new(levServerSSL), BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
-			//bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
+			Log(LOG_LEVEL_DEBUG, "SSL created %d", ++sslCreated);
+			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, true);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;

@@ -125,7 +125,7 @@ void HtmlTemplateLoadAll()
 			}
 		}
 
-		//config_destroy(&cfg);
+		//config_destroy(&cfg); // TODO: fix segfault here
 
 		if (itemsFound != 8) {
 			Log(LOG_LEVEL_ERROR, "Not all HTML templates found, using stock HTML...");

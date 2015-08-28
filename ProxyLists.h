@@ -57,6 +57,7 @@ typedef struct _UNCHECKED_PROXY {
 	bool checking;
 	uint8_t retries;
 	bool checkSuccess;
+	struct bufferevent *assocBufferEvent;
 
 	/* PROXY_TYPE_HTTP
 	 *	7 - Send HTTP request
@@ -95,7 +96,7 @@ typedef struct _UNCHECKED_PROXY {
 	 *	4 - Send UDP packet
 	 */
 	/*
-	 * Universal stages - 6, 7, 8 - final
+	 * Universal stages - 6, 7, (8 - final)
 	 */
 	uint8_t stage;
 

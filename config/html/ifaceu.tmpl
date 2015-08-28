@@ -3,9 +3,110 @@
                 <!-- Page Heading -->
                 <div class="row">
                     <div class="col-lg-12">
-                        <h1 class="page-header">Unchecked proxies</h1>
+                        <h1 class="page-header">Unchecked proxies (<span id="countUProxies">{T_COUNT_UPROXIES}</span>)</h1>
                     </div>
                 </div>
+		<script src="/js/jsbn.js"></script>
+		<script src="/js/jsbn2.js"></script>
+		<script>
+			$(document).ready(function() {
+				var tb = $('#tableActive').find('tbody');
+				
+				function GetUInt64(bs, offset) {
+					var low = bs.getUint32(offset);
+					var high = bs.getUint32(offset + 4);
+					
+					var biLow = new BigInteger(low.toString(), 10);
+					biLow.lShiftTo(32, biLow);
+					var ret = new BigInteger(high.toString(), 10).add(biLow);
+					return ret;
+				}
+				
+				var lastChange = Date.now();
+				var lastFadeUpdate = Date.now();
+				var update = function() {
+					if (lastChange + 5000 < Date.now()) {
+						window.table.draw(false);
+					}
+				}
+				var updateLoop = function() { update(); setTimeout(updateLoop, 5000); };
+				updateLoop();
+				
+				WSInitialize({T_SUB_UPROXY_ADD} | {T_SUB_UPROXY_REMOVE}, "{T_SUB_AUTH_COOKIE}", function(sub, data) {
+					var bs = new DataView(data);
+					switch (sub) {
+						case {T_SUB_UPROXY_ADD}:
+							var ipType = bs.getUint8(0);
+							var offset;
+							var ipData;
+							if (ipType == 0x04) {
+								ipData = data.slice(1, 5);
+								offset = 5;
+							} else {
+								ipData = data.slice(1, 17);
+								offset = 17;
+							}
+							var port = bs.getUint16(offset);
+							var type = bs.getUint16(offset + 2);
+							var checking = !!bs.getUint8(offset + 4);
+							var retries = bs.getUint8(offset + 5);
+							var rechecking = !!bs.getUint8(offset + 6);
+							
+							var ip = IPParse(ipData, ipType);
+							
+							var row = $('#tableActive > tbody:last-child').append(
+								"<tr>" +
+									"<td>" + (ipType == 0x04 ? ip : ("[" + ip + "]")) + ":" + port + "</td>" +
+									"<td>" + ProxyTypeString(type) + "</td>" +
+									"<td>" + (checking ? '{T_CFG_ENABLED}' : '{T_CFG_DISABLED}') + "</td>" +
+									"<td>" + retries + "</td>" +
+									"<td>" + (rechecking ? '{T_CFG_ENABLED}' : '{T_CFG_DISABLED}') + "</td>" +
+								"</tr>"
+							).find("tr:last");
+							
+							if (lastFadeUpdate + {T_SUB_MSG_INTERVAL} < Date.now()) {
+								var nodes = $(window.table.row.add(row).node()).find("td");
+								nodes.fadeUpdate(nodes.css('background-color'), {T_SUB_MSG_INTERVAL}, true);
+								lastFadeUpdate = Date.now();
+							} else
+								window.table.row.add(row);
+							
+							var cup = $('#countUProxies');
+							cup.text(parseInt(cup.text()) + 1);
+						break;
+						case {T_SUB_UPROXY_REMOVE}:
+							console.log(data);
+							var ipType = bs.getUint8(0);
+							var offset;
+							var ipData;
+							if (ipType == 0x04) {
+								ipData = data.slice(1, 5);
+								offset = 5;
+							} else {
+								ipData = data.slice(1, 17);
+								offset = 17;
+							}
+							var port = bs.getUint16(offset);
+							var type = bs.getUint16(offset + 2);
+							
+							var ip = IPParse(ipData, ipType);
+							
+							var nodes = $(window.table.rows().nodes());
+							for (var x = 0;x < nodes.length;x++) {
+								var td = $(nodes[x]).find("td");
+								if (td[0].innerText == (ipType == 0x04 ? ip : ("[" + ip + "]")) + ":" + port && td[1].innerText == ProxyTypeString(type)) {
+									nodes[x].remove();
+									var cup = $('#countUProxies');
+									cup.text(parseInt(cup.text()) - 1);
+									return;
+								}
+							}
+							console.log("PROXY NOT FOUND! (" + ip + ":" + port + ")");
+						break;
+					}
+				});
+			});
+		</script>
                 <div class="row">
                 <div class="col-lg-12">
                     <div class="panel panel-default">

@@ -23,6 +23,29 @@
 #include "HtmlTemplate.h"
 #include "Websocket.h"
 
+#include <openssl/err.h>
+#include <openssl/conf.h>
+
+#include <dlfcn.h>
+#include <execinfo.h>
+
+void
+SSL_free(SSL *ssl)
+{
+	void(*h_SSL_free)(SSL *ssl);
+	h_SSL_free = dlsym(-1, "SSL_free");
+
+	Log(LOG_LEVEL_DEBUG, "SSL_free");
+	void *buffer[100];
+	int nptrs = backtrace(buffer, 100);
+	char **strs;
+	strs = backtrace_symbols(buffer, nptrs); {
+		for (size_t x = 0; x < nptrs; x++)
+			Log(LOG_LEVEL_DEBUG, "BT %d: %s", x, strs[x]);
+	} free(strs);
+	h_SSL_free(ssl);
+}
+
 static char *StdinDynamic()
 {
 	char *str;
@@ -207,6 +230,7 @@ int main(int argc, char** argv)
 				}
 
 				levServerSSL = SSL_CTX_new(SSLv23_server_method());
+				SSL_CTX_set_session_cache_mode(levServerSSL, SSL_SESS_CACHE_OFF);
 
 				if (!SSL_CTX_use_certificate_chain_file(levServerSSL, SSLPublicKey) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
 					Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
@@ -422,18 +446,27 @@ int main(int argc, char** argv)
 	Log(LOG_LEVEL_SUCCESS, "Non-interactive mode active");
 
 	for (;;) {
-		msleep(1000); // gdb is flipping out when we exit main thread
-		FILE *hF = fopen("events.txt", "w+"); {
+		msleep(INT_MAX); // gdb is flipping out when we exit main thread
+		ERR_free_strings();
+		EVP_cleanup();
+		CONF_modules_finish();
+		CONF_modules_free();
+		CONF_modules_unload(1);
+		CRYPTO_cleanup_all_ex_data();
+		exit(0);
+		/*FILE *hF = fopen("events.txt", "w+"); {
 			//Log(LOG_LEVEL_DEBUG, "Dumping events...");
 			event_base_dump_events(levRequestBase, hF);
-		} fclose(hF);
+		} fclose(hF);*/
 	}
 }
 
 void RequestBase()
 {
-	if (SSLEnabled)
+	if (SSLEnabled) {
 		RequestBaseSSLCTX = SSL_CTX_new(SSLv23_client_method());
+		SSL_CTX_set_session_cache_mode(RequestBaseSSLCTX, SSL_SESS_CACHE_OFF);
+	}
 
 	for (;;) {
 		if (CurrentlyChecking > 0)
