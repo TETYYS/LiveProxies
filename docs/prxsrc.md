@@ -20,7 +20,7 @@ Currently program supports following formats of proxy list sources:
  - URL `.url`
 
 ## Script
-In order to add proxies from html websites, or to clean proxy lists before pushing them to the program, you should use Python scripts. See [BlogspotGeneric.py](../BlogspotGeneric.py) for example script. **NOTE:** All Blogspot websites are different, so script doesn't always match with blog HTML.
+In order to add proxies from html websites, or to clean proxy lists before pushing them to the program, you should use Python scripts. Script entry point is always `run()` See [BlogspotGeneric.py](../BlogspotGeneric.py) for example script. **NOTE:** All Blogspot websites are different, so script doesn't always match with blog HTML.
 ## Static file
 If you want to add static lists of proxies, you should use `.txt` or `.prx` extension files. Just leave proxy list in format specified in the beggining.
 ## URL
