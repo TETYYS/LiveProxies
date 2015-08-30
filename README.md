@@ -1,7 +1,7 @@
 # LiveProxies
 Latest Version: **0.7.2** (pre-release)
 
-LiveProxies is a [high-performance](#performance) asynchronous proxy checker.
+LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 
 ## Features
  - Utilizes Python scripts to harvest (or scrape) proxy lists
@@ -66,9 +66,6 @@ See [Auth](docs/auth.md) for preparing users for interface. **Access to interfac
 
 ## Development
 The program is currently in its very early stages, so any help is appreciated. See TODO list.
-
-## Performance <a name="performance"></a>
-Currently, program doesn't slow down at all at 7000 simultaneous proxy checks, but has memory problems. 85 MB for 7000 simultaneous proxy checks seems high.
 
 ## TODO
  - Provide more interactivity on interface pages
