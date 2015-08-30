@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <openssl/ossl_typ.h>
 
 uint8_t hashSalt[64];
 
@@ -20,10 +21,10 @@ typedef enum _PROXY_TYPE {
 	PROXY_TYPE_SOCKS5_WITH_UDP = 256
 } PROXY_TYPE;
 
-#define PROXY_TYPE_COUNT 8
+#define PROXY_TYPE_COUNT 9
 #define PROXY_TYPE_SOCKS_GENERIC (PROXY_TYPE_SOCKS4 | PROXY_TYPE_SOCKS4A | PROXY_TYPE_SOCKS5)
 #define PROXY_TYPE_SOCKS_GENERIC_SSL (PROXY_TYPE_SOCKS4_TO_SSL | PROXY_TYPE_SOCKS4A_TO_SSL | PROXY_TYPE_SOCKS5_TO_SSL)
-#define PROXY_TYPE_ALL (PROXY_TYPE_HTTP | PROXY_TYPE_HTTPS | PROXY_TYPE_SOCKS_GENERIC | PROXY_TYPE_SOCKS_GENERIC_SSL)
+#define PROXY_TYPE_ALL (PROXY_TYPE_HTTP | PROXY_TYPE_HTTPS | PROXY_TYPE_SOCKS_GENERIC | PROXY_TYPE_SOCKS_GENERIC_SSL | PROXY_TYPE_SOCKS5_WITH_UDP)
 
 typedef enum _ANONYMITY {
 	ANONYMITY_NONE = 0,
@@ -46,6 +47,7 @@ typedef struct _PROXY {
 	uint8_t retries;
 	uint32_t successfulChecks;
 	uint32_t failedChecks;
+	X509 *invalidCert;
 } PROXY;
 
 typedef void(*SingleCheckCallback)(void *UProxy);
@@ -109,6 +111,8 @@ typedef struct _UNCHECKED_PROXY {
 	uint64_t requestTimeMs;
 	uint64_t requestTimeHttpMs;
 	PROXY *associatedProxy;
+
+	X509 *invalidCert;
 
 	SingleCheckCallback singleCheckCallback;
 	void *singleCheckCallbackExtraData;

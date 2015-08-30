@@ -1,6 +1,6 @@
 LiveProxies
 ===================
-Latest Version: **0.7.1** (pre-release)
+Latest Version: **0.7.2** (pre-release)
 
 LiveProxies is a [high-performance](#performance) asynchronous proxy checker.
 
@@ -72,10 +72,8 @@ The program is currently in its very early stages, so any help is appreciated. S
 Currently, program doesn't slow down at all at 7000 simultaneous proxy checks, but has memory problems. 85 MB for 7000 simultaneous proxy checks seems high.
 
 ## TODO
- - Provide more services in full proxy check
  - Provide more interactivity on interface pages
  - Implement checked proxy checking.
- - ~~Async DNS operations~~
  - Revise proxy timeout system
  - ...
  

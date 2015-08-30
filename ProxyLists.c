@@ -124,7 +124,7 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 	Log(LOG_LEVEL_DEBUG, "UProxyAdd: size %d", SizeUncheckedProxies);
 
 	if (MultiFlag(UProxy->type)) {
-		for (size_t x = 0; x < PROXY_TYPE_COUNT - 1 /* -1 because of type 1 */; x++) {
+		for (size_t x = 0; x < PROXY_TYPE_COUNT; x++) {
 			if ((UProxy->type & (PROXY_TYPE)pow(2, x)) == (PROXY_TYPE)pow(2, x)) {
 				IPv6Map *ip = malloc(sizeof(IPv6Map));
 				memcpy(ip, UProxy->ip->Data, sizeof(IPv6Map));
@@ -288,6 +288,7 @@ UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct
 	GenerateHashForUProxy(UProxy);
 	UProxy->associatedProxy = AssociatedProxy;
 	UProxy->singleCheckCallback = NULL;
+	UProxy->invalidCert = NULL;
 	return UProxy;
 }
 
@@ -357,6 +358,8 @@ PROXY *GetProxyFromUid(char *Uid)
 
 void UProxyFree(UNCHECKED_PROXY *In)
 {
+	if (In->invalidCert != NULL)
+		X509_free(In->invalidCert);
 	if (In->timeout != NULL) {
 		event_del(In->timeout);
 		event_free(In->timeout);
@@ -368,6 +371,8 @@ void UProxyFree(UNCHECKED_PROXY *In)
 
 void ProxyFree(PROXY *In)
 {
+	if (In->invalidCert != NULL)
+		X509_free(In->invalidCert);
 	free(In->ip);
 	free(In);
 }

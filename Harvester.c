@@ -54,7 +54,16 @@ void HarvestLoop()
 			goto end;
 		}
 		while ((ent = readdir(d)) != NULL) {
-			if (ent->d_type != DT_REG /* normal file */ || strlen(ent->d_name) < 4 || strcmp(ent->d_name + strlen(ent->d_name) - 3, ".py"))
+			if (ent->d_type != DT_REG /* normal file */ || strlen(ent->d_name) < 4)
+				continue;
+
+			HARVESTER_PROXY_SOURCE_TYPE sourceType = NONE;
+			size_t fileNameLen = strlen(ent->d_name);
+			if (strcmp(ent->d_name + fileNameLen - 3, ".py") == 0)
+				sourceType = SCRIPT;
+			if (strcmp(ent->d_name + fileNameLen - 4, ".txt") == 0 || strcmp(ent->d_name + fileNameLen - 4, ".prx") == 0)
+				sourceType = STATIC;
+			if (sourceType == NONE)
 				continue;
 
 			char *path = (char*)malloc(10 + strlen(ent->d_name) + 1 /* NULL */);
@@ -63,27 +72,50 @@ void HarvestLoop()
 
 			Log(LOG_LEVEL_SUCCESS, "Executing %s...", path);
 
-			pName = PyString_FromString(path);
-			pModule = PyImport_Import(pName);
-			Py_DECREF(pName);
-
-			if (pModule == NULL) {
-				PyErr_Print();
-				goto freepath;
-			}
-			pFunc = PyObject_GetAttrString(pModule, "run");
-			if (!pFunc) {
-				PyErr_Print();
-				goto freemodule;
-			}
-			pResult = PyObject_CallObject(pFunc, NULL);
-			if (!pResult) {
-				PyErr_Print();
-				goto freefunc;
-			}
-
+			char *result;
 			uint32_t added = 0, addedPrev = 0, total = 0;
-			char *result = PyString_AsString(pResult);
+
+			if (sourceType == SCRIPT) {
+				pName = PyString_FromString(path);
+				pModule = PyImport_Import(pName);
+				Py_DECREF(pName);
+
+				if (pModule == NULL) {
+					PyErr_Print();
+					goto freepath;
+				}
+				pFunc = PyObject_GetAttrString(pModule, "run");
+				if (!pFunc) {
+					PyErr_Print();
+					goto freemodule;
+				}
+				pResult = PyObject_CallObject(pFunc, NULL);
+				if (!pResult) {
+					PyErr_Print();
+					goto freefunc;
+				}
+
+				result = PyString_AsString(pResult);
+			}
+			if (sourceType == STATIC) {
+				char pathFull[(strlen(HarvestersPath) + 1 + fileNameLen) * sizeof(char)];
+				strcpy(pathFull, HarvestersPath);
+				strcat(pathFull, "/");
+				strcat(pathFull, ent->d_name);
+
+				FILE *hFile = fopen(pathFull, "r"); {
+					if (hFile == NULL)
+						goto freepath;
+					fseek(hFile, 0, SEEK_END);
+					size_t size = ftell(hFile);
+					fseek(hFile, 0, SEEK_SET);
+
+					result = malloc(size + 1);
+					fread(result, size, 1, hFile);
+					result[size] = 0x00;
+				} fclose(hFile);
+			}
+
 			char *tokSave = NULL;
 			char *pch = strtok_r(result, "\n", &tokSave);
 			PROXY_TYPE curType = PROXY_TYPE_HTTP;
@@ -151,6 +183,7 @@ next:
 			entry.name = path;
 			entry.added = total;
 			entry.addedNew = added;
+			entry.type = sourceType;
 
 			pthread_mutex_lock(&LockHarvesterPrxsrcStats); {
 				if (SizeHarvesterPrxsrcStats < ProxySourcesBacklog) {
@@ -169,11 +202,15 @@ next:
 			statsEntryAdded = true;
 
 			printf("Added %d (%d new) proxies from %s\n", total, added, path);
-			Py_DECREF(pResult);
+			if (sourceType == STATIC) {
+				free(result);
+			} else {
+				Py_DECREF(pResult);
 freefunc:
-			Py_XDECREF(pFunc);
+				Py_XDECREF(pFunc);
 freemodule:
-			Py_DECREF(pModule);
+				Py_DECREF(pModule);
+			}
 freepath:
 			if (!statsEntryAdded)
 				free(path);

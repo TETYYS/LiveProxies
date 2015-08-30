@@ -3,7 +3,7 @@
 #include "IPv6Map.h"
 #include <stddef.h>
 
-#define VERSION "0.7.1"
+#define VERSION "0.7.2"
 #define CALLBACK
 #define OUT
 #define MEM_OUT
@@ -20,6 +20,7 @@
 #define SET_BIT(m, x) (m | (1 << x))
 
 size_t CurrentlyChecking;
+uint8_t *SSLFingerPrint;
 
 double GetUnixTimestampMilliseconds();
 char *GetHost(IP_TYPE Preffered, bool SSL);

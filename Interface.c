@@ -12,26 +12,12 @@
 #include <event2/event.h>
 #include <openssl/rand.h>
 #include <stdlib.h>
-#include <assert.h>
 #include "Server.h"
 #include "Harvester.h"
 
-static char *strnstr(char *Haystack, char *Needle, size_t Size)
-{
-	if (Size == 0)
-		return Haystack;
-	size_t needleLength = strlen(Needle);
-	assert(Size >= needleLength);
-	for (size_t x = 0;x < Size - needleLength;x++) {
-		if (strncmp(&(Haystack[x]), Needle, needleLength) == 0)
-			return &(Haystack[x]);
-	}
-	return 0;
-}
-
 void InterfaceInit()
 {
-	InterfacePagesSize = 9;
+	InterfacePagesSize = 11;
 	InterfacePages = malloc(InterfacePagesSize * sizeof(INTERFACE_PAGE));
 	InterfacePages[0].name = "Home";
 	InterfacePages[0].page = INTERFACE_PAGE_HOME;
@@ -51,6 +37,10 @@ void InterfaceInit()
 	InterfacePages[7].page = INTERFACE_PAGE_RDNS;
 	InterfacePages[8].name = "Raw proxy check output";
 	InterfacePages[8].page = INTERFACE_PAGE_CHECK;
+	InterfacePages[9].name = "Raw proxy add";
+	InterfacePages[9].page = INTERFACE_PAGE_ADD;
+	InterfacePages[10].name = "Tools";
+	InterfacePages[10].page = INTERFACE_PAGE_TOOLS;
 }
 
 // Please lock AuthWebLock
@@ -471,11 +461,12 @@ void InterfaceProxySources(struct bufferevent *BuffEvent, char *Buff)
 		evbuffer_add_printf(body, "<html><head><title>LiveProxies %s interface: Proxy sources</title><style>table{border-collapse:collapse;border:1px solid}\ntd{padding:10px 5px;border:1px solid}\nth{padding:10px 5px;border:1px solid};}</style></head><body>", VERSION);
 
 		pthread_mutex_lock(&LockHarvesterPrxsrcStats); {
-			evbuffer_add_printf(body, "<table><tbody><tr><th>Name</th><th>New proxies</th>\n<th>Total proxies</th></tr>", SizeUncheckedProxies, CurrentlyChecking);
+			evbuffer_add_printf(body, "<table><tbody><tr><th>Name</th><th>Type</th><th>New proxies</th>\n<th>Total proxies</th></tr>", SizeUncheckedProxies, CurrentlyChecking);
 			for (size_t x = 0; x < SizeHarvesterPrxsrcStats; x++) {
 				evbuffer_add(body, "<tr>", 4 * sizeof(char));
 
 				evbuffer_add_printf(body, "<td>%s</td>", HarvesterPrxsrcStats[x].name);
+				evbuffer_add_printf(body, "<td>%s</td>", HarvesterPrxsrcStats[x].type == SCRIPT ? "Script" : "Static");
 				evbuffer_add_printf(body, "<td>%d</td>", HarvesterPrxsrcStats[x].addedNew);
 				evbuffer_add_printf(body, "<td>%d</td>", HarvesterPrxsrcStats[x].added);
 
@@ -917,4 +908,161 @@ void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
 
 	bufferevent_write_buffer(BuffEvent, headers);
 	evbuffer_free(headers);
+}
+
+void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
+{
+	struct evbuffer *headers = evbuffer_new();
+	struct evbuffer *body = evbuffer_new();
+	INTERFACE_INFO info;
+	IPv6Map *ip;
+	uint16_t port;
+	PROXY_TYPE type;
+	char *offset = &(Buff[8]);
+
+	for (size_t x = 0;x < InterfacePagesSize;x++) {
+		if (InterfacePages[x].page == INTERFACE_PAGE_ADD)
+			info.currentPage = &(InterfacePages[x]);
+	}
+
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
+		bufferevent_write_buffer(BuffEvent, headers);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(headers);
+		return;
+	}
+
+	char *newLine = strchr(offset, '\n');
+	/* IP */ {
+		char *ipStart = strstr(offset, "?ip=");
+		if (ipStart == NULL) {
+			evbuffer_add(body, "Missing ip parameter", 20 * sizeof(char));
+			goto error;
+		}
+		ipStart += 4 * sizeof(char);
+
+		if (newLine <= ipStart) {
+			evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+			goto error;
+		}
+
+		char *ipEnd = strchr(ipStart, '&');
+		if (ipEnd == NULL) {
+			evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+			goto error;
+		}
+		char ipRaw[(ipEnd - ipStart) / sizeof(char) + 1];
+		memcpy(ipRaw, ipStart, ipEnd - ipStart);
+		ipRaw[ipEnd - ipStart] = 0x00;
+
+		ip = StringToIPv6Map(ipRaw);
+		if (ip == NULL) {
+			evbuffer_add(body, "Malformed IP", 12 * sizeof(char));
+			goto error;
+		}
+		offset = ipEnd;
+	} /* End IP */
+	/* Port */ {
+		char *portStart = strstr(offset, "&port=");
+		if (portStart == NULL) {
+			evbuffer_add(body, "Missing port parameter", 22 * sizeof(char));
+			goto error;
+		}
+		portStart += 6 * sizeof(char);
+
+		if (newLine <= portStart) {
+			evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+			goto error;
+		}
+
+		port = atoi(portStart);
+		if (port > UINT16_MAX) {
+			evbuffer_add(body, "Malformed port", 14 * sizeof(char));
+			goto error;
+		}
+		offset = strstr(portStart, "&");
+		if (offset == NULL) {
+			evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+			goto error;
+		}
+	} /* End port */
+	/* Type */ {
+		char *typeStart = strstr(offset, "&type=");
+		if (typeStart == NULL) {
+			evbuffer_add(body, "Missing type parameter", 22 * sizeof(char));
+			goto error;
+		}
+		typeStart += 6 * sizeof(char);
+
+		if (newLine <= typeStart) {
+			evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+			goto error;
+		}
+
+		type = atoi(typeStart);
+		if (type > PROXY_TYPE_ALL) {
+			evbuffer_add(body, "Malformed type", 14 * sizeof(char));
+			goto error;
+		}
+	} /* end type */
+
+	UProxyAdd(AllocUProxy(ip, port, type, NULL, NULL));
+
+	evbuffer_add(body, "OK", 2 * sizeof(char));
+	goto ok;
+error:
+	evbuffer_drain(headers, evbuffer_get_length(headers));
+	evbuffer_add(headers, "HTTP/1.1 403 Forbidden\r\nContent-Length: ", 40 * sizeof(char));
+ok:
+	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body) * sizeof(char)); // To Content-Length
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
+	bufferevent_write_buffer(BuffEvent, headers);
+	bufferevent_write_buffer(BuffEvent, body);
+	evbuffer_free(headers);
+	evbuffer_free(body);
+	return;
+}
+
+void InterfaceTools(struct bufferevent *BuffEvent, char *Buff)
+{
+	struct evbuffer *headers = evbuffer_new();
+	struct evbuffer *body = evbuffer_new();
+
+	INTERFACE_INFO info;
+	for (size_t x = 0;x < InterfacePagesSize;x++) {
+		if (InterfacePages[x].page == INTERFACE_PAGE_TOOLS)
+			info.currentPage = &(InterfacePages[x]);
+	}
+
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
+		bufferevent_write_buffer(BuffEvent, headers);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(headers);
+		evbuffer_free(body);
+		return;
+	}
+
+	if (HtmlTemplateUseStock) {
+		evbuffer_add_printf(body, "<html><head><title>LiveProxies %s interface: Tools</title></head><body>Sorry, not supported at non-templated interface</body></html>", VERSION);
+	} else {
+		HTML_TEMPALTE_TABLE_INFO tableInfo;
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateHead, HtmlTemplateHeadSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateTools, HtmlTemplateToolsSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateFoot, HtmlTemplateFootSize, info, tableInfo);
+	}
+
+	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
+
+	bufferevent_write_buffer(BuffEvent, headers);
+	bufferevent_write_buffer(BuffEvent, body);
+	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+	evbuffer_free(headers);
+	evbuffer_free(body);
 }

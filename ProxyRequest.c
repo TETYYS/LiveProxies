@@ -440,19 +440,19 @@ static void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE E
 			if (ProxyIsSSL(UProxy->type)) {
 				// SSL
 				SSL *ssl = bufferevent_openssl_get_ssl(UProxy->assocBufferEvent);
-				X509 *cert = SSL_get_peer_certificate(ssl);
+				X509 *cert = SSL_get_peer_certificate(ssl); {
+					uint8_t hash[EVP_MAX_MD_SIZE];
+					size_t trash;
 
-				EVP_MD *digest = EVP_get_digestbyname("sha1");
-				unsigned char         md[EVP_MAX_MD_SIZE];
-				unsigned int          n;
-				int                   pos;
-				X509_digest(cert, digest, md, &n);
-				printf("Fingerprint: ");
-				for (pos = 0; pos < 19; pos++)
-					printf("%02x:", md[pos]);
-				printf("%02x\n", md[19]);
-				X509_free(cert);
-			}
+					X509_digest(cert, EVP_sha512(), hash, &trash);
+
+					if (!MemEqual(hash, SSLFingerPrint, 512 / 8 /* SHA-512 */))
+						UProxy->invalidCert = X509_dup(cert);
+					else
+						UProxy->invalidCert = NULL;
+				} X509_free(cert);
+			} else
+				UProxy->invalidCert = NULL;
 
 			UProxy->requestTimeHttpMs = GetUnixTimestampMilliseconds();
 			Log(LOG_LEVEL_DEBUG, "Sending HTTP request");

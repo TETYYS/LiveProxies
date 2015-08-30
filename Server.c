@@ -239,6 +239,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 			proxy->anonymity = ANONYMITY_MAX;
 
 		UProxy->checkSuccess = true;
+		proxy->invalidCert = X509_dup(UProxy->invalidCert);
 
 		if (UProxy->associatedProxy == NULL) {
 			Log(LOG_LEVEL_DEBUG, "WServer: Final proxy add type %d anonimity %d", proxy->type, proxy->anonymity);
@@ -329,6 +330,10 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff, bool IsSSL)
 			InterfaceRawHttpBL(BuffEvent, Buff);
 		} else if (pathLen > 5 && strncmp(path, "/rdns", 5) == 0)
 			InterfaceRawReverseDNS(BuffEvent, Buff);
+		else if (pathLen > 4 && strncmp(path, "/add", 4) == 0)
+			InterfaceRawUProxyAdd(BuffEvent, Buff);
+		else if (pathLen == 6 && strncmp(path, "/tools", 6) == 0)
+			InterfaceTools(BuffEvent, Buff);
 		else if (pathLen > 6 && strncmp(path, "/check", 6) == 0) {
 			Log(LOG_LEVEL_DEBUG, "/check on %p", BuffEvent);
 			freeBufferEvent = false; // Free'd in second stage of raw recheck
