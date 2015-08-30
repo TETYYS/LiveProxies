@@ -9,7 +9,8 @@
 typedef enum _HARVESTER_PROXY_SOURCE_TYPE {
 	NONE = 0,
 	SCRIPT = 1,
-	STATIC = 2
+	STATIC = 2,
+	URL = 3
 } HARVESTER_PROXY_SOURCE_TYPE;
 
 typedef struct _HARVESTER_PRXSRC_STATS_ENTRY {
@@ -24,3 +25,4 @@ HARVESTER_PRXSRC_STATS_ENTRY *HarvesterPrxsrcStats;
 size_t SizeHarvesterPrxsrcStats;
 
 void HarvestLoop();
+char *ProxySourceTypeToString(HARVESTER_PROXY_SOURCE_TYPE In);

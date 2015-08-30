@@ -28,6 +28,7 @@
 
 #include <dlfcn.h>
 #include <execinfo.h>
+#include <curl/curl.h>
 
 void
 SSL_free(SSL *ssl)
@@ -156,6 +157,7 @@ int main(int argc, char** argv)
 	if (access("/etc/liveproxies/passwd.conf", F_OK) == -1 && access("./passwd.conf", F_OK) == -1)
 		Log(LOG_LEVEL_WARNING, "No credentials present for interface pages. Access blocked by default.");
 
+	curl_global_init(CURL_GLOBAL_ALL);
 	evthread_use_pthreads();
 	AuthWebList = NULL;
 	pthread_mutex_init(&AuthWebLock, NULL);
@@ -372,18 +374,18 @@ int main(int argc, char** argv)
 		}
 	} /* End auth init */
 
-	RequestString = calloc(300 /* :^) */ + 2 + strlen(VERSION) + 1 /* NUL */, sizeof(char));
+	RequestString = calloc(312 /* :^) */ + 2 + strlen(REQUEST_UA) + 1 /* NUL */, sizeof(char));
 	sprintf(RequestString,
 		"GET /prxchk HTTP/1.1\r\n"
 		"Host: %s\r\n"
 		"Connection: Close\r\n"
 		"Cache-Control: max-age=0\r\n"
 		"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n"
-		"User-Agent: LiveProxies Proxy Checker %s (tetyys.com)\r\n"
+		"User-Agent: %s\r\n"
 		"DNT: 1\r\n"
 		"Accept-Encoding: gzip, deflate, sdch\r\n"
 		"Accept-Language: en-US,en;q=0.8\r\n"
-		"LPKey: ", "%s", VERSION);
+		"LPKey: ", "%s", REQUEST_UA);
 
 	RequestStringSSL = calloc((88 + strlen(VERSION)) + 1 /* NUL */, sizeof(char));
 	sprintf(RequestStringSSL,

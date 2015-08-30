@@ -8,6 +8,8 @@
 #define OUT
 #define MEM_OUT
 
+#define REQUEST_UA "LiveProxies Proxy Checker "VERSION" (tetyys.com/liveproxies)"
+
 #define INTEGER_VISIBLE_SIZE(x) (floor(log10(abs(x))) + 1)
 #define InterlockedIncrement(a, b) __sync_add_and_fetch(a, b)
 #define InterlockedDecrement(a, b) __sync_sub_and_fetch(a, b)

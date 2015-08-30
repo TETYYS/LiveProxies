@@ -682,7 +682,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 					}
 					case 1: {
 						if (item)
-							evbuffer_add_printf(Buffer, "%s", entry->type == SCRIPT ? "Script" : "Static");
+							evbuffer_add_printf(Buffer, "%s", ProxySourceTypeToString(entry->type));
 						else
 							evbuffer_add(Buffer, "Type", 4 * sizeof(char));
 						break;

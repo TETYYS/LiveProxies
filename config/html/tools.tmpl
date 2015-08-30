@@ -7,11 +7,24 @@
                     </div>
                 </div>
                 <script type="text/javascript" src="/js/bootstrap-multiselect.js"></script>
+                <script type="text/javascript" src="/js/ws.js"></script>
                 <link rel="stylesheet" href="/css/bootstrap-multiselect.css" type="text/css"/>
                 <script>
                     $(document).ready(function() {
-                        $('#type').multiselect();
+                        $('#type').multiselect( { buttonWidth: '100%' } );
                     });
+                    function add() {
+                        var type = 0;
+                        var vals = $('#type').val();
+                        for (var x = 0;x < vals.length;x++) {
+                            type |= parseInt(vals[x]);
+                        }
+                        $.ajax("/add?ip=" + $('#ip').val() + "&port=" + $('#port').val() + "&type=" + type).done(function(res) {
+                                $('.panel-body').fadeUpdate($('.panel-body').css("background-color"), 1000, true);
+                        }).fail(function(res) {
+                            alert(res.responseText);
+                        });
+                    }
                 </script>
                 <div class="row">
                 <div class="col-lg-12">
@@ -25,20 +38,48 @@
                         <div class="panel-body">
                             <div class="row">
                                 <div class="col-lg-3">
-                                    <input type="text" name="ip" placeholder="IP address (IPv4 / IPv6)" class="form-control">
+                                    <input type="text" id="ip" placeholder="IP address (IPv4 / IPv6)" class="form-control">
                                 </div>
                                 <div class="col-lg-3">
-                                    <input type="number" name="port" placeholder="Port" class="form-control" min="1" max="65535">
+                                    <input type="number" id="port" placeholder="Port" class="form-control" min="1" max="65535">
                                 </div>
                                 <div class="col-lg-3">
                                     <select id="type" multiple="multiple">
-                                        <option value="1">Option 1</option>
-                                        <option value="2" selected="selected">Option 2</option>
-                                        <option value="3" selected="selected">Option 3</option>
-                                        <option value="4">Option 4</option>
-                                        <option value="5">Option 5</option>
-                                        <option value="6">Option 6</option>
+                                        <option value="1" selected="selected">HTTP</option>
+                                        <option value="2" selected="selected">HTTPS</option>
+                                        <option value="4">SOCKS4</option>
+                                        <option value="8">SOCKS4A</option>
+                                        <option value="16">SOCKS5</option>
+                                        <option value="32">SOKCS4 -> SSL</option>
+                                        <option value="64">SOCKS4A -> SSL</option>
+                                        <option value="128">SOCKS5 -> SSL</option>
+                                        <option value="256">SOCKS5 UDP</option>
                                     </select>
+                                </div>
+                                <div class="col-lg-3">
+                                    <button type="submit" class="btn btn-default btn-block" onclick="add();">Add</button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- /.panel-body -->
+                    </div>
+                    <!-- /.panel -->
+                    <div class="panel panel-default">
+                        <!-- /.panel-heading -->
+                        <div class="panel-heading">
+                            <h3 class="panel-title">
+                                <i class="fa fa-plus"></i><i class="fa fa-plus"></i> Bulk add proxies
+                            </h3>
+                        </div>
+                        <div class="panel-body">
+                            <div class="row">
+                                <div class="col-lg-12">
+                                    <div class="form-group">
+                                        <textarea class="form-control" rows="10" id="bulk" style="resize:none"></textarea>
+                                    </div>
+                                </div>
+                                <div class="col-lg-12">
+                                    <button type="submit" onclick="addBulk();" class="btn btn-default btn-block">Add bulk</button>
                                 </div>
                             </div>
                         </div>

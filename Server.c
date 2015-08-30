@@ -167,79 +167,83 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 		} else
 			proxy = UProxy->associatedProxy;
 
-		bool anonMax = true;
+		proxy->invalidCert = UProxy->invalidCert != NULL ? X509_dup(UProxy->invalidCert) : NULL;
+		if (proxy->invalidCert != NULL)
+			proxy->anonymity = ANONYMITY_TRANSPARENT;
+		else {
+			bool anonMax = true;
 
-		char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
-		char *hostHeaderVal, *hostStart, *hostEnd;
+			char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
+			char *hostHeaderVal, *hostStart, *hostEnd;
 
-		if (!ServerFindHeader("Host: ", Buff, &hostHeaderVal, &hostStart, &hostEnd))
-			goto freeProxy;
+			if (!ServerFindHeader("Host: ", Buff, &hostHeaderVal, &hostStart, &hostEnd))
+				goto freeProxy;
 
-		if (strcmp(hostHeaderVal, host) != 0) {
+			if (strcmp(hostHeaderVal, host) != 0) {
+				free(hostHeaderVal);
+				goto freeProxy;
+			}
 			free(hostHeaderVal);
-			goto freeProxy;
-		}
-		free(hostHeaderVal);
 
-		if ((lpKeyEnd[0] == '\r' && Buff + buffLen - 4 != lpKeyEnd) || (lpKeyEnd[0] == '\n' && Buff + buffLen - 2 != lpKeyEnd))
-			anonMax = false;
-
-		hostStart[6] = '%';
-		hostStart[7] = 's';
-
-		char *cpyBuff = malloc(buffLen - (hostEnd - Buff)); {
-			memcpy(cpyBuff, hostEnd, buffLen - (hostEnd - Buff));
-			memcpy(hostStart + 8, cpyBuff, buffLen - (hostEnd - Buff));
-		} free(cpyBuff);
-
-		if (anonMax) {
-			lpKeyStart = strstr(Buff, "LPKey: ");
-			assert(lpKeyStart != NULL);
-			lpKeyStart[7] = 0x00;
-
-			if (strcmp(Buff, RequestString) != 0)
+			if ((lpKeyEnd[0] == '\r' && Buff + buffLen - 4 != lpKeyEnd) || (lpKeyEnd[0] == '\n' && Buff + buffLen - 2 != lpKeyEnd))
 				anonMax = false;
 
-			buffLen = strlen(Buff); // recompute
-		}
+			hostStart[6] = '%';
+			hostStart[7] = 's';
 
-		if (!anonMax) {
-			int subStrVec[256];
-			for (size_t i = 0;i < 2;i++) {
-				int regexRet = pcre_exec(i == 0 ? ipv4Regex : ipv6Regex, i == 0 ? ipv4RegexEx : ipv6RegexEx, Buff, buffLen, 0, 0, subStrVec, 256);
+			char *cpyBuff = malloc(buffLen - (hostEnd - Buff)); {
+				memcpy(cpyBuff, hostEnd, buffLen - (hostEnd - Buff));
+				memcpy(hostStart + 8, cpyBuff, buffLen - (hostEnd - Buff));
+			} free(cpyBuff);
 
-				if (regexRet != PCRE_ERROR_NOMATCH) {
-					if (regexRet < 0) {
-						Log(LOG_LEVEL_ERROR, "Couldn't execute PCRE %s regex", (i == 0 ? "IPv4" : "IPv6"));
-						goto freeProxy;
-					} else {
-						char *foundIpStr;
-						for (size_t x = 0; x < regexRet; x++) {
-							pcre_get_substring(Buff, subStrVec, regexRet, x, &(foundIpStr));
-							if (foundIpStr != NULL) {
-								IPv6Map *foundIp = StringToIPv6Map(foundIpStr);
-								if (foundIp != NULL && IPv6MapEqual(i == 0 ? GlobalIp4 : GlobalIp6, foundIp)) {
-									Log(LOG_LEVEL_DEBUG, "WServer: switch to transparent proxy on (type %d)", UProxy->type);
-									proxy->anonymity = ANONYMITY_TRANSPARENT;
+			if (anonMax) {
+				lpKeyStart = strstr(Buff, "LPKey: ");
+				assert(lpKeyStart != NULL);
+				lpKeyStart[7] = 0x00;
+
+				if (strcmp(Buff, RequestString) != 0)
+					anonMax = false;
+
+				buffLen = strlen(Buff); // recompute
+			}
+
+			if (!anonMax) {
+				int subStrVec[256];
+				for (size_t i = 0;i < 2;i++) {
+					int regexRet = pcre_exec(i == 0 ? ipv4Regex : ipv6Regex, i == 0 ? ipv4RegexEx : ipv6RegexEx, Buff, buffLen, 0, 0, subStrVec, 256);
+
+					if (regexRet != PCRE_ERROR_NOMATCH) {
+						if (regexRet < 0) {
+							Log(LOG_LEVEL_ERROR, "Couldn't execute PCRE %s regex", (i == 0 ? "IPv4" : "IPv6"));
+							goto freeProxy;
+						} else {
+							char *foundIpStr;
+							for (size_t x = 0; x < regexRet; x++) {
+								pcre_get_substring(Buff, subStrVec, regexRet, x, &(foundIpStr));
+								if (foundIpStr != NULL) {
+									IPv6Map *foundIp = StringToIPv6Map(foundIpStr);
+									if (foundIp != NULL && IPv6MapEqual(i == 0 ? GlobalIp4 : GlobalIp6, foundIp)) {
+										Log(LOG_LEVEL_DEBUG, "WServer: switch to transparent proxy on (type %d)", UProxy->type);
+										proxy->anonymity = ANONYMITY_TRANSPARENT;
+										free(foundIp);
+										pcre_free_substring(foundIpStr);
+										break;
+									}
 									free(foundIp);
-									pcre_free_substring(foundIpStr);
-									break;
 								}
-								free(foundIp);
+								pcre_free_substring(foundIpStr);
 							}
-							pcre_free_substring(foundIpStr);
 						}
 					}
 				}
-			}
 
-			if (proxy->anonymity == ANONYMITY_NONE)
-				proxy->anonymity = ANONYMITY_ANONYMOUS;
-		} else
-			proxy->anonymity = ANONYMITY_MAX;
+				if (proxy->anonymity == ANONYMITY_NONE)
+					proxy->anonymity = ANONYMITY_ANONYMOUS;
+			} else
+				proxy->anonymity = ANONYMITY_MAX;
+		}
 
 		UProxy->checkSuccess = true;
-		proxy->invalidCert = X509_dup(UProxy->invalidCert);
 
 		if (UProxy->associatedProxy == NULL) {
 			Log(LOG_LEVEL_DEBUG, "WServer: Final proxy add type %d anonimity %d", proxy->type, proxy->anonymity);

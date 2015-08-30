@@ -8,7 +8,7 @@
 #include "Config.h"
 #include <python2.7/Python.h>
 #include <dirent.h>
-#include <openssl/sha.h>
+#include <curl/curl.h>
 
 static char *last_strstr(const char *haystack, const char *needle)
 {
@@ -25,6 +25,36 @@ static char *last_strstr(const char *haystack, const char *needle)
 	}
 
 	return result;
+}
+
+static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, char **result)
+{
+	size_t realsize = size * nmemb;
+
+	*result = realloc(*result, (strlen(*result) * sizeof(char)) + realsize + 1);
+	memcpy(&((*result)[strlen(*result)]), contents, realsize);
+
+	return realsize;
+}
+
+char *SourceTypes[] = { "Script", "Static file", "URL" };
+
+char *ProxySourceTypeToString(HARVESTER_PROXY_SOURCE_TYPE In)
+{
+	switch (In) {
+		case SCRIPT: {
+			return SourceTypes[0];
+			break;
+		}
+		case STATIC: {
+			return SourceTypes[1];
+			break;
+		}
+		case URL: {
+			return SourceTypes[2];
+			break;
+		}
+	}
 }
 
 void HarvestLoop()
@@ -63,17 +93,20 @@ void HarvestLoop()
 				sourceType = SCRIPT;
 			if (strcmp(ent->d_name + fileNameLen - 4, ".txt") == 0 || strcmp(ent->d_name + fileNameLen - 4, ".prx") == 0)
 				sourceType = STATIC;
+			if (strcmp(ent->d_name + fileNameLen - 4, ".url") == 0)
+				sourceType = URL;
 			if (sourceType == NONE)
 				continue;
 
 			char *path = (char*)malloc(10 + strlen(ent->d_name) + 1 /* NULL */);
 			sprintf(path, "%s", ent->d_name);
-			path[strlen(path) - 3] = '\0';
+			path[strlen(path) - (sourceType == SCRIPT ? 3 : 4)] = '\0';
 
-			Log(LOG_LEVEL_SUCCESS, "Executing %s...", path);
+			Log(LOG_LEVEL_SUCCESS, "Executing %s... (%s)", path, ProxySourceTypeToString(sourceType));
 
 			char *result;
 			uint32_t added = 0, addedPrev = 0, total = 0;
+			PROXY_TYPE curType = PROXY_TYPE_HTTP;
 
 			if (sourceType == SCRIPT) {
 				pName = PyString_FromString(path);
@@ -115,10 +148,58 @@ void HarvestLoop()
 					result[size] = 0x00;
 				} fclose(hFile);
 			}
+			if (sourceType == URL) {
+				char pathFull[(strlen(HarvestersPath) + 1 + fileNameLen) * sizeof(char)];
+				strcpy(pathFull, HarvestersPath);
+				strcat(pathFull, "/");
+				strcat(pathFull, ent->d_name);
+
+				FILE *hFile = fopen(pathFull, "r"); {
+					if (hFile == NULL)
+						goto freepath;
+					fseek(hFile, 0, SEEK_END);
+					size_t size = ftell(hFile);
+					fseek(hFile, 0, SEEK_SET);
+
+					char contents[size + 1];
+					fread(contents, size, 1, hFile);
+					contents[size] = 0x00;
+
+					char *nl = strstr(contents, "\r\n");
+					if (nl == NULL)
+						nl = strchr(contents, '\n');
+
+					if (nl == NULL) {
+						Log(LOG_LEVEL_WARNING, "Malformed URL type proxy source");
+						goto freepath;
+					}
+					*nl = 0x00;
+					char *url = nl + (1 * sizeof(char));
+					if (url[strlen(url) - 1] == '\n')
+						url[strlen(url) - 1] = 0x00;
+
+					result = malloc(1);
+					CURL *hCurl = curl_easy_init(); {
+						curl_easy_setopt(hCurl, CURLOPT_URL, url);
+						curl_easy_setopt(hCurl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+						curl_easy_setopt(hCurl, CURLOPT_WRITEDATA, &result);
+						curl_easy_setopt(hCurl, CURLOPT_USERAGENT, REQUEST_UA);
+
+						CURLcode res = curl_easy_perform(hCurl);
+
+						if (res != CURLE_OK) {
+							Log(LOG_LEVEL_WARNING, "Request to %s failed: %s", url, curl_easy_strerror(res));
+						} else {
+							if (strncmp(contents, "setType", 7) == 0)
+								curType = atoll(contents + 8);
+						}
+
+					} curl_easy_cleanup(hCurl);
+				} fclose(hFile);
+			}
 
 			char *tokSave = NULL;
 			char *pch = strtok_r(result, "\n", &tokSave);
-			PROXY_TYPE curType = PROXY_TYPE_HTTP;
 			uint16_t curPort;
 			while (pch != NULL) {
 				if (pch[0] == '\0') {
@@ -202,14 +283,14 @@ next:
 			statsEntryAdded = true;
 
 			printf("Added %d (%d new) proxies from %s\n", total, added, path);
-			if (sourceType == STATIC) {
-				free(result);
-			} else {
+			if (sourceType == SCRIPT) {
 				Py_DECREF(pResult);
 freefunc:
 				Py_XDECREF(pFunc);
 freemodule:
 				Py_DECREF(pModule);
+			} else {
+				free(result);
 			}
 freepath:
 			if (!statsEntryAdded)

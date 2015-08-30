@@ -466,7 +466,7 @@ void InterfaceProxySources(struct bufferevent *BuffEvent, char *Buff)
 				evbuffer_add(body, "<tr>", 4 * sizeof(char));
 
 				evbuffer_add_printf(body, "<td>%s</td>", HarvesterPrxsrcStats[x].name);
-				evbuffer_add_printf(body, "<td>%s</td>", HarvesterPrxsrcStats[x].type == SCRIPT ? "Script" : "Static");
+				evbuffer_add_printf(body, "<td>%s</td>", ProxySourceTypeToString(HarvesterPrxsrcStats[x].type));
 				evbuffer_add_printf(body, "<td>%d</td>", HarvesterPrxsrcStats[x].addedNew);
 				evbuffer_add_printf(body, "<td>%d</td>", HarvesterPrxsrcStats[x].added);
 
@@ -916,7 +916,7 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 	struct evbuffer *body = evbuffer_new();
 	INTERFACE_INFO info;
 	IPv6Map *ip;
-	uint16_t port;
+	ssize_t port;
 	PROXY_TYPE type;
 	char *offset = &(Buff[8]);
 
@@ -1001,13 +1001,13 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 		}
 
 		type = atoi(typeStart);
-		if (type > PROXY_TYPE_ALL) {
+		if (type > PROXY_TYPE_ALL || type <= 0) {
 			evbuffer_add(body, "Malformed type", 14 * sizeof(char));
 			goto error;
 		}
 	} /* end type */
 
-	UProxyAdd(AllocUProxy(ip, port, type, NULL, NULL));
+	UProxyAdd(AllocUProxy(ip, (uint16_t)port, type, NULL, NULL));
 
 	evbuffer_add(body, "OK", 2 * sizeof(char));
 	goto ok;

@@ -1,5 +1,4 @@
-LiveProxies
-===================
+# LiveProxies
 Latest Version: **0.7.2** (pre-release)
 
 LiveProxies is a [high-performance](#performance) asynchronous proxy checker.
@@ -33,7 +32,7 @@ apt-get install libevent-dev python2.7-dev libssl-dev libgeoip-dev libpcre3-dev 
 cmake .
 make
 ```
-#### Installation:
+### Installation:
 ```
 mkdir /etc/liveproxies
 cp -R config/* /etc/liveproxies
@@ -48,12 +47,11 @@ wget http://geolite.maxmind.com/download/geoip/database/GeoIPv6.dat.gz
 gunzip GeoIPv6.dat.gz
 mv GeoIPv6.dat /usr/local/share/GeoIP/
 ```
-#### Usage:
-
-Now you probably would want to add scraping scripts to `/etc/liveproxies/scripts`.
-See `BlogspotGeneric.py` for example script. **NOTE:** All blogspot websites are different, so script doesn't always match with blog HTML.
+### Usage:
 
 After running, you can access interface at [ip]:[server port]/
+
+See [Prxsrc](docs/prxsrc.md) for importing proxies to LiveProxies.
  
 See [Auth](docs/auth.md) for preparing users for interface. **Access to interface is blocked by default if no users are present.**
 
@@ -64,6 +62,7 @@ See [Auth](docs/auth.md) for preparing users for interface. **Access to interfac
  - libconfig
  - pcre
  - openssl
+ - curl (this is not used as primary library for checking proxies)
 
 ## Development
 The program is currently in its very early stages, so any help is appreciated. See TODO list.
