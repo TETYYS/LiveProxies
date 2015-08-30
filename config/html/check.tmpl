@@ -193,6 +193,14 @@
 					});
 				});
 			</script>
+			<style>
+				pre {
+					height: auto;
+					max-height: 400px;
+					overflow: auto;
+					overflow-y: none;
+				}
+			</style>
 			<div class="container-fluid">
 				<!-- Page Heading -->
 				<div class="row" style="padding-bottom:15px">
@@ -227,7 +235,7 @@
 					</div>
 				</div>
 				<div class="row">
-					<div class="alert fade in col-lg-6 text-center" id="zen" style="padding: 0; margin-right: 15px; visibility: hidden">
+					<div class="alert fade in col-lg-6 text-center" id="zen" style="padding: 0; margin-right: 15px; visibility: hidden; height: 68px">
 						<a id="zenLink"><img style="position: absolute; right: 5px; top: 5px;" src="/spamhaus/zen.gif"></a>
 						<h3 id="zenImgWrap"><img id="zenImg"></h3>
 					</div>
@@ -244,6 +252,33 @@
 					<div class="alert alert-info fade in col-lg-12 text-center" id="rdns" style="padding: 0; visibility: hidden">
 						<h3 style="position:absolute;top: 5px;right: 5px;margin:0">Reverse DNS</h3>
 						<h3 style="margin:10px" id="rdnsText"></h3>
+					</div>
+				</div>
+				<div class="panel panel-default">
+					<div class="panel-heading">
+						<h3 class="panel-title">
+							<i class="fa fa-flag"></i> Flags
+						</h3>
+					</div>
+					{T_CHECK_COND_INVALID_CERT}
+					<div class="panel-body alert-danger">
+						<div class="row">
+							<div class="col-lg-1">
+								<span class="fa-stack fa-lg fa-4x">
+									<i class="fa fa-lock fa-stack-1x" style="color:black"></i>
+									<i class="fa fa-ban fa-stack-2x text-danger"></i>
+								</span>
+							</div>
+							<div class="col-lg-11">
+								<p>Proxy server sends invalid SSL certificate and probably is spying on users.</p>
+								<p>Certificate fingerprint: {T_CHECK_COND_INVALID_CERT_FINGERPRINT}</p>
+								<pre class="alert-danger">{T_CHECK_COND_INVALID_CERT_INFO}</pre>
+							</div>
+						</div>
+					{T_CHECK_ELSE_COND_INVALID_CERT}
+					<div class="panel-body">
+						<i class="fa fa-check fa-4x"></i> None
+					{T_CHECK_END_COND_INVALID_CERT}
 					</div>
 				</div>
 			</div>
