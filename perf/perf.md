@@ -12,7 +12,6 @@ Notes:
  - Version: 0.7.2 (pre-release)
  - Not multi-threaded
  - Peak memory usage 10~ MB
- - Includes * second idle state
 
 Time (sec)  | Result (proxies)
 ----------- | -------------
