@@ -47,6 +47,23 @@ SSL_free(SSL *ssl)
 	h_SSL_free(ssl);
 }
 
+void
+bufferevent_free(struct bufferevent *bufev)
+{
+	void(*h_bufferevent_free)(struct bufferevent *bufev);
+	h_bufferevent_free = dlsym(-1, "bufferevent_free");
+
+	Log(LOG_LEVEL_DEBUG, "bufferevent_free %p", bufev);
+	void *buffer[100];
+	int nptrs = backtrace(buffer, 100);
+	char **strs;
+	strs = backtrace_symbols(buffer, nptrs); {
+		for (size_t x = 0; x < nptrs; x++)
+			Log(LOG_LEVEL_DEBUG, "BT %d: %s", x, strs[x]);
+	} free(strs);
+	h_bufferevent_free(bufev);
+}
+
 static char *StdinDynamic()
 {
 	char *str;

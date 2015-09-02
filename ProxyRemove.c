@@ -11,7 +11,6 @@ void RemoveThread()
 {
 	for (;;) {
 		msleep(RemoveThreadInterval);
-		continue; ////////////////////////////////////////////////
 		PROXY *proxy = NULL;
 		pthread_mutex_lock(&LockCheckedProxies); {
 			uint64_t low = UINT64_MAX;
@@ -24,6 +23,7 @@ void RemoveThread()
 		} pthread_mutex_unlock(&LockCheckedProxies);
 		if (proxy != NULL) {
 			UNCHECKED_PROXY *UProxy = UProxyFromProxy(proxy);
+			UProxyAdd(UProxy);
 			proxy->rechecking = true;
 			RequestAsync(UProxy);
 		}
