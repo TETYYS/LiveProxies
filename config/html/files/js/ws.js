@@ -34,8 +34,10 @@ function WSTextChange(e, text, updateTime)
 			return;
 		}
 	}
-	e.fadeUpdate(e.css('color'), updateTime);
-	origColors.push([e, e.css('color')]);
+	var color = e.css('color');
+	origColors.push([e, color]);
+	e.fadeUpdate(color, updateTime);
+	console.log("pushed orig color " + color);
 }
 
 function IntToBin(Int, bytes) {
@@ -163,5 +165,6 @@ function WSInitialize(subscriptions, cookieName, fxMessage)
 } 
 
 function WSPull(subscription, current) {
+	console.log("payload len: " + ('P' + IntToBin(subscription, 4) + current).length);
 	wsConn.send('P' + IntToBin(subscription, 4) + current, { binary: true });
 }
