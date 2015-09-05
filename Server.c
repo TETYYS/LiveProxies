@@ -288,7 +288,6 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff, bool IsSSL)
 	bool freeBufferEvent = true;
 
 	bufferevent_set_timeouts(BuffEvent, NULL, NULL);
-	bufferevent_disable(BuffEvent, EV_READ);
 
 	Log(LOG_LEVEL_DEBUG, "Server landing");
 	/* Page dispatch */ {
@@ -499,7 +498,7 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 	VALGRIND_MAKE_MEM_DEFINED(buff, len + 1);
 #endif
 
-	// HexDump("Server buffer", buff, len);
+	HexDump("Server buffer", buff, len);
 
 	// Websockets
 	if (!HtmlTemplateUseStock) {

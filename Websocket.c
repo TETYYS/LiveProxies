@@ -215,6 +215,16 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 	if (!GET_BIT(Buff[1], 7)) {
 		// Mask not set
 		Log(LOG_LEVEL_DEBUG, "Websocket PACKET mask not set");
+
+		pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
+			for (size_t x = 0;x < WebSocketSubscribedClientsSize;x++) {
+				if (WebSocketSubscribedClients[x]->buffEvent == BuffEvent) {
+					WebsocketClientTimeout(BuffEvent, EV_TIMEOUT, WebSocketSubscribedClients[x]);
+					return;
+				}
+			}
+		} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
+
 		bufferevent_free(BuffEvent);
 		return;
 	}
@@ -241,11 +251,26 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 		payload = (uint8_t*)(&Buff[6]);
 	}
 
-	if (lenExtended != ((Buff + BuffLen) - payload)) {
+	Log(LOG_LEVEL_DEBUG, "Actual length: %d, sent length: %d", ((Buff + BuffLen) - payload), lenExtended);
+	if (lenExtended > ((Buff + BuffLen) - payload)) {
 		// stop the ruse man
+		pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
+			for (size_t x = 0;x < WebSocketSubscribedClientsSize;x++) {
+				if (WebSocketSubscribedClients[x]->buffEvent == BuffEvent) {
+					WebsocketClientTimeout(BuffEvent, EV_TIMEOUT, WebSocketSubscribedClients[x]);
+					return;
+				}
+			}
+		} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
+
 		bufferevent_free(BuffEvent);
 		return;
 	}
+
+#if DEBUG
+	if (lenExtended != ((Buff + BuffLen) - payload))
+		Log(LOG_LEVEL_WARNING, "Websocket payload lengths do not match");
+#endif
 
 	uint8_t *payLoadDecoded = malloc(lenExtended);
 	for (uint32_t x = 0; x < lenExtended; x++)
@@ -319,8 +344,8 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 	} pthread_mutex_unlock(&WebSocketUnfinishedPacketsLock);
 	// After this, no freeing is required at further opcode processing
 
+	HexDump("Binary payload", payLoadDecoded, lenExtended);
 	switch (opcode) {
-		HexDump("Binary payload", payLoadDecoded, lenExtended);
 
 		case WEBSOCKET_OPCODE_UNICODE:
 		case WEBSOCKET_OPCODE_BINARY: {
@@ -358,6 +383,8 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 								uint64_t network = htobe64(target);
 								Log(LOG_LEVEL_DEBUG, "Sent on pull data on demand");
 								WebsocketClientsNotifySingle(BuffEvent, &network, sizeof(network), sub);
+							} else {
+								Log(LOG_LEVEL_DEBUG, "Sent on pull data on demand [SAME]");
 							}
 							break;
 						}
@@ -413,7 +440,7 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 			if (*(uint32_t*)payLoadDecoded > (	WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES +	WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES + WEBSOCKET_SERVER_COMMAND_PROXY_ADD + WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE +
 												WEBSOCKET_SERVER_COMMAND_UPROXY_ADD +		WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE)) {
 				// Ruse man!!
-				WebsocketClientTimeout(BuffEvent, EV_TIMEOUT, client); // this is actually ruse man, so stop him
+				WebsocketClientTimeout(BuffEvent, EV_TIMEOUT, client);
 				goto end;
 				return;
 			}

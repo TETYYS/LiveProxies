@@ -10,6 +10,8 @@
 void RemoveThread()
 {
 	for (;;) {
+		if (RemoveThreadInterval == 0)
+			return;
 		msleep(RemoveThreadInterval);
 		PROXY *proxy = NULL;
 		pthread_mutex_lock(&LockCheckedProxies); {
