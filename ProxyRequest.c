@@ -512,13 +512,13 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 		if (ProxyIsSSL(UProxy->type))
 			Log(LOG_LEVEL_DEBUG, "SSL stage %d error %02x", UProxy->stage, Event);
 
-		RequestFree(bufferevent_getfd(BuffEvent), Event, UProxy);
 #if DEBUG
 		char *ip = IPv6MapToString(UProxy->ip); {
 			Log(LOG_LEVEL_DEBUG, "EVEvent: event timeout / fail %s", ip);
 		} free(ip);
 		Log(LOG_LEVEL_DEBUG, "EVEvent: BuffEvent: %08x event %02x", BuffEvent, Event);
 #endif
+		RequestFree(bufferevent_getfd(BuffEvent), Event, UProxy);
 		/*if (UProxy->timeout != NULL)
 			event_active(UProxy->timeout, EV_TIMEOUT, 0);*/
 	}

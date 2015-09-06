@@ -291,11 +291,6 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff, bool IsSSL)
 
 	Log(LOG_LEVEL_DEBUG, "Server landing");
 	/* Page dispatch */ {
-		if (Buff[0] != 'G') {
-			// wait a sec we don't have any POST or any other handlers
-			goto free;
-		}
-
 		char *firstIndex = strchr(Buff, ' ');
 
 		if (firstIndex == NULL)
@@ -333,8 +328,10 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff, bool IsSSL)
 			InterfaceRawHttpBL(BuffEvent, Buff);
 		} else if (pathLen > 5 && strncmp(path, "/rdns", 5) == 0)
 			InterfaceRawReverseDNS(BuffEvent, Buff);
-		else if (pathLen > 4 && strncmp(path, "/add", 4) == 0)
+		else if (pathLen >= 4 && strncmp(path, "/add", 4) == 0) {
+			freeBufferEvent = false; // Needed by POST
 			InterfaceRawUProxyAdd(BuffEvent, Buff);
+		}
 		else if (pathLen == 6 && strncmp(path, "/tools", 6) == 0)
 			InterfaceTools(BuffEvent, Buff);
 		else if (pathLen > 6 && strncmp(path, "/check", 6) == 0) {
@@ -529,13 +526,28 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 		}
 	}
 
-	bool valid = false;
-	if (buff[len - 1] == '\n' && buff[len - 2] == '\r' && buff[len - 3] == '\n' && buff[len - 4] == '\r')
-		valid = true;
-	if (!valid) {
-		if (buff[len - 1] != '\n' || buff[len - 2] != '\n') {
-			// Not full message
-			// We got data in evbuffer, just return and wait for remaining data
+	if (buff[0] != 'G' && buff[0] != 'P' && buff[1] != 'O') {
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
+		free(buff);
+		bufferevent_free(BuffEvent);
+		Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
+		return;
+	}
+
+	if (buff[0] == 'G') {
+		bool valid = false;
+		if (buff[len - 1] == '\n' && buff[len - 2] == '\r' && buff[len - 3] == '\n' && buff[len - 4] == '\r')
+			valid = true;
+		if (!valid) {
+			if (buff[len - 1] != '\n' || buff[len - 2] != '\n') {
+				// Not a full header
+				// We got data in evbuffer, just return and wait for remaining data
+				free(buff);
+				return;
+			}
+		}
+	} else {
+		if (strstr(buff, "\r\n\r\n") == NULL && strstr(buff, "\n\n") == NULL) {
 			free(buff);
 			return;
 		}
@@ -741,7 +753,9 @@ static void ServerUDP(int hSock)
 			proxy->retries = 0;
 			proxy->successfulChecks = 1;
 			proxy->anonymity = ANONYMITY_NONE;
-		}
+			proxy->invalidCert = NULL;
+		} else
+			proxy = UProxy->associatedProxy;
 
 		UProxy->checkSuccess = true;
 

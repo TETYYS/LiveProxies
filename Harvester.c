@@ -206,57 +206,10 @@ void HarvestLoop()
 					pch = strtok_r(NULL, "\n", &tokSave);
 					continue;
 				}
-				if (strncmp(pch, "setType", 7) == 0)
-					curType = atoll(pch + 8);
 
-				if (ProxyIsSSL(curType) && !SSLEnabled) {
-					Log(LOG_LEVEL_WARNING, "Got SSL proxy, but SSL is disabled");
-					goto next;
-				}
-
-				char *delimiterOffset = last_strstr(pch, ":");
-
-				if (delimiterOffset == NULL)
-					goto next;
-
-				curPort = atoi(delimiterOffset + 1);
-				if (curPort == 0)
-					goto next;
-
-				pch[delimiterOffset - pch] = '\0';
-
-				IPv6Map *map;
-				if (pch[0] == '[' && pch[strlen(pch) - 1] == ']') {
-					pch[strlen(pch) - 1] = '\0';
-					map = StringToIPv6Map(pch + 1);
-				} else
-					map = StringToIPv6Map(pch);
-
-				if (map == NULL)
-					goto next;
-
-				IP_TYPE type = GetIPType(map);
-
-				if (GlobalIp4 == NULL && type == IPV4) {
-					Log(LOG_LEVEL_WARNING, "Got IPv4 address from harvester %s, but no IPv4 is provided (GlobalIp4)", path);
-					free(map);
-					goto next;
-				}
-				if (GlobalIp6 == NULL && type == IPV6) {
-					Log(LOG_LEVEL_WARNING, "Got IPv6 address from harvester %s, but no IPv6 is provided (GlobalIp6)", path);
-					free(map);
-					goto next;
-				}
-
-				UNCHECKED_PROXY *up = AllocUProxy(map, curPort, curType, NULL, NULL);
-
-				addedPrev = added;
-				added += UProxyAdd(up);
-
-				if (addedPrev == added)
-					UProxyFree(up);
+				added += AddProxyHarvesterFormat(pch, &curType);
 				total++;
-next:
+
 				pch = strtok_r(NULL, "\n", &tokSave);
 			}
 
@@ -302,4 +255,58 @@ freepath:
 end:
 		msleep(HARVEST_TIMEOUT);
 	}
+}
+
+size_t AddProxyHarvesterFormat(char *In, PROXY_TYPE *CurrentType)
+{
+	if (strncmp(In, "setType", 7) == 0)
+		*CurrentType = atoll(In + 8);
+
+	if (ProxyIsSSL(*CurrentType) && !SSLEnabled) {
+		Log(LOG_LEVEL_WARNING, "Got SSL proxy, but SSL is disabled");
+		return 0;
+	}
+
+	char *delimiterOffset = last_strstr(In, ":");
+
+	if (delimiterOffset == NULL)
+		return 0;
+
+	uint16_t curPort = atoi(delimiterOffset + 1);
+	if (curPort == 0)
+		return 0;
+
+	In[delimiterOffset - In] = '\0';
+
+	IPv6Map *map;
+	if (In[0] == '[' && In[strlen(In) - 1] == ']') {
+		In[strlen(In) - 1] = '\0';
+		map = StringToIPv6Map(In + 1);
+	} else
+		map = StringToIPv6Map(In);
+
+	if (map == NULL)
+		return 0;
+
+	IP_TYPE type = GetIPType(map);
+
+	if (GlobalIp4 == NULL && type == IPV4) {
+		Log(LOG_LEVEL_WARNING, "Got IPv4 address, but no IPv4 is provided (GlobalIp4)");
+		free(map);
+		return 0;
+	}
+	if (GlobalIp6 == NULL && type == IPV6) {
+		Log(LOG_LEVEL_WARNING, "Got IPv6 address, but no IPv6 is provided (GlobalIp6)");
+		free(map);
+		return 0;
+	}
+
+	UNCHECKED_PROXY *up = AllocUProxy(map, curPort, *CurrentType, NULL, NULL);
+
+	size_t added = UProxyAdd(up);
+
+	if (added == 0)
+		UProxyFree(up);
+
+	return added;
 }

@@ -31,7 +31,7 @@ http://127.0.0.1/proxylist.txt
 ```
 In this case, program will push all proxies in `http://127.0.0.1/proxylist.txt` with HTTP and HTTPS type.
 
-It is worth noting that LiveProxies will accept proxy even if ending of line contains unnessecary information. Here's a couple of examples:
+It is worth noting that LiveProxies will accept proxy even if ending of line contains unnessecary information (except if it cointains ":", a delimiter for IP address and port). Here's a couple of examples:
 ```
 ===== Checked With Proxyfire 1.24 Check Report =====	(adds none)
 Checked in the USA on a 10sec Timeout					(adds none)

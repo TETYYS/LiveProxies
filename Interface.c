@@ -912,6 +912,9 @@ void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
 
 void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 {
+	if (Buff == NULL) {
+
+	}
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
 	INTERFACE_INFO info;
@@ -920,10 +923,10 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 	PROXY_TYPE type;
 	char *offset = &(Buff[8]);
 
-	for (size_t x = 0;x < InterfacePagesSize;x++) {
+	/*for (size_t x = 0;x < InterfacePagesSize;x++) {
 		if (InterfacePages[x].page == INTERFACE_PAGE_ADD)
 			info.currentPage = &(InterfacePages[x]);
-	}
+	}*/
 
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
@@ -933,83 +936,119 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 		return;
 	}
 
-	char *newLine = strchr(offset, '\n');
-	/* IP */ {
-		char *ipStart = strstr(offset, "?ip=");
-		if (ipStart == NULL) {
-			evbuffer_add(body, "Missing ip parameter", 20 * sizeof(char));
-			goto error;
-		}
-		ipStart += 4 * sizeof(char);
+	if (Buff[0] == 'G') {
+		char *newLine = strchr(offset, '\n');
+		/* IP */ {
+			char *ipStart = strstr(offset, "?ip=");
+			if (ipStart == NULL) {
+				evbuffer_add(body, "Missing ip parameter", 20 * sizeof(char));
+				goto error;
+			}
+			ipStart += 4 * sizeof(char);
 
-		if (newLine <= ipStart) {
-			evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+			if (newLine <= ipStart) {
+				evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+				goto error;
+			}
+
+			char *ipEnd = strchr(ipStart, '&');
+			if (ipEnd == NULL) {
+				evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+				goto error;
+			}
+			char ipRaw[(ipEnd - ipStart) / sizeof(char) + 1];
+			memcpy(ipRaw, ipStart, ipEnd - ipStart);
+			ipRaw[ipEnd - ipStart] = 0x00;
+
+			ip = StringToIPv6Map(ipRaw);
+			if (ip == NULL) {
+				evbuffer_add(body, "Malformed IP", 12 * sizeof(char));
+				goto error;
+			}
+			offset = ipEnd;
+		} /* End IP */
+		/* Port */ {
+			char *portStart = strstr(offset, "&port=");
+			if (portStart == NULL) {
+				evbuffer_add(body, "Missing port parameter", 22 * sizeof(char));
+				goto error;
+			}
+			portStart += 6 * sizeof(char);
+
+			if (newLine <= portStart) {
+				evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+				goto error;
+			}
+
+			port = atoi(portStart);
+			if (port > UINT16_MAX) {
+				evbuffer_add(body, "Malformed port", 14 * sizeof(char));
+				goto error;
+			}
+			offset = strstr(portStart, "&");
+			if (offset == NULL) {
+				evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+				goto error;
+			}
+		} /* End port */
+		/* Type */ {
+			char *typeStart = strstr(offset, "&type=");
+			if (typeStart == NULL) {
+				evbuffer_add(body, "Missing type parameter", 22 * sizeof(char));
+				goto error;
+			}
+			typeStart += 6 * sizeof(char);
+
+			if (newLine <= typeStart) {
+				evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+				goto error;
+			}
+
+			type = atoi(typeStart);
+			if (type > PROXY_TYPE_ALL || type <= 0) {
+				evbuffer_add(body, "Malformed type", 14 * sizeof(char));
+				goto error;
+			}
+		} /* end type */
+
+		UProxyAdd(AllocUProxy(ip, (uint16_t)port, type, NULL, NULL));
+
+		evbuffer_add(body, "OK", 2 * sizeof(char));
+	} else {
+		char *rawLen;
+		if (!ServerFindHeader("Content-Length: ", Buff, &rawLen, NULL, NULL)) {
+			evbuffer_add(body, "Invalid request", 15 * sizeof(char));
 			goto error;
 		}
 
-		char *ipEnd = strchr(ipStart, '&');
-		if (ipEnd == NULL) {
-			evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+		uint64_t len = atoll(rawLen);
+		if (len == 0) {
+			evbuffer_add(body, "Invalid request", 15 * sizeof(char));
 			goto error;
 		}
-		char ipRaw[(ipEnd - ipStart) / sizeof(char) + 1];
-		memcpy(ipRaw, ipStart, ipEnd - ipStart);
-		ipRaw[ipEnd - ipStart] = 0x00;
+		uint64_t origLen = strlen(Buff);
 
-		ip = StringToIPv6Map(ipRaw);
-		if (ip == NULL) {
-			evbuffer_add(body, "Malformed IP", 12 * sizeof(char));
-			goto error;
+		char *content = strstr(Buff, "\r\n\r\n") + (4 * sizeof(char));
+		if (content == 4 * sizeof(char)) {
+			content = strstr(Buff, "\n\n") + (2 * sizeof(char));
+			if (content == 2 * sizeof(char)) {
+				evbuffer_add(body, "Invalid request", 15 * sizeof(char));
+				goto error;
+			}
 		}
-		offset = ipEnd;
-	} /* End IP */
-	/* Port */ {
-		char *portStart = strstr(offset, "&port=");
-		if (portStart == NULL) {
-			evbuffer_add(body, "Missing port parameter", 22 * sizeof(char));
-			goto error;
-		}
-		portStart += 6 * sizeof(char);
+		uint64_t contentLen = origLen - ((content - Buff) / sizeof(char));
 
-		if (newLine <= portStart) {
-			evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+		if (len < contentLen) {
+			evbuffer_add(body, "Invalid request", 15 * sizeof(char));
 			goto error;
-		}
-
-		port = atoi(portStart);
-		if (port > UINT16_MAX) {
-			evbuffer_add(body, "Malformed port", 14 * sizeof(char));
-			goto error;
-		}
-		offset = strstr(portStart, "&");
-		if (offset == NULL) {
-			evbuffer_add(body, "Malformed request", 17 * sizeof(char));
-			goto error;
-		}
-	} /* End port */
-	/* Type */ {
-		char *typeStart = strstr(offset, "&type=");
-		if (typeStart == NULL) {
-			evbuffer_add(body, "Missing type parameter", 22 * sizeof(char));
-			goto error;
-		}
-		typeStart += 6 * sizeof(char);
-
-		if (newLine <= typeStart) {
-			evbuffer_add(body, "Malformed request", 17 * sizeof(char));
-			goto error;
-		}
-
-		type = atoi(typeStart);
-		if (type > PROXY_TYPE_ALL || type <= 0) {
-			evbuffer_add(body, "Malformed type", 14 * sizeof(char));
-			goto error;
-		}
-	} /* end type */
-
-	UProxyAdd(AllocUProxy(ip, (uint16_t)port, type, NULL, NULL));
-
-	evbuffer_add(body, "OK", 2 * sizeof(char));
+		} else if (len > contentLen) {
+			bufferevent_setwatermark(BuffEvent, EV_READ, len - contentLen, 0);
+			bufferevent_setcb(BuffEvent, InterfaceRawUProxyAddProcessPost, NULL, ServerEvent, NULL);
+			evbuffer_add(bufferevent_get_input(BuffEvent), Buff, origLen);
+			return;
+		} else
+			InterfaceRawUProxyAddProcessPost(BuffEvent, Buff);
+	}
 	goto ok;
 error:
 	evbuffer_drain(headers, evbuffer_get_length(headers));
@@ -1022,6 +1061,49 @@ ok:
 	evbuffer_free(headers);
 	evbuffer_free(body);
 	return;
+}
+
+void InterfaceRawUProxyAddProcessPost(struct bufferevent *BuffEvent, char *Buff)
+{
+	if (Buff == NULL) {
+		uint64_t len = evbuffer_get_length(bufferevent_get_input(BuffEvent));
+		Buff = malloc(len + 1);
+		evbuffer_remove(bufferevent_get_input(BuffEvent), Buff, len);
+		Buff[len] = 0x00;
+	}
+
+	char *content = strstr(Buff, "\r\n\r\n") + (4 * sizeof(char));
+	if (content == 4 * sizeof(char)) {
+		content = strstr(Buff, "\n\n") + (2 * sizeof(char));
+		if (content == 2 * sizeof(char)) {
+			bufferevent_free(BuffEvent);
+			return;
+		}
+	}
+	// uint64_t contentLen = (content - Buff) / sizeof(char);
+
+	char *tokSave = NULL;
+	char *pch = strtok_r(content, "\n", &tokSave);
+	uint16_t curPort;
+	uint64_t added = 0, total = 0;
+	PROXY_TYPE curType = PROXY_TYPE_HTTP;
+	while (pch != NULL) {
+		if (pch[0] == '\0') {
+			pch = strtok_r(NULL, "\n", &tokSave);
+			continue;
+		}
+
+		added += AddProxyHarvesterFormat(pch, &curType);
+		total++;
+
+		pch = strtok_r(NULL, "\n", &tokSave);
+	}
+
+	printf("Added %d (%d new) proxies from the interface\n", total, added);
+
+	evbuffer_add_printf(bufferevent_get_output(BuffEvent), "HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\n%04c%04c", added, total);
+	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+	bufferevent_free(BuffEvent);
 }
 
 void InterfaceTools(struct bufferevent *BuffEvent, char *Buff)

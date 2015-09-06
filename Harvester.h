@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <pthread.h>
+#include "ProxyLists.h"
 
 #define HARVEST_TIMEOUT 1000 * 60 * 30
 
@@ -26,3 +27,4 @@ size_t SizeHarvesterPrxsrcStats;
 
 void HarvestLoop();
 char *ProxySourceTypeToString(HARVESTER_PROXY_SOURCE_TYPE In);
+size_t AddProxyHarvesterFormat(char *In, PROXY_TYPE *CurrentType);
