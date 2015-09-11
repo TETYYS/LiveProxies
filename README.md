@@ -68,7 +68,9 @@ See [Auth](docs/auth.md) for preparing users for interface. **Access to interfac
 Push requests welcome. See TODO list.
 
 ## TODO
+ - Implement legit page checking
+ - Windows support
+ - Daemon mode
  - Suggesstions?
- 
 
 [Maxmind's GeoIP]:https://github.com/maxmind/geoip-api-c/
