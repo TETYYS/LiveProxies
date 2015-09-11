@@ -12,19 +12,33 @@
                 <script>
                     $(document).ready(function() {
                         $('#type').multiselect( { buttonWidth: '100%' } );
+                        $('#typeBulk').multiselect( { buttonWidth: '100%' } );
                     });
                     
                     function add() {
                         var type = 0;
                         var vals = $('#type').val();
-                        for (var x = 0;x < vals.length;x++) {
+                        for (var x = 0;x < vals.length;x++)
                             type |= parseInt(vals[x]);
-                        }
+                        
                         $.ajax("/add?ip=" + $('#ip').val() + "&port=" + $('#port').val() + "&type=" + type).done(function(res) {
                                 $('.panel-body').fadeUpdate($('.panel-body').css("background-color"), 1000, true);
                         }).fail(function(res) {
                             alert(res.responseText);
                         });
+                    }
+                    
+                    function bulkAddType() {
+                        var type = 0;
+                        var vals = $('#typeBulk').val();
+                        for (var x = 0;x < vals.length;x++)
+                            type |= parseInt(vals[x]);
+                        
+                        var bulkval = $('#bulk').val();
+                        if (bulkval == "" || bulkval[bulkval.length - 1] == '\n')
+                            $('#bulk').val("setType " + type + "\n");
+                        else
+                            $('#bulk').val($('#bulk').val() + "\nsetType " + type + "\n");
                     }
 
                     function addBulk() {
@@ -111,6 +125,20 @@
                             <h3 class="panel-title pull-left" style="padding-top: 6.5px">
                                 <i class="fa fa-plus"></i><i class="fa fa-plus"></i> Bulk add proxies
                             </h3>
+                            <div class="col-lg-3">
+                                <select id="typeBulk" multiple="multiple" class="pull-left">
+                                    <option value="1" selected="selected">HTTP</option>
+                                    <option value="2" selected="selected">HTTPS</option>
+                                    <option value="4">SOCKS4</option>
+                                    <option value="8">SOCKS4A</option>
+                                    <option value="16">SOCKS5</option>
+                                    <option value="32">SOKCS4 -> SSL</option>
+                                    <option value="64">SOCKS4A -> SSL</option>
+                                    <option value="128">SOCKS5 -> SSL</option>
+                                    <option value="256">SOCKS5 UDP</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-default btn-sm pull-left" onclick="bulkAddType();">Add</button>
                             <button class="btn btn-default btn-sm pull-right" onclick="format();">Format</button>
                         </div>
                         <div class="panel-body">

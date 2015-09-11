@@ -20,18 +20,20 @@
 #include "Config.h"
 #include <openssl/evp.h>
 #include <openssl/x509.h>
+#include "Stats.h"
 
-char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",					"{T_CFG_HOME_ACTIVE}",			"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",		"{T_CFG_SOURCES_ACTIVE}",
-								"{T_CFG_STATS_ACTIVE}",				"{T_USER}",							"{T_COUNT_UPROXIES}",			"{T_COUNT_PROXIES}",			"{T_UPROXIES_HEAD}",			"{T_UPROXIES_TABLE_ITEMS_START}",
-								"{T_UPROXIES_TABLE_ITEMS_END}",		"{T_CFG_TABLE_ODD}",				"{T_CFG_TABLE_EVEN}",			"{T_CFG_TABLE_OK}",				"{T_CFG_TABLE_WARN}",			"{T_CFG_TABLE_ERR}",
-								"{T_UPROXIES_ITEM}",				"{T_PROXIES_HEAD}",					"{T_PROXIES_TABLE_ITEMS_START}","{T_PROXIES_TABLE_ITEMS_END}",	"{T_PROXIES_ITEM}",				"{T_PRXSRC_HEAD}",
-								"{T_PRXSRC_TABLE_ITEMS_START}",		"{T_PRXSRC_TABLE_ITEMS_END}",		"{T_PRXSRC_ITEM}",				NULL,							"{T_TABLE_BREAK}",				"{T_STATS_GEO_HEAD}",
-								"{T_STATS_GEO_TABLE_ITEMS_START}",	"{T_STATS_GEO_TABLE_ITEMS_END}",	"{T_STATS_GEO_ITEM}",			"{T_CHECK_IP}",					"{T_CHECK_PORT}",				"{T_CHECK_TYPE}",
-								"{T_CHECK_COUNTRY_LOWER}",			"{T_CHECK_COUNTRY_UPPER}",			"{T_CHECK_LIVE_SINCE}",			"{T_CHECK_LAST_CHECKED}",		"{T_CHECK_CONNECT_TIMEOUT}",	"{T_CHECK_HTTP_S_TIMEOUT}",
-								"{T_CHECK_SUCCESSFUL_CHECKS}",		"{T_CHECK_FAILED_CHECKS}",			"{T_CHECK_RETRIES}",			"{T_CHECK_UID}",				"{T_CHECK_COUNTRY_FULL}",		"{T_SUB_SIZE_UPROXIES}",
-								"{T_SUB_SIZE_PROXIES}",				"{T_SUB_AUTH_COOKIE}",				"{T_SUB_MSG_INTERVAL}",			"{T_SUB_PROXY_ADD}",			"{T_SUB_UPROXY_ADD}",			"{T_SUB_PROXY_REMOVE}",
-								"{T_SUB_UPROXY_REMOVE}",			"{T_CFG_ENABLED}",					"{T_CFG_DISABLED}",				"{T_CFG_TOOLS_ACTIVE}",			"{T_CHECK_COND_INVALID_CERT}",	"{T_CHECK_COND_INVALID_CERT_FINGERPRINT}",
-								"{T_CHECK_ELSE_COND_INVALID_CERT}",	"{T_CHECK_END_COND_INVALID_CERT}",	"{T_CHECK_COND_INVALID_CERT_INFO}"
+char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",					"{T_CFG_HOME_ACTIVE}",				"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",		"{T_CFG_SOURCES_ACTIVE}",
+								"{T_CFG_STATS_ACTIVE}",				"{T_USER}",							"{T_COUNT_UPROXIES}",				"{T_COUNT_PROXIES}",			"{T_UPROXIES_HEAD}",			"{T_UPROXIES_TABLE_ITEMS_START}",
+								"{T_UPROXIES_TABLE_ITEMS_END}",		"{T_CFG_TABLE_ODD}",				"{T_CFG_TABLE_EVEN}",				"{T_CFG_TABLE_OK}",				"{T_CFG_TABLE_WARN}",			"{T_CFG_TABLE_ERR}",
+								"{T_UPROXIES_ITEM}",				"{T_PROXIES_HEAD}",					"{T_PROXIES_TABLE_ITEMS_START}",	"{T_PROXIES_TABLE_ITEMS_END}",	"{T_PROXIES_ITEM}",				"{T_PRXSRC_HEAD}",
+								"{T_PRXSRC_TABLE_ITEMS_START}",		"{T_PRXSRC_TABLE_ITEMS_END}",		"{T_PRXSRC_ITEM}",					NULL,							"{T_TABLE_BREAK}",				"{T_STATS_GEO_HEAD}",
+								"{T_STATS_GEO_TABLE_ITEMS_START}",	"{T_STATS_GEO_TABLE_ITEMS_END}",	"{T_STATS_GEO_ITEM}",				"{T_CHECK_IP}",					"{T_CHECK_PORT}",				"{T_CHECK_TYPE}",
+								"{T_CHECK_COUNTRY_LOWER}",			"{T_CHECK_COUNTRY_UPPER}",			"{T_CHECK_LIVE_SINCE}",				"{T_CHECK_LAST_CHECKED}",		"{T_CHECK_CONNECT_TIMEOUT}",	"{T_CHECK_HTTP_S_TIMEOUT}",
+								"{T_CHECK_SUCCESSFUL_CHECKS}",		"{T_CHECK_FAILED_CHECKS}",			"{T_CHECK_RETRIES}",				"{T_CHECK_UID}",				"{T_CHECK_COUNTRY_FULL}",		"{T_SUB_SIZE_UPROXIES}",
+								"{T_SUB_SIZE_PROXIES}",				"{T_SUB_AUTH_COOKIE}",				"{T_SUB_MSG_INTERVAL}",				"{T_SUB_PROXY_ADD}",			"{T_SUB_UPROXY_ADD}",			"{T_SUB_PROXY_REMOVE}",
+								"{T_SUB_UPROXY_REMOVE}",			"{T_CFG_ENABLED}",					"{T_CFG_DISABLED}",					"{T_CFG_TOOLS_ACTIVE}",			"{T_CHECK_COND_INVALID_CERT}",	"{T_CHECK_COND_INVALID_CERT_FINGERPRINT}",
+								"{T_CHECK_ELSE_COND_INVALID_CERT}",	"{T_CHECK_END_COND_INVALID_CERT}",	"{T_CHECK_COND_INVALID_CERT_INFO}",	"{T_STATS_PCOUNT_HEAD}",		"{T_STATS_PCOUNT_ITEMS_START}",	"{T_STATS_PCOUNT_ITEMS_END}",
+								"{T_STATS_PCOUNT_ITEM}"
 };
 
 static char *StrReplace(char *string, char *substr, char *replacement)
@@ -731,6 +733,40 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				TableInfo.tableHeadOrItemIteration++; // << line+4
 				break;
 			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_PCOUNT_HEAD:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_PCOUNT_ITEM: {
+				bool item = Components[x].identifier == HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_PCOUNT_ITEM;
+				STATS_PROXY_COUNT *entry = (STATS_PROXY_COUNT*)TableInfo.tableObject;
+
+				switch (TableInfo.tableHeadOrItemIteration) {
+					case 0: {
+						if (item) {
+							char *time = FormatTime(entry->Time); {
+								evbuffer_add_printf(Buffer, "%s", time);
+							} free(time);
+						} else
+							evbuffer_add(Buffer, "Time", 4 * sizeof(char));
+						break;
+					}
+					case 1: {
+						if (item) {
+							evbuffer_add_printf(Buffer, "%d", entry->Proxy);
+						} else
+							evbuffer_add(Buffer, "Checked proxies", 15 * sizeof(char));
+						break;
+					}
+					case 2: {
+						if (item)
+							evbuffer_add_printf(Buffer, "%d", entry->UProxy);
+						else
+							evbuffer_add(Buffer, "Unchecked proxies", 17 * sizeof(char));
+						TableInfo.tableHeadOrItemIteration = -1; // line+4 sets it to 0
+						break;
+					}
+				}
+				TableInfo.tableHeadOrItemIteration++; // << line+4
+				break;
+			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_UPROXIES_TABLE_ITEMS_START: {
 				pthread_mutex_lock(&LockUncheckedProxies); {
 					for (uint64_t i = 0;i < SizeUncheckedProxies;i++) {
@@ -764,17 +800,17 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_PRXSRC_TABLE_ITEMS_START: {
-				pthread_mutex_lock(&LockHarvesterPrxsrcStats); {
-					for (size_t i = 0;i < SizeHarvesterPrxsrcStats;i++) {
+				pthread_mutex_lock(&LockStatsHarvesterPrxsrc); {
+					for (size_t i = 0;i < SizeStatsHarvesterPrxsrc;i++) {
 						HTML_TEMPALTE_TABLE_INFO tableInfo;
 						tableInfo.inTable = true;
 						tableInfo.currentComponentIteration = x + 1;
 						tableInfo.tableObjectIteration = i;
 						tableInfo.tableHeadOrItemIteration = 0;
-						tableInfo.tableObject = &(HarvesterPrxsrcStats[i]);
+						tableInfo.tableObject = &(HarvesterStatsPrxsrc[i]);
 						HtmlTemplateBufferInsert(Buffer, Components, Size, Info, tableInfo);
 					}
-				} pthread_mutex_unlock(&LockHarvesterPrxsrcStats);
+				} pthread_mutex_unlock(&LockStatsHarvesterPrxsrc);
 				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_PRXSRC_TABLE_ITEMS_END || x > Size)
 					x++;
 				break;
@@ -811,6 +847,22 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				}
 				free(statsGeo);
 				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_GEO_TABLE_ITEMS_END || x > Size)
+					x++;
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_PCOUNT_TABLE_ITEMS_START: {
+				pthread_mutex_lock(&LockStatsProxyCount); {
+					for (size_t i = 0;i < StatsProxyCountSize;i++) {
+						HTML_TEMPALTE_TABLE_INFO tableInfo;
+						tableInfo.inTable = true;
+						tableInfo.currentComponentIteration = x + 1;
+						tableInfo.tableObjectIteration = i;
+						tableInfo.tableHeadOrItemIteration = 0;
+						tableInfo.tableObject = &(StatsProxyCount[i]);
+						HtmlTemplateBufferInsert(Buffer, Components, Size, Info, tableInfo);
+					}
+				} pthread_mutex_unlock(&LockStatsProxyCount);
+				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_PCOUNT_TABLE_ITEMS_END || x > Size)
 					x++;
 				break;
 			}
@@ -882,7 +934,8 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_UPROXIES_TABLE_ITEMS_END:
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_PROXIES_TABLE_ITEMS_END:
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_PRXSRC_TABLE_ITEMS_END:
-			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_GEO_TABLE_ITEMS_END: {
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_GEO_TABLE_ITEMS_END:
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_PCOUNT_TABLE_ITEMS_END: {
 				return;
 				break;
 			}

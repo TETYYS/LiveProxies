@@ -1,5 +1,5 @@
 # LiveProxies
-Latest Version: **0.7.4** (beta)
+Latest Version: **0.7.5** (beta)
 
 LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 
@@ -37,7 +37,7 @@ make
 mkdir /etc/liveproxies
 cp -R config/* /etc/liveproxies
 
-nano /etc/liveproxies.conf # Modify configuration here
+nano /etc/liveproxies.conf # Modify configuration here, see docs/liveproxies.conf for commented file
 
 mkdir /usr/local/share/GeoIP
 wget http://geolite.maxmind.com/download/geoip/database/GeoLiteCountry/GeoIP.dat.gz
@@ -51,7 +51,7 @@ mv GeoIPv6.dat /usr/local/share/GeoIP/
 
 After running, you can access interface at [ip]:[server port]/
 
-See [Prxsrc](docs/prxsrc.md) for importing proxies to LiveProxies.
+See [Prxsrc](docs/prxsrc.md) for importing proxies to LiveProxies. You can also import proxies in the interface.
  
 See [Auth](docs/auth.md) for preparing users for interface. **Access to interface is blocked by default if no users are present.**
 
@@ -65,12 +65,10 @@ See [Auth](docs/auth.md) for preparing users for interface. **Access to interfac
  - curl (this is not used as primary library for checking proxies)
 
 ## Development
-The program is currently in its very early stages, so any help is appreciated. See TODO list.
+Push requests welcome. See TODO list.
 
 ## TODO
- - Provide more interactivity on interface pages
- - Revise proxy timeout system
- - ...
+ - Suggesstions?
  
 
 [Maxmind's GeoIP]:https://github.com/maxmind/geoip-api-c/

@@ -21,9 +21,9 @@ typedef struct _HARVESTER_PRXSRC_STATS_ENTRY {
 	HARVESTER_PROXY_SOURCE_TYPE type;
 } HARVESTER_PRXSRC_STATS_ENTRY;
 
-pthread_mutex_t LockHarvesterPrxsrcStats;
-HARVESTER_PRXSRC_STATS_ENTRY *HarvesterPrxsrcStats;
-size_t SizeHarvesterPrxsrcStats;
+pthread_mutex_t LockStatsHarvesterPrxsrc;
+HARVESTER_PRXSRC_STATS_ENTRY *HarvesterStatsPrxsrc;
+size_t SizeStatsHarvesterPrxsrc;
 
 void HarvestLoop();
 char *ProxySourceTypeToString(HARVESTER_PROXY_SOURCE_TYPE In);

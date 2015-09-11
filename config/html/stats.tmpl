@@ -43,6 +43,35 @@
                         <!-- /.panel-body -->
                     </div>
                     <!-- /.panel -->
+                    
+                    <div class="panel panel-default">
+                        <div class="panel-heading">
+                            <i class="fa fa-bar-chart-o fa-fw"></i> Proxy count
+                        </div>
+                        <!-- /.panel-heading -->
+                        <div class="panel-body">
+                            <div id="CProxyCount"></div>
+                        </div>
+                        <!-- /.panel-body -->
+                    </div>
+                    <script>
+                        $(document).ready(function() {
+                            Morris.Area({
+                                element: 'CProxyCount',
+                                data: [{T_STATS_PCOUNT_ITEMS_START}{
+                                    time: '{T_STATS_PCOUNT_ITEM}',
+                                    1: {T_STATS_PCOUNT_ITEM},
+                                    2: {T_STATS_PCOUNT_ITEM}
+                                },{T_STATS_PCOUNT_ITEMS_END}],
+                                xkey: 'time', // {T_STATS_PCOUNT_HEAD}
+                                ykeys: ['1', '2'],
+                                labels: ['{T_STATS_PCOUNT_HEAD}', '{T_STATS_PCOUNT_HEAD}'],
+                                pointSize: 2,
+                                hideHover: 'auto',
+                                resize: true
+                            });
+                        });
+                    </script>
                 </div>
                 <!-- /.col-lg-12 -->
             </div>

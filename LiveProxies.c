@@ -10,26 +10,31 @@
 #include "Interface.h"
 #include "PBKDF2.h"
 #include "Server.h"
+#include "Stats.h"
+#include "HtmlTemplate.h"
+#include "Websocket.h"
+
 #include <event2/event.h>
 #include <event2/thread.h>
+
 #include <openssl/ssl.h>
+#include <openssl/rand.h>
+#include <openssl/err.h>
+#include <openssl/conf.h>
+
 #include <pcre.h>
 #include <limits.h>
 #include <libconfig.h>
 #include <stdio.h>
 #include <unistd.h>
-#include <openssl/rand.h>
 #include <math.h>
-#include "HtmlTemplate.h"
-#include "Websocket.h"
-
-#include <openssl/err.h>
-#include <openssl/conf.h>
 
 #include <dlfcn.h>
 #include <execinfo.h>
+
 #include <curl/curl.h>
 
+#if DEBUG
 void
 SSL_free(SSL *ssl)
 {
@@ -63,6 +68,7 @@ bufferevent_free(struct bufferevent *bufev)
 	} free(strs);
 	h_bufferevent_free(bufev);
 }
+#endif
 
 static char *StdinDynamic()
 {
@@ -213,19 +219,19 @@ int main(int argc, char** argv)
 #define CONFIG_BOOL(cfg, svar, var, default) if (config_setting_lookup_bool(cfg, svar, (int*)(&var)) == CONFIG_FALSE) { var = default; Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %d...", svar, default); }
 
 	CONFIG_INT64(cfgRoot, "SimultaneousChecks", SimultaneousChecks, 3000)
-		CONFIG_INT64(cfgRoot, "CheckingInterval", CheckingInterval, 10000)
-		CONFIG_INT64(cfgRoot, "RemoveThreadInterval", RemoveThreadInterval, 300000)
-		CONFIG_INT64(cfgRoot, "GlobalTimeout", GlobalTimeout, 10000)
-		CONFIG_INT64(cfgRoot, "AcceptableSequentialFails", AcceptableSequentialFails, 3)
-		CONFIG_INT64(cfgRoot, "AuthLoginExpiry", AuthLoginExpiry, 10800)
-		CONFIG_INT64(cfgRoot, "ProxySourcesBacklog", ProxySourcesBacklog, 20)
-		CONFIG_INT(cfgRoot, "ServerPort", ServerPort, 8084)
-		CONFIG_INT(cfgRoot, "ServerPortUDP", ServerPortUDP, 8084)
-		CONFIG_BOOL(cfgRoot, "EnableUDP", EnableUDP, true)
-		CONFIG_STRING(cfgRoot, "HarvestersPath", HarvestersPath, "/etc/liveproxies/scripts/")
-		CONFIG_STRING(cfgRoot, "HttpBLAccessKey", HttpBLAccessKey, "")
+	CONFIG_INT64(cfgRoot, "CheckingInterval", CheckingInterval, 10000)
+	CONFIG_INT64(cfgRoot, "RemoveThreadInterval", RemoveThreadInterval, 300000)
+	CONFIG_INT64(cfgRoot, "GlobalTimeout", GlobalTimeout, 10000)
+	CONFIG_INT64(cfgRoot, "AcceptableSequentialFails", AcceptableSequentialFails, 3)
+	CONFIG_INT64(cfgRoot, "AuthLoginExpiry", AuthLoginExpiry, 10800)
+	CONFIG_INT64(cfgRoot, "ProxySourcesBacklog", ProxySourcesBacklog, 20)
+	CONFIG_INT(cfgRoot, "ServerPort", ServerPort, 8084)
+	CONFIG_INT(cfgRoot, "ServerPortUDP", ServerPortUDP, 8084)
+	CONFIG_BOOL(cfgRoot, "EnableUDP", EnableUDP, true)
+	CONFIG_STRING(cfgRoot, "HarvestersPath", HarvestersPath, "/etc/liveproxies/scripts/")
+	CONFIG_STRING(cfgRoot, "HttpBLAccessKey", HttpBLAccessKey, "")
 
-		GlobalTimeoutTV.tv_sec = GlobalTimeout / 1000;
+	GlobalTimeoutTV.tv_sec = GlobalTimeout / 1000;
 	GlobalTimeoutTV.tv_usec = (GlobalTimeout % 1000) * 1000;
 
 	if (HttpBLAccessKey[0] == 0x00)
@@ -235,66 +241,71 @@ int main(int argc, char** argv)
 		config_setting_t *sslGroup = config_setting_get_member(cfgRoot, "SSL");
 
 		CONFIG_BOOL(sslGroup, "Enable", SSLEnabled, false)
-			CONFIG_STRING(sslGroup, "Private", SSLPrivateKey, "/etc/liveproxies/private.key")
-			CONFIG_STRING(sslGroup, "Public", SSLPublicKey, "/etc/liveproxies/public.cer")
-			CONFIG_STRING(sslGroup, "CipherList", SSLCipherList, "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH")
-			CONFIG_INT(sslGroup, "ServerPort", SSLServerPort, 8085)
+		CONFIG_STRING(sslGroup, "Private", SSLPrivateKey, "/etc/liveproxies/private.key")
+		CONFIG_STRING(sslGroup, "Public", SSLPublicKey, "/etc/liveproxies/public.cer")
+		CONFIG_STRING(sslGroup, "CipherList", SSLCipherList, "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH")
+		CONFIG_INT(sslGroup, "ServerPort", SSLServerPort, 8085)
 
-			if (SSLEnabled) {
-				SSL_load_error_strings();
-				SSL_library_init();
-				if (!RAND_poll()) {
-					Log(LOG_LEVEL_ERROR, "RAND_poll, exiting...");
+		if (SSLEnabled) {
+			SSL_load_error_strings();
+			SSL_library_init();
+			if (!RAND_poll()) {
+				Log(LOG_LEVEL_ERROR, "RAND_poll, exiting...");
+				exit(EXIT_FAILURE);
+			}
+
+			levServerSSL = SSL_CTX_new(SSLv23_server_method());
+			SSL_CTX_set_session_cache_mode(levServerSSL, SSL_SESS_CACHE_OFF);
+
+			SSL_CTX *CTX;
+			X509 *cert = NULL;
+			RSA *rsa = NULL;
+			BIO *bio;
+			uint8_t *certBuff;
+			size_t size;
+
+			FILE *hFile = fopen(SSLPublicKey, "r"); {
+				if (hFile == NULL) {
+					Log(LOG_LEVEL_ERROR, "Failed to read public key (1), exiting...");
+					exit(EXIT_FAILURE);
+				}
+				fseek(hFile, 0, SEEK_END);
+				size = ftell(hFile);
+				fseek(hFile, 0, SEEK_SET);
+
+				certBuff = malloc(size);
+				fread(certBuff, size, 1, hFile);
+			} fclose(hFile);
+
+			bio = BIO_new_mem_buf(certBuff, size); {
+				cert = PEM_read_bio_X509(bio, NULL, 0, NULL);
+				if (cert == NULL) {
+					Log(LOG_LEVEL_ERROR, "Failed to read public key (2), exiting...");
 					exit(EXIT_FAILURE);
 				}
 
-				levServerSSL = SSL_CTX_new(SSLv23_server_method());
-				SSL_CTX_set_session_cache_mode(levServerSSL, SSL_SESS_CACHE_OFF);
+				if (!SSL_CTX_use_certificate(levServerSSL, cert) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
+					Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
+					exit(EXIT_FAILURE);
+				}
+				SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+				SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
 
-
-				SSL_CTX *CTX;
-				X509 *cert = NULL;
-				RSA *rsa = NULL;
-				BIO *bio;
-				uint8_t *certBuff;
-				size_t size;
-
-				FILE *hFile = fopen(SSLPublicKey, "r"); {
-					if (hFile == NULL) {
-						Log(LOG_LEVEL_ERROR, "Failed to read public key (1), exiting...");
-						exit(EXIT_FAILURE);
-					}
-					fseek(hFile, 0, SEEK_END);
-					size = ftell(hFile);
-					fseek(hFile, 0, SEEK_SET);
-
-					certBuff = malloc(size);
-					fread(certBuff, size, 1, hFile);
-				} fclose(hFile);
-
-				bio = BIO_new_mem_buf(certBuff, size); {
-					cert = PEM_read_bio_X509(bio, NULL, 0, NULL);
-					if (cert == NULL) {
-						Log(LOG_LEVEL_ERROR, "Failed to read public key (2), exiting...");
-						exit(EXIT_FAILURE);
-					}
-
-					if (!SSL_CTX_use_certificate(levServerSSL, cert) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
-						Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
-						exit(EXIT_FAILURE);
-					}
-					SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-					SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
-
-					uint8_t *buff;
-					size_t len;
-					SSLFingerPrint = malloc(EVP_MAX_MD_SIZE);
-					size_t trash;
-					X509_digest(cert, EVP_sha512(), SSLFingerPrint, &trash);
-					Log(LOG_LEVEL_DEBUG, "SSL fingerprint: %128x", SSLFingerPrint);
-				} BIO_free(bio);
-			}
+				uint8_t *buff;
+				size_t len;
+				SSLFingerPrint = malloc(EVP_MAX_MD_SIZE);
+				size_t trash;
+				X509_digest(cert, EVP_sha512(), SSLFingerPrint, &trash);
+				Log(LOG_LEVEL_DEBUG, "SSL fingerprint: %128x", SSLFingerPrint);
+			} BIO_free(bio);
+		}
 	} /* End SSL */
+
+	/* Stats */	{
+		config_setting_t *statsGroup = config_setting_get_member(cfgRoot, "Stats");
+		CONFIG_INT(statsGroup, "CollectionInterval", StatsCollectionInterval, 10000)
+		CONFIG_INT(statsGroup, "MaxItems", StatsMaxItems, 1000)
+	} /* End stats */
 
 	/* GlobalIP */ {
 		const char *globalIp4 = NULL;
@@ -441,23 +452,14 @@ int main(int argc, char** argv)
 
 	pthread_mutex_init(&LockUncheckedProxies, NULL);
 	pthread_mutex_init(&LockCheckedProxies, NULL);
-	pthread_mutex_init(&LockHarvesterPrxsrcStats, NULL);
+	pthread_mutex_init(&LockStatsHarvesterPrxsrc, NULL);
+	pthread_mutex_init(&LockStatsProxyCount, NULL);
 
-	pthread_t serverBase;
-	int status = pthread_create(&serverBase, NULL, (void*)ServerBase, NULL);
-	if (status != 0) {
-		Log(LOG_LEVEL_ERROR, "WServerBase thread creation error, return code: %d\n", status);
-		return status;
-	}
-	pthread_detach(serverBase);
+	int status;
+#define THREAD_START(var, fx, name) pthread_t var; status = pthread_create(&var, NULL, (void*)fx, NULL); if (status != 0) { Log(LOG_LEVEL_ERROR, name" creation error, code %d", status); return status; } pthread_setname_np(var, name); pthread_detach(var);
 
-	pthread_t serverBaseSSL;
-	status = pthread_create(&serverBaseSSL, NULL, (void*)ServerBaseSSL, NULL);
-	if (status != 0) {
-		Log(LOG_LEVEL_ERROR, "WServerBaseSSL thread creation error, return code: %d\n", status);
-		return status;
-	}
-	pthread_detach(serverBaseSSL);
+	THREAD_START(serverBase, ServerBase, "Server base")
+	THREAD_START(serverBaseSSL, ServerBaseSSL, "Server base SSL")
 
 	if (EnableUDP) {
 		if (GlobalIp4 != NULL)
@@ -466,37 +468,11 @@ int main(int argc, char** argv)
 			ServerUDP6();
 	}
 
-	status = pthread_create(&harvestThread, NULL, (void*)HarvestLoop, NULL);
-	if (status != 0) {
-		Log(LOG_LEVEL_ERROR, "HarvestLoop thread creation error, return code: %d\n", status);
-		return status;
-	}
-	pthread_detach(harvestThread);
-	Log(LOG_LEVEL_DEBUG, "Started harvest thread");
-
-	status = pthread_create(&removeThread, NULL, (void*)RemoveThread, NULL);
-	if (status != 0) {
-		Log(LOG_LEVEL_ERROR, "RemoteThread thread creation error, return code: %d\n", status);
-		return status;
-	}
-	pthread_detach(removeThread);
-	Log(LOG_LEVEL_DEBUG, "Started remove thread");
-
-	status = pthread_create(&checkThread, NULL, (void*)CheckLoop, NULL);
-	if (status != 0) {
-		Log(LOG_LEVEL_ERROR, "CheckLoop thread creation error, return code: %d\n", status);
-		return status;
-	}
-	pthread_detach(checkThread);
-	Log(LOG_LEVEL_DEBUG, "Started check thread");
-
-	pthread_t requestBase;
-	status = pthread_create(&requestBase, NULL, (void*)RequestBase, NULL);
-	if (status != 0) {
-		Log(LOG_LEVEL_ERROR, "RequestBase thread creation error, return code: %d\n", status);
-		return status;
-	}
-	pthread_detach(requestBase);
+	THREAD_START(harvestThread, HarvestLoop, "Harvest thread")
+	THREAD_START(removeThread, RemoveThread, "Removal thread")
+	THREAD_START(checkThread, CheckLoop, "Check thread")
+	THREAD_START(requestBase, RequestBase, "Request base")
+	THREAD_START(statsThread, StatsCollection, "Stats thread")
 
 	Log(LOG_LEVEL_SUCCESS, "Non-interactive mode active");
 

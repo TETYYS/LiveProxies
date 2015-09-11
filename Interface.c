@@ -460,19 +460,19 @@ void InterfaceProxySources(struct bufferevent *BuffEvent, char *Buff)
 	if (HtmlTemplateUseStock) {
 		evbuffer_add_printf(body, "<html><head><title>LiveProxies %s interface: Proxy sources</title><style>table{border-collapse:collapse;border:1px solid}\ntd{padding:10px 5px;border:1px solid}\nth{padding:10px 5px;border:1px solid};}</style></head><body>", VERSION);
 
-		pthread_mutex_lock(&LockHarvesterPrxsrcStats); {
+		pthread_mutex_lock(&LockStatsHarvesterPrxsrc); {
 			evbuffer_add_printf(body, "<table><tbody><tr><th>Name</th><th>Type</th><th>New proxies</th>\n<th>Total proxies</th></tr>", SizeUncheckedProxies, CurrentlyChecking);
-			for (size_t x = 0; x < SizeHarvesterPrxsrcStats; x++) {
+			for (size_t x = 0; x < SizeStatsHarvesterPrxsrc; x++) {
 				evbuffer_add(body, "<tr>", 4 * sizeof(char));
 
-				evbuffer_add_printf(body, "<td>%s</td>", HarvesterPrxsrcStats[x].name);
-				evbuffer_add_printf(body, "<td>%s</td>", ProxySourceTypeToString(HarvesterPrxsrcStats[x].type));
-				evbuffer_add_printf(body, "<td>%d</td>", HarvesterPrxsrcStats[x].addedNew);
-				evbuffer_add_printf(body, "<td>%d</td>", HarvesterPrxsrcStats[x].added);
+				evbuffer_add_printf(body, "<td>%s</td>", HarvesterStatsPrxsrc[x].name);
+				evbuffer_add_printf(body, "<td>%s</td>", ProxySourceTypeToString(HarvesterStatsPrxsrc[x].type));
+				evbuffer_add_printf(body, "<td>%d</td>", HarvesterStatsPrxsrc[x].addedNew);
+				evbuffer_add_printf(body, "<td>%d</td>", HarvesterStatsPrxsrc[x].added);
 
 				evbuffer_add(body, "</tr>", 5 * sizeof(char));
 			}
-		} pthread_mutex_unlock(&LockHarvesterPrxsrcStats);
+		} pthread_mutex_unlock(&LockStatsHarvesterPrxsrc);
 
 		evbuffer_add(body, "</tbody></table></body></html>", 30 * sizeof(char));
 	} else {

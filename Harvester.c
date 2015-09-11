@@ -62,8 +62,8 @@ void HarvestLoop()
 	// holy memory
 
 	Py_Initialize();
-	HarvesterPrxsrcStats = NULL;
-	SizeHarvesterPrxsrcStats = 0;
+	HarvesterStatsPrxsrc = NULL;
+	SizeStatsHarvesterPrxsrc = 0;
 
 	for (;;) {
 		PyObject *pName, *pModule, *pFunc = NULL, *pResult;
@@ -219,19 +219,19 @@ void HarvestLoop()
 			entry.addedNew = added;
 			entry.type = sourceType;
 
-			pthread_mutex_lock(&LockHarvesterPrxsrcStats); {
-				if (SizeHarvesterPrxsrcStats < ProxySourcesBacklog) {
-					HarvesterPrxsrcStats = SizeHarvesterPrxsrcStats == 0 ? malloc(++SizeHarvesterPrxsrcStats * sizeof(HARVESTER_PRXSRC_STATS_ENTRY)) :
-						realloc(HarvesterPrxsrcStats, ++SizeHarvesterPrxsrcStats * sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
-					memcpy(&(HarvesterPrxsrcStats[SizeHarvesterPrxsrcStats - 1]), &entry, sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
+			pthread_mutex_lock(&LockStatsHarvesterPrxsrc); {
+				if (SizeStatsHarvesterPrxsrc < ProxySourcesBacklog) {
+					HarvesterStatsPrxsrc = SizeStatsHarvesterPrxsrc == 0 ? malloc(++SizeStatsHarvesterPrxsrc * sizeof(HARVESTER_PRXSRC_STATS_ENTRY)) :
+						realloc(HarvesterStatsPrxsrc, ++SizeStatsHarvesterPrxsrc * sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
+					memcpy(&(HarvesterStatsPrxsrc[SizeStatsHarvesterPrxsrc - 1]), &entry, sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
 				} else {
-					free(HarvesterPrxsrcStats[SizeHarvesterPrxsrcStats].name);
-					for (size_t x = SizeHarvesterPrxsrcStats - 1;x < SizeHarvesterPrxsrcStats;x--) {
-						memcpy(&(HarvesterPrxsrcStats[x - 1]), &(HarvesterPrxsrcStats[x]), sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
+					free(HarvesterStatsPrxsrc[SizeStatsHarvesterPrxsrc].name);
+					for (size_t x = SizeStatsHarvesterPrxsrc - 1;x < SizeStatsHarvesterPrxsrc;x--) {
+						memcpy(&(HarvesterStatsPrxsrc[x - 1]), &(HarvesterStatsPrxsrc[x]), sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
 					}
-					memcpy(&(HarvesterPrxsrcStats[0]), &entry, sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
+					memcpy(&(HarvesterStatsPrxsrc[0]), &entry, sizeof(HARVESTER_PRXSRC_STATS_ENTRY));
 				}
-			} pthread_mutex_unlock(&LockHarvesterPrxsrcStats);
+			} pthread_mutex_unlock(&LockStatsHarvesterPrxsrc);
 
 			statsEntryAdded = true;
 

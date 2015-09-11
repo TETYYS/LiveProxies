@@ -22,10 +22,17 @@ char *HttpBLAccessKey;
 
 struct timeval GlobalTimeoutTV;
 
-bool SSLEnabled;
-char *SSLPublicKey;
-char *SSLPrivateKey;
-char *SSLCipherList;
-uint16_t SSLServerPort;
+/* SSL */
+	bool SSLEnabled;
+	char *SSLPublicKey;
+	char *SSLPrivateKey;
+	char *SSLCipherList;
+	uint16_t SSLServerPort;
+/* End SSL */
 
 uint64_t WSMessageIntervalMs;
+
+/* Stats */
+	uint64_t StatsCollectionInterval;
+	uint64_t StatsMaxItems;
+/* End stats */
