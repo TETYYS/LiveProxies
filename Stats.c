@@ -9,6 +9,9 @@
 
 void StatsCollection()
 {
+	if (StatsCollectionInterval == 0)
+		return;
+
 	StatsProxyCountSize = 0;
 	StatsProxyCount = NULL;
 	for (;;) {
