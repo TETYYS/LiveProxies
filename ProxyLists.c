@@ -289,6 +289,11 @@ UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct
 	UProxy->associatedProxy = AssociatedProxy;
 	UProxy->singleCheckCallback = NULL;
 	UProxy->invalidCert = NULL;
+	UProxy->pageTarget = NULL;
+	UProxy->targetPort = 0;
+	UProxy->targetIPv4 = NULL;
+	UProxy->targetIPv6 = NULL;
+	UProxy->udpRead = NULL;
 	return UProxy;
 }
 

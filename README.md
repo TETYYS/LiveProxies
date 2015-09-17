@@ -1,5 +1,5 @@
 # LiveProxies
-Latest Version: **0.7.5** (beta)
+Latest Version: **0.8.0** (beta)
 
 LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 
@@ -71,6 +71,7 @@ Push requests welcome. See TODO list.
  - Implement legit page checking
  - Windows support
  - Daemon mode
+ - Change asynchronous DNS mode from thread to signal
  - Suggesstions?
 
 [Maxmind's GeoIP]:https://github.com/maxmind/geoip-api-c/

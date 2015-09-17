@@ -16,6 +16,7 @@
 
 #include <event2/event.h>
 #include <event2/thread.h>
+#include <event2/dns.h>
 
 #include <openssl/ssl.h>
 #include <openssl/rand.h>
@@ -188,6 +189,7 @@ int main(int argc, char** argv)
 	pthread_mutex_init(&WebSocketSubscribedClientsLock, NULL);
 	AuthWebCount = 0;
 	levRequestBase = event_base_new();
+	levRequestDNSBase = evdns_base_new(levRequestBase, 1);
 	CurrentlyChecking = 0;
 	SizeUncheckedProxies = 0;
 	SizeCheckedProxies = 0;
@@ -230,6 +232,11 @@ int main(int argc, char** argv)
 	CONFIG_BOOL(cfgRoot, "EnableUDP", EnableUDP, true)
 	CONFIG_STRING(cfgRoot, "HarvestersPath", HarvestersPath, "/etc/liveproxies/scripts/")
 	CONFIG_STRING(cfgRoot, "HttpBLAccessKey", HttpBLAccessKey, "")
+
+	CONFIG_STRING(cfgRoot, "RequestHeaderKey", RequestHeaderKey, "LPKey")
+	CONFIG_STRING(cfgRoot, "RequestUA", RequestUA, "LiveProxies proxy checker {VERSION} (tetyys.com/liveproxies)")
+	StrReplaceOrig(&RequestUA, "{VERSION}", VERSION);
+	StrReplaceOrig(&RequestUA, "{KEY_NAME}", RequestHeaderKey);
 
 	GlobalTimeoutTV.tv_sec = GlobalTimeout / 1000;
 	GlobalTimeoutTV.tv_usec = (GlobalTimeout % 1000) * 1000;
@@ -298,6 +305,11 @@ int main(int argc, char** argv)
 				X509_digest(cert, EVP_sha512(), SSLFingerPrint, &trash);
 				Log(LOG_LEVEL_DEBUG, "SSL fingerprint: %128x", SSLFingerPrint);
 			} BIO_free(bio);
+
+			CONFIG_STRING(sslGroup, "RequestHeaders", RequestStringSSL, "CONNECT {HOST} HTTP/1.1\r\nHost: {HOST}\r\nUser-Agent: {UA}\r\n\r\n")
+			StrReplaceOrig(&RequestStringSSL, "{VERSION}", VERSION);
+			StrReplaceOrig(&RequestStringSSL, "{UA}", RequestUA);
+			StrReplaceOrig(&RequestStringSSL, "{KEY_NAME}", RequestHeaderKey);
 		}
 	} /* End SSL */
 
@@ -344,6 +356,23 @@ int main(int argc, char** argv)
 				Host6SSL = HostFormat(GlobalIp6, SSLServerPort);
 		}
 	} /* End GlobalIP */
+
+	CONFIG_STRING(cfgRoot, "RequestHeaders", RequestString,
+		"GET /prxchk HTTP/1.1\r\n"
+		"Host: {HOST}\r\n"
+		"Connection: Close\r\n"
+		"Cache-Control: max-age=0\r\n"
+		"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n"
+		"User-Agent: {UA}\r\n"
+		"DNT: 1\r\n"
+		"Accept-Encoding: gzip, deflate, sdch\r\n"
+		"Accept-Language: en-US,en;q=0.8\r\n"
+		"{KEY_NAME}: {KEY_VAL}")
+	// Host and LPKey is injected upon request
+	StrReplaceOrig(&RequestString, "{VERSION}", VERSION);
+	StrReplaceOrig(&RequestString, "{UA}", RequestUA);
+	StrReplaceOrig(&RequestString, "{KEY_NAME}", RequestHeaderKey);
+	RequestStringLen = strlen(RequestString);
 
 	config_destroy(&cfg);
 
@@ -401,26 +430,6 @@ int main(int argc, char** argv)
 			config_destroy(&cfg);
 		}
 	} /* End auth init */
-
-	RequestString = calloc(312 /* :^) */ + 2 + strlen(REQUEST_UA) + 1 /* NUL */, sizeof(char));
-	sprintf(RequestString,
-		"GET /prxchk HTTP/1.1\r\n"
-		"Host: %s\r\n"
-		"Connection: Close\r\n"
-		"Cache-Control: max-age=0\r\n"
-		"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n"
-		"User-Agent: %s\r\n"
-		"DNT: 1\r\n"
-		"Accept-Encoding: gzip, deflate, sdch\r\n"
-		"Accept-Language: en-US,en;q=0.8\r\n"
-		"LPKey: ", "%s", REQUEST_UA);
-
-	RequestStringSSL = calloc((88 + strlen(VERSION)) + 1 /* NUL */, sizeof(char));
-	sprintf(RequestStringSSL,
-		"CONNECT %s HTTP/1.1\r\n"
-		"Host: %s\r\n"
-		"User-Agent: LiveProxies Proxy Checker %s (tetyys.com)\r\n"
-		"\r\n", "%s", "%s", VERSION);
 
 	const char *pcreError;
 	int pcreErrorOffset;
@@ -533,6 +542,9 @@ void CheckLoop()
 
 		for (size_t x = 0; x < count; x++) {
 			Log(LOG_LEVEL_DEBUG, "CheckLoop: Proxy %d set checking", x);
+			proxiesToCheck[x]->targetIPv4 = GlobalIp4;
+			proxiesToCheck[x]->targetIPv6 = GlobalIp6;
+			proxiesToCheck[x]->targetPort = ProxyIsSSL(proxiesToCheck[x]->type) ? ServerPort : SSLServerPort;
 			RequestAsync(proxiesToCheck[x]);
 		}
 

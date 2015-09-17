@@ -421,18 +421,16 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 				}
 			}
 
-			WEB_SOCKET_SUBSCRIBED_CLIENT *client;
-
 			// Register client
 			pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
 				WebSocketSubscribedClientsSize++;
 
 				WebSocketSubscribedClients = WebSocketSubscribedClients == NULL ?
 					malloc(sizeof(*WebSocketSubscribedClients)) :
-					realloc(WebSocketSubscribedClients, sizeof(*WebSocketSubscribedClients));
+					realloc(WebSocketSubscribedClients, sizeof(*WebSocketSubscribedClients) * WebSocketSubscribedClientsSize);
 			} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);
 
-			client = malloc(sizeof(WEB_SOCKET_UNFINISHED_PACKET));
+			WEB_SOCKET_SUBSCRIBED_CLIENT *client = malloc(sizeof(WEB_SOCKET_UNFINISHED_PACKET));
 			WebSocketSubscribedClients[WebSocketSubscribedClientsSize - 1] = client;
 
 			client->buffEvent = BuffEvent;

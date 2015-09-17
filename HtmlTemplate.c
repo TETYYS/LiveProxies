@@ -36,32 +36,6 @@ char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",					"{T_CFG
 								"{T_STATS_PCOUNT_ITEM}"
 };
 
-static char *StrReplace(char *string, char *substr, char *replacement)
-{
-	char *tok = NULL;
-	char *newstr = NULL;
-	char *oldstr = NULL;
-
-	if (substr == NULL || replacement == NULL)
-		return strdup(string);
-	newstr = strdup(string);
-	while ((tok = strstr(newstr, substr))) {
-		oldstr = newstr;
-		newstr = malloc(strlen(oldstr) - strlen(substr) + strlen(replacement) + 1);
-
-		if (newstr == NULL) {
-			free(oldstr);
-			return NULL;
-		}
-		memcpy(newstr, oldstr, tok - oldstr);
-		memcpy(newstr + (tok - oldstr), replacement, strlen(replacement));
-		memcpy(newstr + (tok - oldstr) + strlen(replacement), tok + strlen(substr), strlen(oldstr) - strlen(substr) - (tok - oldstr));
-		memset(newstr + strlen(oldstr) - strlen(substr) + strlen(replacement), 0, 1);
-		free(oldstr);
-	}
-	return newstr;
-}
-
 void HtmlTemplateLoadAll()
 {
 	HtmlTemplateUseStock = false;

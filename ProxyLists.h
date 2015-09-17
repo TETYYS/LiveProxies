@@ -55,6 +55,11 @@ typedef void(*SingleCheckCallback)(void *UProxy);
 typedef struct _UNCHECKED_PROXY {
 	IPv6Map *ip;
 	uint16_t port;
+
+	uint16_t targetPort;
+	IPv6Map *targetIPv4;
+	IPv6Map *targetIPv6;
+
 	PROXY_TYPE type;
 	bool checking;
 	uint8_t retries;
@@ -63,26 +68,31 @@ typedef struct _UNCHECKED_PROXY {
 
 	/* PROXY_TYPE_HTTP
 	 *	7 - Send HTTP request
+	 *	8 - Download legit page
 	 * PROXY_TYPE_HTTPS
 	 *	0 - Send CONNECT request
 	 *	1 - Receive CONNECT response
 	 *	6 - SSL hanshake
 	 *	7 - Send HTTP request
+	 *	8 - Download legit page
 	 * PROXY_TYPE_SOCKS4/A
 	 *	0 - Send SOCKS4/A packet
 	 *	1 - Receive answer
 	 *	7 - Send HTTP request
+	 *	8 - Download legit page
 	 * PROXY_TYPE_SOCKS5
 	 *	0 - Send SOCKS5 auth packet
 	 *	1 - Receive auth response
 	 *	2 - Send SOCKS5 main packet
 	 *	3 - Receive response
 	 *	7 - Send HTTP request
+	 *	8 - Download legit page
 	 * PROXY_TYPE_SOCKS4/A_TO_SSL
 	 *	0 - Send SOCKS4/A packet
 	 *	1 - Receive answer
 	 *	6 - SSL hanshake
 	 *	7 - Send HTTP request
+	 *	8 - Download legit page
 	 * PROXY_TYPE_SOCKS5_TO_SSL
 	 *	0 - Send SOCKS5 auth packet
 	 *	1 - Receive auth response
@@ -90,15 +100,17 @@ typedef struct _UNCHECKED_PROXY {
 	 *	3 - Receive response
 	 *	6 - SSL hanshake
 	 *	7 - Send HTTP request
+	 *	8 - Download legit page
 	 * PROXY_TYPE_SOCKS5_WITH_UDP
 	 *	0 - Send SOCKS5 auth packet
 	 *	1 - Receive auth response
 	 *	2 - Send SOCKS5 main packet
 	 *	3 - Receive response
 	 *	4 - Send UDP packet
+	 *	8 - Receive UDP packet
 	 */
 	/*
-	 * Universal stages - 6, 7, (8 - final)
+	 * Universal stages - 6, 7, 8
 	 */
 	uint8_t stage;
 
@@ -106,6 +118,7 @@ typedef struct _UNCHECKED_PROXY {
 	pthread_mutex_t processing;
 
 	struct event *timeout;
+	struct event *udpRead;
 
 	uint8_t hash[512 / 8]; // SHA-512
 	uint64_t requestTimeMs;
@@ -114,6 +127,7 @@ typedef struct _UNCHECKED_PROXY {
 
 	X509 *invalidCert;
 
+	char *pageTarget;
 	SingleCheckCallback singleCheckCallback;
 	void *singleCheckCallbackExtraData;
 } UNCHECKED_PROXY;

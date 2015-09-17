@@ -110,19 +110,19 @@ MEM_OUT bool ServerFindHeader(char *In, char *Buff, char **Out, char **StartInde
 	return true;
 }
 
-static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
+static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 {
 	// Loose proxy is automatically free'd by EVWrite called timeout
 
 	UNCHECKED_PROXY *UProxy = NULL;
 	PROXY *proxy;
+	char *keyRaw;
 
 	char *lpKeyStart, *lpKeyEnd;
-	size_t buffLen = strlen(Buff);
+	size_t buffLen = strlen(*Buff);
 
 	/* Get UProxy pointer */ {
-		char *keyRaw;
-		if (!ServerFindHeader("LPKey: ", Buff, &keyRaw, &lpKeyStart, &lpKeyEnd) || strlen(keyRaw) < 512 / 8)
+		if (!ServerFindHeader("LPKey: ", *Buff, &keyRaw, &lpKeyStart, &lpKeyEnd) || strlen(keyRaw) < 512 / 8)
 			return;
 
 		char *key;
@@ -131,7 +131,6 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 			free(keyRaw);
 			return;
 		}
-		free(keyRaw);
 
 		pthread_mutex_lock(&LockUncheckedProxies); {
 			for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
@@ -143,8 +142,10 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 		} pthread_mutex_unlock(&LockUncheckedProxies);
 		free(key);
 
-		if (UProxy == NULL)
+		if (UProxy == NULL) {
+			free(keyRaw);
 			return;
+		}
 	} /* End get UProxy pointer */
 
 	/* Process headers */ {
@@ -174,19 +175,28 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 			bool anonMax = true;
 
 			char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
+			if (!StrReplaceOrig(Buff, host, "{HOST}"))
+				anonMax = false;
+			assert(StrReplaceOrig(Buff, keyRaw, "{KEY_VAL}"));
+
+			buffLen = strlen(*Buff);
+
+			if (RequestStringLen != buffLen || !MemEqual(*Buff, RequestString, buffLen))
+				anonMax = false;
+
+			// Get original host header
+			/*char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
 			char *hostHeaderVal, *hostStart, *hostEnd;
 
 			if (!ServerFindHeader("Host: ", Buff, &hostHeaderVal, &hostStart, &hostEnd))
 				goto freeProxy;
 
+			// Compare host header value
 			if (strcmp(hostHeaderVal, host) != 0) {
 				free(hostHeaderVal);
 				goto freeProxy;
 			}
 			free(hostHeaderVal);
-
-			if ((lpKeyEnd[0] == '\r' && Buff + buffLen - 4 != lpKeyEnd) || (lpKeyEnd[0] == '\n' && Buff + buffLen - 2 != lpKeyEnd))
-				anonMax = false;
 
 			hostStart[6] = '%';
 			hostStart[7] = 's';
@@ -205,21 +215,22 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 					anonMax = false;
 
 				buffLen = strlen(Buff); // recompute
-			}
+			}*/
 
 			if (!anonMax) {
 				int subStrVec[256];
 				for (size_t i = 0;i < 2;i++) {
-					int regexRet = pcre_exec(i == 0 ? ipv4Regex : ipv6Regex, i == 0 ? ipv4RegexEx : ipv6RegexEx, Buff, buffLen, 0, 0, subStrVec, 256);
+					int regexRet = pcre_exec(i == 0 ? ipv4Regex : ipv6Regex, i == 0 ? ipv4RegexEx : ipv6RegexEx, *Buff, buffLen, 0, 0, subStrVec, 256);
 
 					if (regexRet != PCRE_ERROR_NOMATCH) {
 						if (regexRet < 0) {
 							Log(LOG_LEVEL_ERROR, "Couldn't execute PCRE %s regex", (i == 0 ? "IPv4" : "IPv6"));
+							free(keyRaw);
 							goto freeProxy;
 						} else {
 							char *foundIpStr;
 							for (size_t x = 0; x < regexRet; x++) {
-								pcre_get_substring(Buff, subStrVec, regexRet, x, &(foundIpStr));
+								pcre_get_substring(*Buff, subStrVec, regexRet, x, &(foundIpStr));
 								if (foundIpStr != NULL) {
 									IPv6Map *foundIp = StringToIPv6Map(foundIpStr);
 									if (foundIp != NULL && IPv6MapEqual(i == 0 ? GlobalIp4 : GlobalIp6, foundIp)) {
@@ -242,6 +253,8 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char *Buff)
 			} else
 				proxy->anonymity = ANONYMITY_MAX;
 		}
+
+		free(keyRaw);
 
 		UProxy->checkSuccess = true;
 
@@ -282,7 +295,7 @@ void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx)
 	}
 }
 
-static void ServerLanding(struct bufferevent *BuffEvent, char *Buff, bool IsSSL)
+static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL)
 {
 	UNCHECKED_PROXY *UProxy = NULL;
 	bool freeBufferEvent = true;
@@ -291,7 +304,7 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff, bool IsSSL)
 
 	Log(LOG_LEVEL_DEBUG, "Server landing");
 	/* Page dispatch */ {
-		char *firstIndex = strchr(Buff, ' ');
+		char *firstIndex = strchr(*Buff, ' ');
 
 		if (firstIndex == NULL)
 			goto free;
@@ -313,40 +326,40 @@ static void ServerLanding(struct bufferevent *BuffEvent, char *Buff, bool IsSSL)
 			bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			ProxyCheckLanding(BuffEvent, Buff);
 		} else if (pathLen == 7 && strncmp(path, "/ifaceu", 7) == 0)
-			InterfaceUncheckedProxies(BuffEvent, Buff);
+			InterfaceUncheckedProxies(BuffEvent, *Buff);
 		else if (pathLen == 6 && strncmp(path, "/iface", 6) == 0)
-			InterfaceProxies(BuffEvent, Buff);
+			InterfaceProxies(BuffEvent, *Buff);
 		else if (pathLen == 7 && strncmp(path, "/prxsrc", 7) == 0)
-			InterfaceProxySources(BuffEvent, Buff);
+			InterfaceProxySources(BuffEvent, *Buff);
 		else if (pathLen == 6 && strncmp(path, "/stats", 6) == 0)
-			InterfaceStats(BuffEvent, Buff);
+			InterfaceStats(BuffEvent, *Buff);
 		else if (pathLen > 4 && strncmp(path, "/zen", 4) == 0) {
 			freeBufferEvent = false; // Free'd in second stage of ZEN DNS lookup
-			InterfaceRawSpamhausZen(BuffEvent, Buff);
+			InterfaceRawSpamhausZen(BuffEvent, *Buff);
 		} else if (pathLen > 7 && strncmp(path, "/httpbl", 7) == 0) {
 			freeBufferEvent = false; // Free'd in second stage of Http:BL DNS lookup
-			InterfaceRawHttpBL(BuffEvent, Buff);
+			InterfaceRawHttpBL(BuffEvent, *Buff);
 		} else if (pathLen > 5 && strncmp(path, "/rdns", 5) == 0)
-			InterfaceRawReverseDNS(BuffEvent, Buff);
+			InterfaceRawReverseDNS(BuffEvent, *Buff);
 		else if (pathLen >= 4 && strncmp(path, "/add", 4) == 0) {
 			freeBufferEvent = false; // Needed by POST
-			InterfaceRawUProxyAdd(BuffEvent, Buff);
+			InterfaceRawUProxyAdd(BuffEvent, *Buff);
 		}
 		else if (pathLen == 6 && strncmp(path, "/tools", 6) == 0)
-			InterfaceTools(BuffEvent, Buff);
+			InterfaceTools(BuffEvent, *Buff);
 		else if (pathLen > 6 && strncmp(path, "/check", 6) == 0) {
 			Log(LOG_LEVEL_DEBUG, "/check on %p", BuffEvent);
 			freeBufferEvent = false; // Free'd in second stage of raw recheck
-			InterfaceRawRecheck(BuffEvent, Buff);
+			InterfaceRawRecheck(BuffEvent, *Buff);
 		} else if (pathLen == 1 && strncmp(path, "/", 1) == 0)
-			InterfaceHome(BuffEvent, Buff);
+			InterfaceHome(BuffEvent, *Buff);
 		else if (pathLen > 8 && strncmp(path, "/recheck", 8) == 0) {
 			if (HtmlTemplateUseStock)
 				freeBufferEvent = false; // Free'd in second stage of stock html recheck
-			InterfaceProxyRecheck(BuffEvent, Buff);
+			InterfaceProxyRecheck(BuffEvent, *Buff);
 		} else if (pathLen == 4 && strncmp(path, "/wsn", 4) == 0) {
 			// Websocket notifications
-			WebsocketSwitch(BuffEvent, Buff);
+			WebsocketSwitch(BuffEvent, *Buff);
 			freeBufferEvent = false; // Handled by websocket file
 		} else {
 			if (HtmlTemplateUseStock)
@@ -556,7 +569,7 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 	buff[len] = 0x00;
 	evbuffer_drain(evBuff, len); // No clear data function?
 
-	ServerLanding(BuffEvent, buff, Ctx);
+	ServerLanding(BuffEvent, &buff, Ctx);
 
 	free(buff);
 }

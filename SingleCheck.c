@@ -12,6 +12,18 @@
 #include "ProxyRequest.h"
 #include "Logger.h"
 
+void PageRequest(PROXY *In, void CALLBACK *FinishedCallback, char *Page, void *Ex)
+{
+	bool success = false;
+	UNCHECKED_PROXY *UProxy = UProxyFromProxy(In);
+	UProxy->singleCheckCallback = FinishedCallback;
+	UProxy->singleCheckCallbackExtraData = Ex;
+	UProxy->pageTarget = Page;
+
+	UProxyAdd(UProxy);
+	RequestAsync(UProxy);
+}
+
 void Recheck(PROXY *In, void CALLBACK *FinishedCallback, void *Ex)
 {
 	bool success = false;
