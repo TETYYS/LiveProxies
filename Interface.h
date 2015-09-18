@@ -69,3 +69,4 @@ void InterfaceRawHttpBL					(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawUProxyAdd				(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceTools						(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawUProxyAddProcessPost	(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceRawGetCustomPage			(struct bufferevent *BuffEvent, char *Buff);

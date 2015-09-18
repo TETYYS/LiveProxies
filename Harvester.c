@@ -259,6 +259,7 @@ end:
 
 size_t AddProxyHarvesterFormat(char *In, PROXY_TYPE *CurrentType)
 {
+	// TODO: Add in proxy sources
 	if (strncmp(In, "setType", 7) == 0)
 		*CurrentType = atoll(In + 8);
 

@@ -51,7 +51,7 @@ static void RequestFree(evutil_socket_t fd, short what, UNCHECKED_PROXY *UProxy)
 	struct timespec tm;
 	tm.tv_sec = 1;
 
-	pthread_mutex_lock(&(UProxy->processing)); // locks only on EVWrite called timeout
+	pthread_mutex_lock(&(UProxy->processing));
 
 	if (UProxy->associatedProxy == NULL) {
 		if (!UProxy->checkSuccess)
@@ -78,6 +78,8 @@ static void RequestFree(evutil_socket_t fd, short what, UNCHECKED_PROXY *UProxy)
 
 			if (UProxy->singleCheckCallback != NULL)
 				UProxy->singleCheckCallback(UProxy);
+		} else {
+			UProxy->singleCheckCallback(UProxy);
 		}
 
 		UProxyRemove(UProxy);
@@ -281,7 +283,7 @@ static bool ProxyDNSResolve(UNCHECKED_PROXY *UProxy, char *Domain)
 
 int sslCreated2 = 0;
 
-static char *ProxyParseUrl(UNCHECKED_PROXY *UProxy, bool OnlyDomain, bool IncludePort)
+static MEM_OUT char *ProxyParseUrl(UNCHECKED_PROXY *UProxy, bool OnlyDomain, bool IncludePort, OUT char **Path)
 {
 	char *domain = strdup(UProxy->pageTarget);
 
@@ -292,8 +294,11 @@ static char *ProxyParseUrl(UNCHECKED_PROXY *UProxy, bool OnlyDomain, bool Includ
 
 	domain = domain + (8 * sizeof(char));
 	char *pathStart = strstr(domain, "/");
-	if (pathStart != NULL)
+	if (pathStart != NULL) {
+		*Path = strdup(pathStart);
 		*pathStart = 0x00;
+	} else
+		*Path = NULL;
 
 	char *portStart = strchr(domain, ":");
 	if (portStart == NULL) {
@@ -342,7 +347,7 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 					if (UProxy->pageTarget == NULL) {
 						char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
 
-						reqString = StrReplaceToNew(RequestStringSSL, "{HOST}", host); {
+						reqString = StrReplaceToNew(RequestStringSSL, "{HOST}", host, NULL); {
 							if (strstr(reqString, "{KEY_VAL}") != NULL) {
 								char *key;
 								size_t key64Len = Base64Encode(UProxy->hash, 512 / 8, &key); {
@@ -406,7 +411,7 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 						SOCKS4(SOCKS_TYPE_CONNECT, UProxy);
 						UProxy->stage = 1;
 					} else {
-						char *domain = ProxyParseUrl(UProxy, false, false); {
+						char *domain = ProxyParseUrl(UProxy, false, false, NULL); {
 							if (domain == NULL)
 								goto fail;
 							if (UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL) {
@@ -456,7 +461,7 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 						Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 2");
 						UProxy->stage = 2;
 						if (UProxy->pageTarget != NULL) {
-							char *domain = ProxyParseUrl(UProxy, false, false); {
+							char *domain = ProxyParseUrl(UProxy, false, false, NULL); {
 								if (domain == NULL)
 									goto fail;
 
@@ -618,39 +623,24 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 			Log(LOG_LEVEL_DEBUG, "Sending HTTP request");
 			char *key;
 			size_t key64Len = Base64Encode(UProxy->hash, 512 / 8, &key); {
-
-				/*char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
-				size_t rawOrigLen = strlen(RequestString);
-				size_t baseLen = (rawOrigLen - 2 /* %s for Host header *) + strlen(host);
-				size_t fullOrigLen = (sizeof(char) * rawOrigLen) + 1;
-
-				reqString = malloc((sizeof(char) * (baseLen + key64Len + 4 /* \r\n\r\n *)) + 1 /* NUL *);
-				memcpy(reqString, RequestString, fullOrigLen);
-
-				char reqStringFormat[fullOrigLen];
-				memcpy(reqStringFormat, reqString, fullOrigLen);
-				sprintf(reqString, reqStringFormat, host);
-
-				memcpy(reqString + baseLen, key, key64Len * sizeof(char));
-				reqString[baseLen + key64Len] = '\r';
-				reqString[baseLen + key64Len + 1] = '\n';
-				reqString[baseLen + key64Len + 2] = '\r';
-				reqString[baseLen + key64Len + 3] = '\n';
-				reqString[baseLen + key64Len + 4] = 0x00;*/
-
 				Log(LOG_LEVEL_DEBUG, "Page target: %s", UProxy->pageTarget);
 
 				if (UProxy->pageTarget == NULL) {
 					char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
 
 					reqString = StrReplaceToNew(RequestString, "{HOST}", host);
+					StrReplaceOrig(reqString, "{PAGE_PATH}", "/prxchk");
 				} else {
-					char *domain = ProxyParseUrl(UProxy, true, true); {
+					char *path;
+					char *domain = ProxyParseUrl(UProxy, true, true, &path); {
 						if (domain == NULL)
 							goto fail;
 
 						reqString = StrReplaceToNew(RequestString, "{HOST}", domain);
+						StrReplaceOrig(reqString, "{PAGE_PATH}", path == NULL ? "/" : path);
 					} free(domain);
+					if (path != NULL)
+						free(path);
 				}
 				if (strstr(reqString, "{KEY_VAL}") != NULL)
 					StrReplaceOrig(&reqString, "{KEY_VAL}", key);
@@ -667,6 +657,10 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 		case 8:
 		{
 			// TODO: Handle chunked responses for HTTP?
+
+			UProxy->checkSuccess = true;
+			pthread_mutex_lock(&(UProxy->processing));
+
 			if (UProxy->pageTarget != NULL)
 				UProxy->singleCheckCallback(UProxy);
 

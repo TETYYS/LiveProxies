@@ -370,6 +370,12 @@ void UProxyFree(UNCHECKED_PROXY *In)
 		event_free(In->timeout);
 	}
 	pthread_mutex_destroy(&(In->processing));
+	if (In->pageTarget != NULL)
+		free(In->pageTarget);
+	if (In->targetIPv4 != NULL)
+		free(In->targetIPv4);
+	if (In->targetIPv6 != NULL)
+		free(In->targetIPv6);
 	free(In->ip);
 	free(In);
 }

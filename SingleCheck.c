@@ -7,10 +7,10 @@
 #include <netdb.h>
 #include <resolv.h>
 #include <string.h>
-#include <assert.h>
 #include <event2/bufferevent.h>
 #include "ProxyRequest.h"
 #include "Logger.h"
+#include "Config.h"
 
 void PageRequest(PROXY *In, void CALLBACK *FinishedCallback, char *Page, void *Ex)
 {
@@ -30,6 +30,9 @@ void Recheck(PROXY *In, void CALLBACK *FinishedCallback, void *Ex)
 	UNCHECKED_PROXY *UProxy = UProxyFromProxy(In);
 	UProxy->singleCheckCallback = FinishedCallback;
 	UProxy->singleCheckCallbackExtraData = Ex;
+	UProxy->targetIPv4 = GlobalIp4;
+	UProxy->targetIPv6 = GlobalIp6;
+	UProxy->targetPort = ProxyIsSSL(UProxy->type) ? ServerPort : SSLServerPort;
 
 	UProxyAdd(UProxy);
 	In->rechecking = true;

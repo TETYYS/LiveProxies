@@ -344,8 +344,10 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 		else if (pathLen >= 4 && strncmp(path, "/add", 4) == 0) {
 			freeBufferEvent = false; // Needed by POST
 			InterfaceRawUProxyAdd(BuffEvent, *Buff);
-		}
-		else if (pathLen == 6 && strncmp(path, "/tools", 6) == 0)
+		} else if (pathLen > 10 && strncmp(path, "/cpage", 10) == 0) {
+			freeBufferEvent = false; // Free'd in second stage of custom page request
+			InterfaceRawGetCustomPage(BuffEvent, *Buff);
+		} else if (pathLen == 6 && strncmp(path, "/tools", 6) == 0)
 			InterfaceTools(BuffEvent, *Buff);
 		else if (pathLen > 6 && strncmp(path, "/check", 6) == 0) {
 			Log(LOG_LEVEL_DEBUG, "/check on %p", BuffEvent);

@@ -358,7 +358,7 @@ int main(int argc, char** argv)
 	} /* End GlobalIP */
 
 	CONFIG_STRING(cfgRoot, "RequestHeaders", RequestString,
-		"GET /prxchk HTTP/1.1\r\n"
+		"GET {PAGE_PATH} HTTP/1.1\r\n"
 		"Host: {HOST}\r\n"
 		"Connection: Close\r\n"
 		"Cache-Control: max-age=0\r\n"

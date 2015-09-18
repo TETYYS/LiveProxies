@@ -17,7 +17,7 @@
 
 void InterfaceInit()
 {
-	InterfacePagesSize = 11;
+	InterfacePagesSize = 7;
 	InterfacePages = malloc(InterfacePagesSize * sizeof(INTERFACE_PAGE));
 	InterfacePages[0].name = "Home";
 	InterfacePages[0].page = INTERFACE_PAGE_HOME;
@@ -31,16 +31,8 @@ void InterfaceInit()
 	InterfacePages[4].page = INTERFACE_PAGE_STATS;
 	InterfacePages[5].name = "Proxy recheck";
 	InterfacePages[5].page = INTERFACE_PAGE_RECHECK;
-	InterfacePages[6].name = "Raw Spamhaus ZEN output";
-	InterfacePages[6].page = INTERFACE_PAGE_SPAMHAUS;
-	InterfacePages[7].name = "Raw Reverse DNS output";
-	InterfacePages[7].page = INTERFACE_PAGE_RDNS;
-	InterfacePages[8].name = "Raw proxy check output";
-	InterfacePages[8].page = INTERFACE_PAGE_CHECK;
-	InterfacePages[9].name = "Raw proxy add";
-	InterfacePages[9].page = INTERFACE_PAGE_ADD;
-	InterfacePages[10].name = "Tools";
-	InterfacePages[10].page = INTERFACE_PAGE_TOOLS;
+	InterfacePages[6].name = "Tools";
+	InterfacePages[6].page = INTERFACE_PAGE_TOOLS;
 }
 
 // Please lock AuthWebLock
@@ -608,17 +600,20 @@ static PROXY *GetProxyFromUidBuff(char *Buff)
 {
 	PROXY *proxy = NULL;
 
-	char *pathStart = strstr(Buff, "?uid=");
-	if (pathStart == NULL)
+	char *uidStart = strstr(Buff, "?uid=");
+	if (uidStart == NULL)
 		return NULL;
 
-	char *pathEnd = strchr(pathStart, ' ');
-	if (pathEnd == NULL)
-		return NULL;
+	char *uidEnd = strchr(uidStart, '&');
+	if (uidEnd == NULL) {
+		uidEnd = strchr(uidStart, ' ');
+		if (uidEnd == NULL)
+			return NULL;
+	}
 
-	*pathEnd = 0x00;
+	*uidEnd = 0x00;
 
-	return GetProxyFromUid(pathStart + (5 * sizeof(char)));
+	return GetProxyFromUid(uidStart + (5 * sizeof(char)));
 }
 
 void InterfaceProxyRecheck(struct bufferevent *BuffEvent, char *Buff)
@@ -636,6 +631,8 @@ void InterfaceProxyRecheck(struct bufferevent *BuffEvent, char *Buff)
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 		evbuffer_free(headers);
+		if (HtmlTemplateUseStock)
+			bufferevent_free(BuffEvent);
 		return;
 	}
 
@@ -669,7 +666,6 @@ fail:
 		bufferevent_free(BuffEvent);
 		evbuffer_free(headers);
 	} else {
-
 		if (proxy == NULL) {
 			bufferevent_write(BuffEvent, "HTTP/1.1 404 Not found\r\nContent-Length: 15\r\n\r\nProxy not found", 61 * sizeof(char));
 			bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
@@ -718,6 +714,7 @@ void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
 		return;
 	}
 
@@ -728,6 +725,7 @@ void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
 		return;
 	}
 
@@ -750,6 +748,7 @@ void InterfaceRawHttpBL(struct bufferevent *BuffEvent, char *Buff)
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
 		return;
 	}
 
@@ -774,11 +773,6 @@ void InterfaceRawReverseDNS(struct bufferevent *BuffEvent, char *Buff)
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
 	INTERFACE_INFO info;
-
-	for (size_t x = 0;x < InterfacePagesSize;x++) {
-		if (InterfacePages[x].page == INTERFACE_PAGE_RECHECK)
-			info.currentPage = &(InterfacePages[x]);
-	}
 
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
@@ -874,16 +868,12 @@ void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
 	struct evbuffer *headers = evbuffer_new();
 	INTERFACE_INFO info;
 
-	for (size_t x = 0;x < InterfacePagesSize;x++) {
-		if (InterfacePages[x].page == INTERFACE_PAGE_RECHECK)
-			info.currentPage = &(InterfacePages[x]);
-	}
-
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
 		return;
 	}
 
@@ -894,6 +884,7 @@ void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
 		return;
 	}
 	if (proxy->rechecking) {
@@ -901,6 +892,7 @@ void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
 		return;
 	}
 
@@ -912,9 +904,6 @@ void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
 
 void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 {
-	if (Buff == NULL) {
-
-	}
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
 	INTERFACE_INFO info;
@@ -923,16 +912,12 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 	PROXY_TYPE type;
 	char *offset = &(Buff[8]);
 
-	/*for (size_t x = 0;x < InterfacePagesSize;x++) {
-		if (InterfacePages[x].page == INTERFACE_PAGE_ADD)
-			info.currentPage = &(InterfacePages[x]);
-	}*/
-
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
 		return;
 	}
 
@@ -1147,4 +1132,89 @@ void InterfaceTools(struct bufferevent *BuffEvent, char *Buff)
 
 	evbuffer_free(headers);
 	evbuffer_free(body);
+}
+
+static void InterfaceRawGetCustomPageStage2(UNCHECKED_PROXY *UProxy)
+{
+	struct bufferevent *buffEvent = (struct bufferevent*)UProxy->singleCheckCallbackExtraData;
+
+	if (!UProxy->checkSuccess) {
+		bufferevent_write(buffEvent, "HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 23\r\nContent-Type: text/html\r\n\r\nProxy connection failure", 101);
+		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
+		bufferevent_free(buffEvent);
+		return;
+	}
+
+	bufferevent_write_buffer(buffEvent, bufferevent_get_input(UProxy->assocBufferEvent));
+
+	pthread_mutex_unlock(&(UProxy->processing));
+
+	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
+	Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
+	bufferevent_free(buffEvent);
+	return;
+}
+
+void InterfaceRawGetCustomPage(struct bufferevent *BuffEvent, char *Buff)
+{
+	struct evbuffer *headers = evbuffer_new();
+	struct evbuffer *body = evbuffer_new();
+	INTERFACE_INFO info;
+
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
+		bufferevent_write_buffer(BuffEvent, headers);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(body);
+		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
+		return;
+	}
+
+	char *newLine = strchr(Buff, '\n');
+
+	PROXY *proxy = GetProxyFromUidBuff(Buff);
+
+	if (proxy == NULL) {
+		bufferevent_write(BuffEvent, "HTTP/1.1 404 Not found\r\nContent-Length: 15\r\n\r\nProxy not found", 61 * sizeof(char));
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(body);
+		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
+		return;
+	}
+
+	char *pageStart = strstr((strlen(Buff) + 1) * sizeof(char), "&page="); // That's because GetProxyFromUidBuff puts 0x00 at & or \x20 in path (& in this situation, if page= exists). Search page= at one character from 0x00
+	if (pageStart == NULL || pageStart >= newLine) {
+		evbuffer_add(body, "Missing page parameter", 22 * sizeof(char));
+		goto fail;
+	}
+
+	char *pageEnd = strchr(pageStart, ' ');
+	if (pageEnd == NULL) {
+		evbuffer_add(body, "Malformed request", 17 * sizeof(char));
+		goto fail;
+	}
+
+	*pageEnd = 0x00;
+
+	PageRequest(proxy, InterfaceRawGetCustomPageStage2, pageStart, NULL);
+
+	evbuffer_free(headers);
+	evbuffer_free(body);
+
+	return;
+fail:
+	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
+
+	bufferevent_write_buffer(BuffEvent, headers);
+	bufferevent_write_buffer(BuffEvent, body);
+	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+	evbuffer_free(headers);
+	evbuffer_free(body);
+	bufferevent_free(BuffEvent);
 }
