@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="LiveProxies interface">
+    <meta name="author" content="TETYYS (https://github.com/TETYYS/LiveProxies)">
+
+    <title>LiveProxies {T_VERSION} RAW</title>
+
+    <script src="//code.jquery.com/jquery-2.1.4.js"></script>
+   <!-- <script src="//code.jquery.com/ui/1.11.4/jquery-ui.min.js"></script> -->
+    <script src="//code.jquery.com/color/jquery.color-2.1.2.min.js"></script>
+    <script src="/js/ws.js"></script>
+
+    <link href="//maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css" rel="stylesheet">
+
+    <link href="/css/sb-admin.css" rel="stylesheet">
+    <link href="/css/dataTables.bootstrap.css" rel="stylesheet">
+
+    <link href="//cdnjs.cloudflare.com/ajax/libs/morris.js/0.5.1/morris.css" rel="stylesheet">
+    <link href="/css/flag-css.min.mod.css" rel="stylesheet">
+    <link href="//maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css" rel="stylesheet" type$
+
+    <!--[if lt IE 9]>
+        <script src="//oss.maxcdn.com/libs/html5shiv/3.7.0/html5shiv.js"></script>
+        <script src="//oss.maxcdn.com/libs/respond.js/1.4.2/respond.min.js"></script>
+    <![endif]-->
+    <style>
+        .warnLine {
+            background-image: url('/warnLine.svg');
+            background-repeat: repeat-x;
+            height: 20px;
+        }
+    </style>
+    <script>
+	$(document).ready(function() {
+		$('#render').attr("href", "/cpagerender" + document.location.search);
+	});
+    </script>
+</head>
+	<body style="margin: 0">
+		<div style="background-color: red" class="text-center">
+			<div class="warnLine"></div>
+			<h1>WARNING</h1>
+			<p>Data coming from proxy server can be tampered and modified to inject any kind of scripts. If you understand the risks, click here to render the page:</p>
+			<a id="render" class="btn btn-info" role="button" style="margin-bottom: 10px">Ahhh ,Dont Stop , Keep Injecting Me Those CVEs !!! I Love It !!!</a>
+			<div class="warnLine"></div>
+		</div>
+		<pre>{T_CPAGE_RAW_HTTP}</pre>
+	</body>
+</html>
