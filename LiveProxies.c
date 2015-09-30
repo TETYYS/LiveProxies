@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "LiveProxies.h"
 #include "ProxyRequest.h"
 #include "GeoIP.h"
@@ -29,47 +31,10 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <math.h>
-
-#include <dlfcn.h>
-#include <execinfo.h>
+#include <fcntl.h>
+#include <pthread.h>
 
 #include <curl/curl.h>
-
-#if DEBUG
-void
-SSL_free(SSL *ssl)
-{
-	void(*h_SSL_free)(SSL *ssl);
-	h_SSL_free = dlsym(-1, "SSL_free");
-
-	Log(LOG_LEVEL_DEBUG, "SSL_free");
-	void *buffer[100];
-	int nptrs = backtrace(buffer, 100);
-	char **strs;
-	strs = backtrace_symbols(buffer, nptrs); {
-		for (size_t x = 0; x < nptrs; x++)
-			Log(LOG_LEVEL_DEBUG, "BT %d: %s", x, strs[x]);
-	} free(strs);
-	h_SSL_free(ssl);
-}
-
-void
-bufferevent_free(struct bufferevent *bufev)
-{
-	void(*h_bufferevent_free)(struct bufferevent *bufev);
-	h_bufferevent_free = dlsym(-1, "bufferevent_free");
-
-	Log(LOG_LEVEL_DEBUG, "bufferevent_free %p", bufev);
-	void *buffer[100];
-	int nptrs = backtrace(buffer, 100);
-	char **strs;
-	strs = backtrace_symbols(buffer, nptrs); {
-		for (size_t x = 0; x < nptrs; x++)
-			Log(LOG_LEVEL_DEBUG, "BT %d: %s", x, strs[x]);
-	} free(strs);
-	h_bufferevent_free(bufev);
-}
-#endif
 
 static char *StdinDynamic()
 {
@@ -301,7 +266,7 @@ int main(int argc, char** argv)
 				uint8_t *buff;
 				size_t len;
 				SSLFingerPrint = malloc(EVP_MAX_MD_SIZE);
-				size_t trash;
+				unsigned int trash;
 				X509_digest(cert, EVP_sha512(), SSLFingerPrint, &trash);
 				Log(LOG_LEVEL_DEBUG, "SSL fingerprint: %128x", SSLFingerPrint);
 			} BIO_free(bio);
@@ -409,7 +374,7 @@ int main(int argc, char** argv)
 			config_setting_t *Auth = config_setting_get_member(cfgRoot, "Auth");
 			if (Auth != NULL) {
 				while ((currentBlock = config_setting_get_elem(Auth, x)) != NULL) {
-					char *val = config_setting_get_string(currentBlock);
+					const char *val = config_setting_get_string(currentBlock);
 					if (x % 2 == 0) {
 						if (AuthLocalList == NULL)
 							AuthLocalList = malloc(++AuthLocalCount * sizeof(AuthLocalList));
@@ -419,10 +384,10 @@ int main(int argc, char** argv)
 						AuthLocalList[AuthLocalCount - 1] = malloc(sizeof(AUTH_LOCAL));
 
 						AuthLocalList[AuthLocalCount - 1]->username = malloc((strlen(val) * sizeof(char)) + 1);
-						strcpy(AuthLocalList[AuthLocalCount - 1]->username, val);
+						strcpy((char*)AuthLocalList[AuthLocalCount - 1]->username, val);
 					} else {
 						AuthLocalList[AuthLocalCount - 1]->password = malloc((strlen(val) * sizeof(char)) + 1);
-						strcpy(AuthLocalList[AuthLocalCount - 1]->password, val);
+						strcpy((char*)AuthLocalList[AuthLocalCount - 1]->password, val);
 					}
 					x++;
 				}
@@ -486,7 +451,7 @@ int main(int argc, char** argv)
 	Log(LOG_LEVEL_SUCCESS, "Non-interactive mode active");
 
 	for (;;) {
-		msleep(INT_MAX); // gdb is flipping out when we exit main thread
+		sleep(INT_MAX); // gdb is flipping out when we exit main thread
 		ERR_free_strings();
 		EVP_cleanup();
 		CONF_modules_finish();
@@ -544,7 +509,7 @@ void CheckLoop()
 			Log(LOG_LEVEL_DEBUG, "CheckLoop: Proxy %d set checking", x);
 			proxiesToCheck[x]->targetIPv4 = GlobalIp4;
 			proxiesToCheck[x]->targetIPv6 = GlobalIp6;
-			proxiesToCheck[x]->targetPort = ProxyIsSSL(proxiesToCheck[x]->type) ? ServerPort : SSLServerPort;
+			proxiesToCheck[x]->targetPort = proxiesToCheck[x]->type == PROXY_TYPE_SOCKS5_WITH_UDP ? ServerPortUDP : (ProxyIsSSL(proxiesToCheck[x]->type) ? SSLServerPort : ServerPort);
 			RequestAsync(proxiesToCheck[x]);
 		}
 

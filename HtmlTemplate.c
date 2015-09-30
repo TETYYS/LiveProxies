@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <limits.h>
+#include <ctype.h>
 #include "Global.h"
 #include "ProxyLists.h"
 #include "Interface.h"
@@ -22,7 +22,7 @@
 #include <openssl/x509.h>
 #include "Stats.h"
 
-char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",					"{T_CFG_HOME_ACTIVE}",				"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",		"{T_CFG_SOURCES_ACTIVE}",
+char *HtmlTemplateTags[] = { "{T_VERSION}",						"{T_CURRENT_PAGE}",					"{T_CFG_HOME_ACTIVE}",				"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",		"{T_CFG_SOURCES_ACTIVE}",
 								"{T_CFG_STATS_ACTIVE}",				"{T_USER}",							"{T_COUNT_UPROXIES}",				"{T_COUNT_PROXIES}",			"{T_UPROXIES_HEAD}",			"{T_UPROXIES_TABLE_ITEMS_START}",
 								"{T_UPROXIES_TABLE_ITEMS_END}",		"{T_CFG_TABLE_ODD}",				"{T_CFG_TABLE_EVEN}",				"{T_CFG_TABLE_OK}",				"{T_CFG_TABLE_WARN}",			"{T_CFG_TABLE_ERR}",
 								"{T_UPROXIES_ITEM}",				"{T_PROXIES_HEAD}",					"{T_PROXIES_TABLE_ITEMS_START}",	"{T_PROXIES_TABLE_ITEMS_END}",	"{T_PROXIES_ITEM}",				"{T_PRXSRC_HEAD}",
@@ -33,7 +33,7 @@ char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",					"{T_CFG
 								"{T_SUB_SIZE_PROXIES}",				"{T_SUB_AUTH_COOKIE}",				"{T_SUB_MSG_INTERVAL}",				"{T_SUB_PROXY_ADD}",			"{T_SUB_UPROXY_ADD}",			"{T_SUB_PROXY_REMOVE}",
 								"{T_SUB_UPROXY_REMOVE}",			"{T_CFG_ENABLED}",					"{T_CFG_DISABLED}",					"{T_CFG_TOOLS_ACTIVE}",			"{T_CHECK_COND_INVALID_CERT}",	"{T_CHECK_COND_INVALID_CERT_FINGERPRINT}",
 								"{T_CHECK_ELSE_COND_INVALID_CERT}",	"{T_CHECK_END_COND_INVALID_CERT}",	"{T_CHECK_COND_INVALID_CERT_INFO}",	"{T_STATS_PCOUNT_HEAD}",		"{T_STATS_PCOUNT_ITEMS_START}",	"{T_STATS_PCOUNT_ITEMS_END}",
-								"{T_STATS_PCOUNT_ITEM}"
+								"{T_STATS_PCOUNT_ITEM}",			"{T_CPAGE_RAW_HTTP}"
 };
 
 void HtmlTemplateLoadAll()
@@ -53,7 +53,7 @@ void HtmlTemplateLoadAll()
 		fullPath = true;
 	}
 
-	char *files[] = { "head.tmpl", "foot.tmpl", "home.tmpl", "iface.tmpl", "ifaceu.tmpl", "prxsrc.tmpl", "stats.tmpl", "check.tmpl", "tools.tmpl" };
+	char *files[] = { "head.tmpl", "foot.tmpl", "home.tmpl", "iface.tmpl", "ifaceu.tmpl", "prxsrc.tmpl", "stats.tmpl", "check.tmpl", "tools.tmpl", "cpageraw.tmpl" };
 
 	if (d) {
 		config_t cfg;
@@ -81,24 +81,26 @@ void HtmlTemplateLoadAll()
 					if (hFile != NULL) {
 						Log(LOG_LEVEL_DEBUG, "Parsing %s...", dir->d_name);
 
-						if (strcmp(dir->d_name, "head.tmpl") == 0)
+						if (strcmp(dir->d_name, files[0]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateHead, &HtmlTemplateHeadSize, cfgRoot);
-						if (strcmp(dir->d_name, "foot.tmpl") == 0)
+						if (strcmp(dir->d_name, files[1]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateFoot, &HtmlTemplateFootSize, cfgRoot);
-						if (strcmp(dir->d_name, "home.tmpl") == 0)
+						if (strcmp(dir->d_name, files[2]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateHome, &HtmlTemplateHomeSize, cfgRoot);
-						if (strcmp(dir->d_name, "iface.tmpl") == 0)
+						if (strcmp(dir->d_name, files[3]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateProxies, &HtmlTemplateProxiesSize, cfgRoot);
-						if (strcmp(dir->d_name, "ifaceu.tmpl") == 0)
+						if (strcmp(dir->d_name, files[4]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateUProxies, &HtmlTemplateUProxiesSize, cfgRoot);
-						if (strcmp(dir->d_name, "prxsrc.tmpl") == 0)
+						if (strcmp(dir->d_name, files[5]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateProxySources, &HtmlTemplateProxySourcesSize, cfgRoot);
-						if (strcmp(dir->d_name, "stats.tmpl") == 0)
+						if (strcmp(dir->d_name, files[6]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateStats, &HtmlTemplateStatsSize, cfgRoot);
-						if (strcmp(dir->d_name, "check.tmpl") == 0)
+						if (strcmp(dir->d_name, files[7]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateCheck, &HtmlTemplateCheckSize, cfgRoot);
-						if (strcmp(dir->d_name, "tools.tmpl") == 0)
+						if (strcmp(dir->d_name, files[8]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateTools, &HtmlTemplateToolsSize, cfgRoot);
+						if (strcmp(dir->d_name, files[9]) == 0)
+							HtmlTemplateParse(hFile, &HtmlTemplateCPageRaw, &HtmlTemplateCPageRawSize, cfgRoot);
 
 						itemsFound++;
 					}
@@ -108,7 +110,7 @@ void HtmlTemplateLoadAll()
 
 		//config_destroy(&cfg); // TODO: fix segfault here
 
-		if (itemsFound != 9) {
+		if (itemsFound != 10) {
 			Log(LOG_LEVEL_ERROR, "Not all HTML templates found, using stock HTML...");
 			HtmlTemplateUseStock = true;
 		}
@@ -150,7 +152,7 @@ void HtmlTemplateMimeTypesInit()
 	config_setting_t *mimeTypes = config_setting_get_member(cfgRoot, "MimeTypes");
 	if (mimeTypes != NULL) {
 		while ((currentBlock = config_setting_get_elem(mimeTypes, x)) != NULL) {
-			char *val = config_setting_get_string(currentBlock);
+			const char *val = config_setting_get_string(currentBlock);
 			if (x % 2 == 0) {
 				if (HtmlTemplateMimeTypes == NULL)
 					HtmlTemplateMimeTypes = malloc(++HtmlTemplateMimeTypesSize * sizeof(HTML_TEMPLATE_MIME_TYPE));
@@ -171,7 +173,7 @@ void HtmlTemplateMimeTypesInit()
 
 static void HtmlTemplateFindFirst(char *Contents, OUT HTML_TEMPLATE_COMPONENT_IDENTIFIER *Identifier, OUT char **Offset)
 {
-	*Offset = SIZE_MAX;
+	*Offset = (char*)SIZE_MAX;
 	*Identifier = HTML_TEMPLATE_COMPONENT_IDENTIFIER_INVALID;
 
 	for (size_t x = 0;x < arrlen(HtmlTemplateTags);x++) {
@@ -179,7 +181,9 @@ static void HtmlTemplateFindFirst(char *Contents, OUT HTML_TEMPLATE_COMPONENT_ID
 			continue;
 
 		char *cur = strstr(Contents, HtmlTemplateTags[x]);
+
 		if (cur != NULL && cur < *Offset) {
+			Log(LOG_LEVEL_DEBUG, "TAG %s (%d)", HtmlTemplateTags[x], x);
 			*Offset = cur;
 			*Identifier = x;
 		}
@@ -240,7 +244,7 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 				comp.identifier = identifier;
 
 #define CONFIG_STRING(cfg, svar, var) const char *val; if (config_setting_lookup_string(cfg, svar, &(val)) == CONFIG_FALSE) { Log(LOG_LEVEL_ERROR, "Failed to lookup %s, using stock template...", svar); HtmlTemplateUseStock = true; return; } else { var = malloc((strlen(val) * sizeof(char)) + 1); strcpy(var, val); }
-#define CONFIG_INT(cfg, svar, var) if (config_setting_lookup_int(cfg, svar, &(var)) == CONFIG_FALSE) { Log(LOG_LEVEL_ERROR, "Failed to lookup %s, using stock template...", svar); HtmlTemplateUseStock = true; return; }
+#define CONFIG_INT(cfg, svar, var) if (config_setting_lookup_int(cfg, svar, (int*)(&(var))) == CONFIG_FALSE) { Log(LOG_LEVEL_ERROR, "Failed to lookup %s, using stock template...", svar); HtmlTemplateUseStock = true; return; }
 
 				switch (identifier) {
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_VERSION: {
@@ -308,39 +312,39 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_MSG_INTERVAL: {
 						config_setting_t *wsGroup = config_setting_get_member(CfgRoot, "WS");
 						CONFIG_INT(wsGroup, "MessageIntervalMs", WSMessageIntervalMs);
-						comp.content = WSMessageIntervalMs;
+						comp.content = (void*)WSMessageIntervalMs;
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_COUNT_PROXIES: {
-						comp.content = &SizeCheckedProxies;
+						comp.content = (void*)(&SizeCheckedProxies);
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_COUNT_UPROXIES: {
-						comp.content = &SizeUncheckedProxies;
+						comp.content = (void*)(&SizeUncheckedProxies);
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_SIZE_PROXIES: {
-						comp.content = WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES;
+						comp.content = (void*)WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES;
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_SIZE_UPROXIES: {
-						comp.content = WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES;
+						comp.content = (void*)WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES;
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_PROXY_ADD: {
-						comp.content = WEBSOCKET_SERVER_COMMAND_PROXY_ADD;
+						comp.content = (void*)WEBSOCKET_SERVER_COMMAND_PROXY_ADD;
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_UPROXY_ADD: {
-						comp.content = WEBSOCKET_SERVER_COMMAND_UPROXY_ADD;
+						comp.content = (void*)WEBSOCKET_SERVER_COMMAND_UPROXY_ADD;
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_PROXY_REMOVE: {
-						comp.content = WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE;
+						comp.content = (void*)WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE;
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_UPROXY_REMOVE: {
-						comp.content = WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE;
+						comp.content = (void*)WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE;
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_SUB_AUTH_COOKIE: {
@@ -390,9 +394,6 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 		}
 	}
 
-	if (Info.currentPage->page == INTERFACE_PAGE_CHECK)
-		assert(TableInfo.tableObject != NULL);
-
 	/*Log(LOG_LEVEL_DEBUG, "TableInfo:");
 	Log(LOG_LEVEL_DEBUG, ".x: %d", TableInfo.currentComponentIteration);
 	Log(LOG_LEVEL_DEBUG, ".inTable: %s", TableInfo.inTable ? "true" : "false");
@@ -405,6 +406,15 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 		/*Log(LOG_LEVEL_DEBUG, "Component (%d): ", x);
 		Log(LOG_LEVEL_DEBUG, ".content: %s", Components[x].content);
 		Log(LOG_LEVEL_DEBUG, ".identifier: %d", Components[x].identifier);*/
+
+		if (Info.currentPage->page == INTERFACE_PAGE_CPAGE_RAW && TableInfo.tableObject == 1) {
+			do {
+				x++;
+				Log(LOG_LEVEL_DEBUG, "CPAGE ++ -> %d (%d)", x, Components[x].identifier);
+			} while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_CPAGE_RAW_HTTP && x < Size);
+			if (x >= Size)
+				break;
+		}
 
 		switch (Components[x].identifier) {
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CURRENT_PAGE: {
@@ -753,7 +763,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 						HtmlTemplateBufferInsert(Buffer, Components, Size, Info, tableInfo);
 					}
 				} pthread_mutex_unlock(&LockUncheckedProxies);
-				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_UPROXIES_TABLE_ITEMS_END || x > Size)
+				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_UPROXIES_TABLE_ITEMS_END && x < Size)
 					x++;
 				break;
 			}
@@ -769,7 +779,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 						HtmlTemplateBufferInsert(Buffer, Components, Size, Info, tableInfo);
 					}
 				} pthread_mutex_unlock(&LockCheckedProxies);
-				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_PROXIES_TABLE_ITEMS_END || x > Size)
+				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_PROXIES_TABLE_ITEMS_END && x < Size)
 					x++;
 				break;
 			}
@@ -785,7 +795,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 						HtmlTemplateBufferInsert(Buffer, Components, Size, Info, tableInfo);
 					}
 				} pthread_mutex_unlock(&LockStatsHarvesterPrxsrc);
-				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_PRXSRC_TABLE_ITEMS_END || x > Size)
+				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_PRXSRC_TABLE_ITEMS_END && x < Size)
 					x++;
 				break;
 			}
@@ -820,7 +830,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 					HtmlTemplateBufferInsert(Buffer, Components, Size, Info, tableInfo);
 				}
 				free(statsGeo);
-				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_GEO_TABLE_ITEMS_END || x > Size)
+				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_GEO_TABLE_ITEMS_END && x < Size)
 					x++;
 				break;
 			}
@@ -836,7 +846,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 						HtmlTemplateBufferInsert(Buffer, Components, Size, Info, tableInfo);
 					}
 				} pthread_mutex_unlock(&LockStatsProxyCount);
-				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_PCOUNT_TABLE_ITEMS_END || x > Size)
+				while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_STATS_PCOUNT_TABLE_ITEMS_END && x < Size)
 					x++;
 				break;
 			}
@@ -930,7 +940,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 					continue;
 
 				uint8_t hash[EVP_MAX_MD_SIZE];
-				size_t trash;
+				unsigned int trash;
 
 				X509_digest(((PROXY*)(TableInfo.tableObject))->invalidCert, EVP_sha1(), hash, &trash);
 				for (size_t x = 0; x < 160 / 8;x++)
@@ -957,6 +967,11 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 						x++;
 					} while (Components[x].identifier != HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_END_COND_INVALID_CERT);
 				}
+				break;
+			}
+			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CPAGE_RAW_HTTP: {
+				if (Info.currentPage->page == INTERFACE_PAGE_CPAGE_RAW && TableInfo.tableObject == 0)
+					return;
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_TABLE_BREAK: {

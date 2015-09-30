@@ -29,5 +29,4 @@ void ServerUDP4();
 void ServerRead(struct bufferevent *BuffEvent, void *Ctx);
 void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx);
 
-MEM_OUT bool ServerFindHeader(char *In, char *Buff, char **Out, char **StartIndex, char **EndIndex);
 void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...);

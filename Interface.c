@@ -17,7 +17,7 @@
 
 void InterfaceInit()
 {
-	InterfacePagesSize = 7;
+	InterfacePagesSize = 8;
 	InterfacePages = malloc(InterfacePagesSize * sizeof(INTERFACE_PAGE));
 	InterfacePages[0].name = "Home";
 	InterfacePages[0].page = INTERFACE_PAGE_HOME;
@@ -33,6 +33,8 @@ void InterfaceInit()
 	InterfacePages[5].page = INTERFACE_PAGE_RECHECK;
 	InterfacePages[6].name = "Tools";
 	InterfacePages[6].page = INTERFACE_PAGE_TOOLS;
+	InterfacePages[7].name = "CPAGE_RAW";
+	InterfacePages[7].page = INTERFACE_PAGE_CPAGE_RAW;
 }
 
 // Please lock AuthWebLock
@@ -60,7 +62,7 @@ static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, INTERFACE_I
 
 		char *cookie;
 
-		if (!ServerFindHeader("Cookie: ", Buff, &cookie, NULL, NULL))
+		if (!HTTPFindHeader("Cookie: ", Buff, &cookie, NULL, NULL))
 			goto endCookie;
 
 		char *lpAuth; // not this is not long pointer
@@ -109,7 +111,7 @@ endCookie:
 		char *authStr;
 
 		char *authorization;
-		if (ServerFindHeader("Authorization: ", Buff, &authorization, NULL, NULL)) {
+		if (HTTPFindHeader("Authorization: ", Buff, &authorization, NULL, NULL)) {
 			/* Resolve username:password from authorization header */ {
 				char *authStrb64 = strstr(authorization, "Basic ") + (sizeof(char) * 6);
 
@@ -205,7 +207,7 @@ endCookie:
 
 						uint8_t randBytes[SIZE_RND_VERIFY];
 						RAND_pseudo_bytes(randBytes, SIZE_RND_VERIFY);
-						size_t b64VerifyLen = Base64Encode(randBytes, SIZE_RND_VERIFY, &(AuthWebList[AuthWebCount - 1]->rndVerify));
+						size_t b64VerifyLen = Base64Encode(randBytes, SIZE_RND_VERIFY, (char**)(&(AuthWebList[AuthWebCount - 1]->rndVerify)));
 
 						evbuffer_add_printf(OutBuff, "HTTP/1.1 200 OK\r\nSet-Cookie: "AUTH_COOKIE"=%s\r\nContent-Length: ", AuthWebList[AuthWebCount - 1]->rndVerify);
 					} pthread_mutex_unlock(&AuthWebLock);
@@ -800,7 +802,7 @@ void InterfaceRawReverseDNS(struct bufferevent *BuffEvent, char *Buff)
 		evbuffer_add(body, "N/A", 3 * sizeof(char));
 	} else {
 		evbuffer_add_printf(headers, "%d", strlen(rDNS)); // To Content-Length
-		evbuffer_add_reference(body, rDNS, strlen(rDNS), free, rDNS);
+		evbuffer_add_reference(body, rDNS, strlen(rDNS), (evbuffer_ref_cleanup_cb)free, rDNS);
 	}
 
 	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
@@ -1001,7 +1003,7 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 		evbuffer_add(body, "OK", 2 * sizeof(char));
 	} else {
 		char *rawLen;
-		if (!ServerFindHeader("Content-Length: ", Buff, &rawLen, NULL, NULL)) {
+		if (!HTTPFindHeader("Content-Length: ", Buff, &rawLen, NULL, NULL)) {
 			evbuffer_add(body, "Invalid request", 15 * sizeof(char));
 			goto error;
 		}
@@ -1014,9 +1016,9 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 		uint64_t origLen = strlen(Buff);
 
 		char *content = strstr(Buff, "\r\n\r\n") + (4 * sizeof(char));
-		if (content == 4 * sizeof(char)) {
+		if ((size_t)content == 4 * sizeof(char)) {
 			content = strstr(Buff, "\n\n") + (2 * sizeof(char));
-			if (content == 2 * sizeof(char)) {
+			if ((size_t)content == 2 * sizeof(char)) {
 				evbuffer_add(body, "Invalid request", 15 * sizeof(char));
 				goto error;
 			}
@@ -1028,7 +1030,7 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 			goto error;
 		} else if (len > contentLen) {
 			bufferevent_setwatermark(BuffEvent, EV_READ, len - contentLen, 0);
-			bufferevent_setcb(BuffEvent, InterfaceRawUProxyAddProcessPost, NULL, ServerEvent, NULL);
+			bufferevent_setcb(BuffEvent, (bufferevent_data_cb)InterfaceRawUProxyAddProcessPost, NULL, ServerEvent, NULL);
 			evbuffer_add(bufferevent_get_input(BuffEvent), Buff, origLen);
 			return;
 		} else
@@ -1058,9 +1060,9 @@ void InterfaceRawUProxyAddProcessPost(struct bufferevent *BuffEvent, char *Buff)
 	}
 
 	char *content = strstr(Buff, "\r\n\r\n") + (4 * sizeof(char));
-	if (content == 4 * sizeof(char)) {
+	if ((size_t)content == 4 * sizeof(char)) {
 		content = strstr(Buff, "\n\n") + (2 * sizeof(char));
-		if (content == 2 * sizeof(char)) {
+		if ((size_t)content == 2 * sizeof(char)) {
 			bufferevent_free(BuffEvent);
 			return;
 		}
@@ -1134,29 +1136,112 @@ void InterfaceTools(struct bufferevent *BuffEvent, char *Buff)
 	evbuffer_free(body);
 }
 
-static void InterfaceRawGetCustomPageStage2(UNCHECKED_PROXY *UProxy)
+static bool InterfaceRawGetCustomPageStage2(UNCHECKED_PROXY *UProxy, UPROXY_CUSTOM_PAGE_STAGE Stage)
 {
+	Log(LOG_LEVEL_DEBUG, "CustomPage stage 2");
 	struct bufferevent *buffEvent = (struct bufferevent*)UProxy->singleCheckCallbackExtraData;
 
 	if (!UProxy->checkSuccess) {
-		bufferevent_write(buffEvent, "HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 23\r\nContent-Type: text/html\r\n\r\nProxy connection failure", 101);
+		bufferevent_write(buffEvent, "HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 24\r\nContent-Type: text/html\r\n\r\nProxy connection failure", 101 * sizeof(char));
 		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
 		bufferevent_free(buffEvent);
-		return;
+		return false;
 	}
 
-	bufferevent_write_buffer(buffEvent, bufferevent_get_input(UProxy->assocBufferEvent));
+	if (Stage == UPROXY_CUSTOM_PAGE_STAGE_INITIAL_PACKET) {
+		bufferevent_write(buffEvent, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: Chunked\r\n\r\n", 72 * sizeof(char));
+
+		struct evbuffer *head = evbuffer_new(); {
+			HTML_TEMPALTE_TABLE_INFO tableInfo;
+			memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+			tableInfo.tableObject = 0;
+			INTERFACE_INFO info;
+
+			for (size_t x = 0;x < InterfacePagesSize;x++) {
+				if (InterfacePages[x].page == INTERFACE_PAGE_CPAGE_RAW)
+					info.currentPage = &(InterfacePages[x]);
+			}
+
+			info.user = NULL;
+			HtmlTemplateBufferInsert(head, HtmlTemplateCPageRaw, HtmlTemplateCPageRawSize, info, tableInfo);
+			Log(LOG_LEVEL_DEBUG, "Head len: %d", evbuffer_get_length(head));
+
+			evbuffer_add_printf(bufferevent_get_output(buffEvent), "%x\r\n", evbuffer_get_length(head));
+			bufferevent_write_buffer(buffEvent, head);
+			bufferevent_write(buffEvent, "\r\n", 2 * sizeof(char));
+		} evbuffer_free(head);
+	}
+
+	size_t len = evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent));
+
+
+	char* data = malloc(len + 1); {
+		data[len] = 0x00;
+		bufferevent_read(UProxy->assocBufferEvent, data, len);
+		StrReplaceOrig(&data, "<", "&lt;");
+		StrReplaceOrig(&data, ">", "&gt;");
+
+		len = strlen(data);
+		evbuffer_add_printf(bufferevent_get_output(buffEvent), "%x\r\n", len);
+		bufferevent_write(buffEvent, data, len);
+	} free(data);
+	bufferevent_write(buffEvent, "\r\n", 2 * sizeof(char));
 
 	pthread_mutex_unlock(&(UProxy->processing));
 
-	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
-	Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
-	bufferevent_free(buffEvent);
-	return;
+	if (Stage == UPROXY_CUSTOM_PAGE_STAGE_END) {
+		struct evbuffer *foot = evbuffer_new(); {
+			HTML_TEMPALTE_TABLE_INFO tableInfo;
+			memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+			tableInfo.tableObject = 1;
+			INTERFACE_INFO info;
+
+			for (size_t x = 0;x < InterfacePagesSize;x++) {
+				if (InterfacePages[x].page == INTERFACE_PAGE_CPAGE_RAW)
+					info.currentPage = &(InterfacePages[x]);
+			}
+
+			info.user = NULL;
+			HtmlTemplateBufferInsert(foot, HtmlTemplateCPageRaw, HtmlTemplateCPageRawSize, info, tableInfo);
+
+			evbuffer_add_printf(bufferevent_get_output(buffEvent), "%d\r\n", evbuffer_get_length(foot));
+			bufferevent_write_buffer(buffEvent, foot);
+			bufferevent_write(buffEvent, "\r\n0\r\n\r\n", 7 * sizeof(char));
+		} evbuffer_free(foot);
+
+		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
+		bufferevent_free(buffEvent);
+	}
+	return true;
 }
 
-void InterfaceRawGetCustomPage(struct bufferevent *BuffEvent, char *Buff)
+static bool InterfaceRawGetCustomPageStage2Render(UNCHECKED_PROXY *UProxy, UPROXY_CUSTOM_PAGE_STAGE Stage)
+{
+	Log(LOG_LEVEL_DEBUG, "CustomPage stage 2 (render)");
+	struct bufferevent *buffEvent = (struct bufferevent*)UProxy->singleCheckCallbackExtraData;
+
+	if (!UProxy->checkSuccess) {
+		bufferevent_write(buffEvent, "HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 24\r\nContent-Type: text/html\r\n\r\nProxy connection failure", 101 * sizeof(char));
+		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
+		bufferevent_free(buffEvent);
+		return false;
+	}
+
+	bufferevent_write_buffer(buffEvent, bufferevent_get_input(UProxy->assocBufferEvent));
+	pthread_mutex_unlock(&(UProxy->processing));
+
+	if (Stage == UPROXY_CUSTOM_PAGE_STAGE_END) {
+		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
+		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
+		bufferevent_free(buffEvent);
+	}
+	return true;
+}
+
+void InterfaceRawGetCustomPage(struct bufferevent *BuffEvent, char *Buff, bool Render)
 {
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
@@ -1186,7 +1271,7 @@ void InterfaceRawGetCustomPage(struct bufferevent *BuffEvent, char *Buff)
 		return;
 	}
 
-	char *pageStart = strstr((strlen(Buff) + 1) * sizeof(char), "&page="); // That's because GetProxyFromUidBuff puts 0x00 at & or \x20 in path (& in this situation, if page= exists). Search page= at one character from 0x00
+	char *pageStart = strstr(Buff + (strlen(Buff) + 1) * sizeof(char), "page="); // That's because GetProxyFromUidBuff puts 0x00 at & or \x20 in path (& in this situation, if page= exists). Search page= at one character from 0x00
 	if (pageStart == NULL || pageStart >= newLine) {
 		evbuffer_add(body, "Missing page parameter", 22 * sizeof(char));
 		goto fail;
@@ -1200,7 +1285,7 @@ void InterfaceRawGetCustomPage(struct bufferevent *BuffEvent, char *Buff)
 
 	*pageEnd = 0x00;
 
-	PageRequest(proxy, InterfaceRawGetCustomPageStage2, pageStart, NULL);
+ 	PageRequest(proxy, Render ? InterfaceRawGetCustomPageStage2Render : InterfaceRawGetCustomPageStage2, pageStart + (sizeof(char) * 5), BuffEvent);
 
 	evbuffer_free(headers);
 	evbuffer_free(body);

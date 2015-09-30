@@ -56,7 +56,7 @@ char *StrReplaceToNew(char *In, char *Search, char *Replace)
 	char *searchOffset = strstr(In, Search);
 
 	if (searchOffset == NULL || *Replace == 0x00)
-		return;
+		return NULL;
 
 	size_t searchLen = strlen(Search);
 	size_t origLen = strlen(In);
@@ -76,7 +76,7 @@ char *StrReplaceToNew(char *In, char *Search, char *Replace)
 		size_t replaceLenBytes = (replaceLen * sizeof(char));
 		memcpy(ret + (searchOffset - In) + replaceLenBytes,
 			   searchOffset + (searchLen * sizeof(char)),
-			   /*(In + (origLen * sizeof(char))) - searchOffset + replaceLenBytes*/ In + (origLen * sizeof(char)) - searchOffset - (searchLen * sizeof(char)));
+			   In + (origLen * sizeof(char)) - searchOffset - (searchLen * sizeof(char)));
 	}
 	ret[(origLen - searchLen + replaceLen) * sizeof(char)] = 0x00;
 
@@ -92,16 +92,12 @@ bool StrReplaceOrig(char **In, char *Search, char *Replace)
 		return false;
 
 	size_t searchOffset = search - *In;
-	Log(LOG_LEVEL_DEBUG, "StrReplaceOrig: %s", *In);
-
 
 	size_t searchLen = strlen(Search);
 	size_t origLen = strlen(*In);
 	size_t replaceLen = strlen(Replace);
 	size_t origToReplaceEndLen = (origLen - searchLen + replaceLen);
 
-	Log(LOG_LEVEL_DEBUG, "StrReplaceOrig: origLen: %d, searchLen: %d, replaceLen %d, origToReplaceEndLen: %d", origLen, searchLen, replaceLen, origToReplaceEndLen);
-	Log(LOG_LEVEL_DEBUG, "StrReplaceOrig: %d VS %d", origLen + 1, origToReplaceEndLen + 1);
 
 	if (replaceLen > searchLen) {
 		// In: Test test {TEST} test
@@ -156,7 +152,43 @@ bool StrReplaceOrig(char **In, char *Search, char *Replace)
 	if (strstr(*In, Search) != NULL)
 		StrReplaceOrig(In, Search, Replace);
 
-	Log(LOG_LEVEL_DEBUG, "StrReplaceOrig PRODUCT: %s", *In);
+	return true;
+}
+
+MEM_OUT bool HTTPFindHeader(char *In, char *Buff, char **Out, char **StartIndex, char **EndIndex)
+{
+	char *valIndex = Buff;
+
+	size_t searchIndex = 0, inLen = strlen(In);
+
+	do {
+		valIndex = strstr(Buff + searchIndex, In);
+		if (valIndex == NULL)
+			return false;
+		if (valIndex == Buff || *(valIndex - 1) != '\n')
+			searchIndex = (size_t)valIndex + inLen;
+		else
+			break;
+	} while (1);
+
+	char *valEnd = strstr(valIndex + inLen, "\r\n");
+	if (valEnd == NULL) {
+		valEnd = strchr(valIndex + inLen, '\n');
+		if (valEnd == NULL)
+			return false;
+	}
+
+	char *valIndexEnd = valIndex + inLen;
+	size_t valLen = valEnd - valIndexEnd;
+
+	*Out = malloc(valLen + 1);
+	memcpy(*Out, valIndexEnd, valLen);
+	(*Out)[valLen] = 0x00;
+
+	if (StartIndex != NULL)
+		*StartIndex = valIndex;
+	if (EndIndex != NULL)
+		*EndIndex = valEnd;
 
 	return true;
 }

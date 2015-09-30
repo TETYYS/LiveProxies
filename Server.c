@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "Base64.h"
 #include "Logger.h"
 #include "IPv6Map.h"
@@ -23,6 +25,7 @@
 #include <math.h>
 #include "HtmlTemplate.h"
 #include "Websocket.h"
+#include <stdio.h>
 #if DEBUG
 #include <valgrind/memcheck.h>
 #endif
@@ -62,7 +65,7 @@ void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...)
 	} va_end(args);
 	size_t bodyLen = strlen(body);
 
-	char *hex[8];
+	char hex[8];
 	sprintf(hex, "%x", bodyLen);
 
 	all = malloc((strlen(hex) + 2 + bodyLen + 2) * sizeof(char) + 1); {
@@ -70,44 +73,6 @@ void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...)
 		bufferevent_write(BuffEvent, all, (strlen(hex) + 2 + bodyLen + 2) * sizeof(char));
 	} free(all);
 	free(body);
-}
-
-MEM_OUT bool ServerFindHeader(char *In, char *Buff, char **Out, char **StartIndex, char **EndIndex)
-{
-	char *valIndex = Buff;
-
-	size_t searchIndex = 0, inLen = strlen(In);
-
-	do {
-		valIndex = strstr(Buff + searchIndex, In);
-		if (valIndex == NULL)
-			return false;
-		if (valIndex == Buff || *(valIndex - 1) != '\n')
-			searchIndex = valIndex + inLen;
-		else
-			break;
-	} while (1);
-
-	char *valEnd = strstr(valIndex + inLen, "\r\n");
-	if (valEnd == NULL) {
-		valEnd = strchr(valIndex + inLen, '\n');
-		if (valEnd == NULL)
-			return false;
-	}
-
-	char *valIndexEnd = valIndex + inLen;
-	size_t valLen = valEnd - valIndexEnd;
-
-	*Out = malloc(valLen + 1);
-	memcpy(*Out, valIndexEnd, valLen);
-	(*Out)[valLen] = 0x00;
-
-	if (StartIndex != NULL)
-		*StartIndex = valIndex;
-	if (EndIndex != NULL)
-		*EndIndex = valEnd;
-
-	return true;
 }
 
 static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
@@ -122,12 +87,12 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 	size_t buffLen = strlen(*Buff);
 
 	/* Get UProxy pointer */ {
-		if (!ServerFindHeader("LPKey: ", *Buff, &keyRaw, &lpKeyStart, &lpKeyEnd) || strlen(keyRaw) < 512 / 8)
+		if (!HTTPFindHeader("LPKey: ", *Buff, &keyRaw, &lpKeyStart, &lpKeyEnd) || strlen(keyRaw) < 512 / 8)
 			return;
 
 		char *key;
 		size_t len; // trash
-		if (!Base64Decode(keyRaw, &key, &len)) {
+		if (!Base64Decode(keyRaw, (unsigned char**)(&key), &len)) {
 			free(keyRaw);
 			return;
 		}
@@ -175,7 +140,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 			bool anonMax = true;
 
 			char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
-			if (!StrReplaceOrig(Buff, host, "{HOST}"))
+			if (!StrReplaceOrig(Buff, host, "{HOST}") || !StrReplaceOrig(Buff, "/prxchk", "{PAGE_PATH}"))
 				anonMax = false;
 			assert(StrReplaceOrig(Buff, keyRaw, "{KEY_VAL}"));
 
@@ -183,39 +148,6 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 
 			if (RequestStringLen != buffLen || !MemEqual(*Buff, RequestString, buffLen))
 				anonMax = false;
-
-			// Get original host header
-			/*char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
-			char *hostHeaderVal, *hostStart, *hostEnd;
-
-			if (!ServerFindHeader("Host: ", Buff, &hostHeaderVal, &hostStart, &hostEnd))
-				goto freeProxy;
-
-			// Compare host header value
-			if (strcmp(hostHeaderVal, host) != 0) {
-				free(hostHeaderVal);
-				goto freeProxy;
-			}
-			free(hostHeaderVal);
-
-			hostStart[6] = '%';
-			hostStart[7] = 's';
-
-			char *cpyBuff = malloc(buffLen - (hostEnd - Buff)); {
-				memcpy(cpyBuff, hostEnd, buffLen - (hostEnd - Buff));
-				memcpy(hostStart + 8, cpyBuff, buffLen - (hostEnd - Buff));
-			} free(cpyBuff);
-
-			if (anonMax) {
-				lpKeyStart = strstr(Buff, "LPKey: ");
-				assert(lpKeyStart != NULL);
-				lpKeyStart[7] = 0x00;
-
-				if (strcmp(Buff, RequestString) != 0)
-					anonMax = false;
-
-				buffLen = strlen(Buff); // recompute
-			}*/
 
 			if (!anonMax) {
 				int subStrVec[256];
@@ -228,11 +160,11 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 							free(keyRaw);
 							goto freeProxy;
 						} else {
-							char *foundIpStr;
+							const char *foundIpStr;
 							for (size_t x = 0; x < regexRet; x++) {
-								pcre_get_substring(*Buff, subStrVec, regexRet, x, &(foundIpStr));
+								pcre_get_substring(*Buff, subStrVec, regexRet, x, &foundIpStr);
 								if (foundIpStr != NULL) {
-									IPv6Map *foundIp = StringToIPv6Map(foundIpStr);
+									IPv6Map *foundIp = StringToIPv6Map((char*)foundIpStr);
 									if (foundIp != NULL && IPv6MapEqual(i == 0 ? GlobalIp4 : GlobalIp6, foundIp)) {
 										Log(LOG_LEVEL_DEBUG, "WServer: switch to transparent proxy on (type %d)", UProxy->type);
 										proxy->anonymity = ANONYMITY_TRANSPARENT;
@@ -344,9 +276,12 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 		else if (pathLen >= 4 && strncmp(path, "/add", 4) == 0) {
 			freeBufferEvent = false; // Needed by POST
 			InterfaceRawUProxyAdd(BuffEvent, *Buff);
-		} else if (pathLen > 10 && strncmp(path, "/cpage", 10) == 0) {
+		} else if (pathLen > 12 && strncmp(path, "/cpagerender", 12) == 0) {
 			freeBufferEvent = false; // Free'd in second stage of custom page request
-			InterfaceRawGetCustomPage(BuffEvent, *Buff);
+			InterfaceRawGetCustomPage(BuffEvent, *Buff, true);
+		} else if (pathLen > 6 && strncmp(path, "/cpage", 6) == 0) {
+			freeBufferEvent = false; // Free'd in second stage of custom page request
+			InterfaceRawGetCustomPage(BuffEvent, *Buff, false);
 		} else if (pathLen == 6 && strncmp(path, "/tools", 6) == 0)
 			InterfaceTools(BuffEvent, *Buff);
 		else if (pathLen > 6 && strncmp(path, "/check", 6) == 0) {
@@ -431,7 +366,7 @@ free:
 		}
 		Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
 		if (evbuffer_get_length(bufferevent_get_output(BuffEvent)))
-			bufferevent_setcb(BuffEvent, ServerRead, bufferevent_free, ServerEvent, NULL);
+			bufferevent_setcb(BuffEvent, ServerRead, (bufferevent_data_cb)bufferevent_free, ServerEvent, NULL);
 		else
 			bufferevent_free(BuffEvent);
 	}
@@ -601,7 +536,7 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 			struct bufferevent *bev = bufferevent_openssl_socket_new(base, Fd, SSL_new(levServerSSL), BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
 			Log(LOG_LEVEL_DEBUG, "SSL created %d", ++sslCreated);
 			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
-			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, true);
+			bufferevent_setcb(bev, ServerRead, NULL, (bufferevent_event_cb)ServerEvent, (void*)true);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
 		}
@@ -667,7 +602,7 @@ void ServerBaseSSL()
 	if (GlobalIp4 != NULL) {
 		map.Data[2] = 0xFFFF0000;
 
-		levServerListSSL4 = LevConnListenerBindCustom(levServerBaseSSL, ServerAccept, SSL4, &map, SSLServerPort);
+		levServerListSSL4 = LevConnListenerBindCustom(levServerBaseSSL, ServerAccept, (void*)SSL4, &map, SSLServerPort);
 		if (!levServerListSSL4) {
 			Log(LOG_LEVEL_ERROR, "Failed to listen on %d (SSL4)\n", ServerPort);
 			exit(EXIT_FAILURE);
@@ -676,7 +611,7 @@ void ServerBaseSSL()
 	if (GlobalIp6 != NULL) {
 		memset(&map, 0, IPV6_SIZE);
 
-		levServerListSSL6 = LevConnListenerBindCustom(levServerBaseSSL, ServerAccept, SSL6, &map, SSLServerPort);
+		levServerListSSL6 = LevConnListenerBindCustom(levServerBaseSSL, ServerAccept, (void*)SSL6, &map, SSLServerPort);
 		if (!levServerListSSL6) {
 			Log(LOG_LEVEL_ERROR, "Failed to listen on %d (SSL6)\n", ServerPort);
 			exit(EXIT_FAILURE);
@@ -705,7 +640,7 @@ void ServerBase()
 	if (GlobalIp6 != NULL) {
 		memset(&map, 0, IPV6_SIZE);
 
-		levServerList6 = LevConnListenerBindCustom(levServerBase, ServerAccept, HTTP6, &map, ServerPort);
+		levServerList6 = LevConnListenerBindCustom(levServerBase, ServerAccept, (void*)HTTP6, &map, ServerPort);
 		if (!levServerList6) {
 			Log(LOG_LEVEL_ERROR, "Failed to listen on %d (HTTP6)\n", ServerPort);
 			exit(EXIT_FAILURE);
@@ -734,7 +669,7 @@ static void ServerUDP(int hSock)
 
 		UNCHECKED_PROXY *UProxy = NULL;
 
-		IPv6Map *ip = RawToIPv6Map(&remote); {
+		IPv6Map *ip = RawToIPv6Map((struct sockaddr*)(&remote)); {
 			pthread_mutex_lock(&LockUncheckedProxies); {
 				for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 					if (MemEqual(buff, UncheckedProxies[x]->hash, 512 / 8) && IPv6MapEqual(ip, UncheckedProxies[x]->ip)) {
@@ -789,7 +724,7 @@ static void ServerUDP(int hSock)
 
 void ServerUDP4()
 {
-	int hSock;
+	size_t hSock;
 	struct sockaddr_in local;
 
 	hSock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -803,17 +738,17 @@ void ServerUDP4()
 	bind(hSock, (struct sockaddr *)&local, sizeof(local));
 
 	pthread_t wServerUDP;
-	int status = pthread_create(&wServerUDP, NULL, (void*)ServerUDP, hSock);
-	if (status != 0) {
+	int status;
+	if ((status = pthread_create(&wServerUDP, NULL, (void*)ServerUDP, (void*)hSock)) != 0) {
 		Log(LOG_LEVEL_ERROR, "WServerUDP thread creation error, return code: %d\n", status);
-		return status;
+		return;
 	}
 	pthread_detach(wServerUDP);
 }
 
 void ServerUDP6()
 {
-	int hSock;
+	size_t hSock;
 	struct sockaddr_in6 local;
 
 	hSock = socket(AF_INET6, SOCK_DGRAM, 0);
@@ -828,10 +763,10 @@ void ServerUDP6()
 	bind(hSock, (struct sockaddr *)&local, sizeof(local));
 
 	pthread_t wServerUDP;
-	int status = pthread_create(&wServerUDP, NULL, (void*)ServerUDP, hSock);
-	if (status != 0) {
+	int status;
+	if ((status = pthread_create(&wServerUDP, NULL, (void*)ServerUDP, (void*)hSock)) != 0) {
 		Log(LOG_LEVEL_ERROR, "WServerUDP thread creation error, return code: %d\n", status);
-		return status;
+		return;
 	}
 	pthread_detach(wServerUDP);
 }

@@ -52,6 +52,27 @@ typedef struct _PROXY {
 
 typedef void(*SingleCheckCallback)(void *UProxy);
 
+typedef enum _UPROXY_CUSTOM_PAGE_STAGE {
+	UPROXY_CUSTOM_PAGE_STAGE_INITIAL_PACKET = 0,
+	UPROXY_CUSTOM_PAGE_STAGE_DDL_PAGE = 1,
+	UPROXY_CUSTOM_PAGE_STAGE_END = 2
+} UPROXY_CUSTOM_PAGE_STAGE;
+
+typedef void(*SingleCheckCallbackCPage)(void *UProxy, UPROXY_CUSTOM_PAGE_STAGE Stage);
+
+typedef enum _UPROXY_STAGE {
+	UPROXY_STAGE_INITIAL_PACKET = 0,
+	UPROXY_STAGE_INITIAL_RESPONSE = 1,
+	UPROXY_STAGE_SOCKS5_MAIN_PACKET = 2,
+	UPROXY_STAGE_SOCKS5_DNS_RESOLVE = 2, // This is not a typo
+	UPROXY_STAGE_SOCKS5_RESPONSE = 3,
+	UPROXY_STAGE_UDP_PACKET = 4,
+	UPROXY_STAGE_SSL_HANDSHAKE = 5,
+	UPROXY_STAGE_HTTP_REQUEST = 6,
+	UPROXY_STAGE_HTTP_RESPONSE = 7,
+	UPROXY_STAGE_HTTP_DDL_PAGE = 8
+} UPROXY_STAGE;
+
 typedef struct _UNCHECKED_PROXY {
 	IPv6Map *ip;
 	uint16_t port;
@@ -67,52 +88,50 @@ typedef struct _UNCHECKED_PROXY {
 	struct bufferevent *assocBufferEvent;
 
 	/* PROXY_TYPE_HTTP
-	 *	7 - Send HTTP request
-	 *	8 - Download legit page
+	 *	6 - Send HTTP request
+	 *	7, 8 - Download legit page
 	 * PROXY_TYPE_HTTPS
 	 *	0 - Send CONNECT request
 	 *	1 - Receive CONNECT response
-	 *	6 - SSL hanshake
-	 *	7 - Send HTTP request
-	 *	8 - Download legit page
+	 *	5 - SSL hanshake
+	 *	6 - Send HTTP request
+	 *	7, 8 - Download legit page
 	 * PROXY_TYPE_SOCKS4/A
 	 *	0 - Send SOCKS4/A packet
 	 *	1 - Receive answer
-	 *	7 - Send HTTP request
-	 *	8 - Download legit page
+	 *	6 - Send HTTP request
+	 *	7, 8 - Download legit page
 	 * PROXY_TYPE_SOCKS5
 	 *	0 - Send SOCKS5 auth packet
 	 *	1 - Receive auth response
 	 *	2 - Send SOCKS5 main packet
 	 *	3 - Receive response
-	 *	7 - Send HTTP request
-	 *	8 - Download legit page
+	 *	6 - Send HTTP request
+	 *	7, 8 - Download legit page
 	 * PROXY_TYPE_SOCKS4/A_TO_SSL
 	 *	0 - Send SOCKS4/A packet
 	 *	1 - Receive answer
-	 *	6 - SSL hanshake
-	 *	7 - Send HTTP request
-	 *	8 - Download legit page
+	 *	5 - SSL hanshake
+	 *	6 - Send HTTP request
+	 *	7, 8 - Download legit page
 	 * PROXY_TYPE_SOCKS5_TO_SSL
 	 *	0 - Send SOCKS5 auth packet
 	 *	1 - Receive auth response
 	 *	2 - Send SOCKS5 main packet
 	 *	3 - Receive response
-	 *	6 - SSL hanshake
-	 *	7 - Send HTTP request
-	 *	8 - Download legit page
+	 *	5 - SSL hanshake
+	 *	6 - Send HTTP request
+	 *	7, 8 - Download legit page
 	 * PROXY_TYPE_SOCKS5_WITH_UDP
 	 *	0 - Send SOCKS5 auth packet
 	 *	1 - Receive auth response
 	 *	2 - Send SOCKS5 main packet
 	 *	3 - Receive response
 	 *	4 - Send UDP packet
-	 *	8 - Receive UDP packet
+	 *	7, 8 - Receive UDP packet
 	 */
-	/*
-	 * Universal stages - 6, 7, 8
-	 */
-	uint8_t stage;
+	// Universal stages - 5, 6, 7, 8
+	UPROXY_STAGE stage;
 
 	// This one blocks EVWrite called timeout event in case WServer is processing UProxy while EVWrite timeout event tries to free it
 	pthread_mutex_t processing;

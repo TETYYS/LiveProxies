@@ -78,9 +78,8 @@ static void RequestFree(evutil_socket_t fd, short what, UNCHECKED_PROXY *UProxy)
 
 			if (UProxy->singleCheckCallback != NULL)
 				UProxy->singleCheckCallback(UProxy);
-		} else {
-			UProxy->singleCheckCallback(UProxy);
-		}
+		} else
+			((SingleCheckCallbackCPage)(UProxy->singleCheckCallback))(UProxy, UPROXY_CUSTOM_PAGE_STAGE_END);
 
 		UProxyRemove(UProxy);
 	}
@@ -97,7 +96,7 @@ static bool SOCKS4(SOCKS_TYPE Type, UNCHECKED_PROXY *UProxy)
 	if (Type == SOCKS_TYPE_UDP_ASSOCIATE)
 		return false;
 
-	if (UProxy->stage == 1) {
+	if (UProxy->stage == UPROXY_STAGE_INITIAL_PACKET) {
 		/*
 		field 1: SOCKS version number, 1 byte, must be 0x04 for this version
 		field 2: command code, 1 byte:
@@ -116,7 +115,7 @@ static bool SOCKS4(SOCKS_TYPE Type, UNCHECKED_PROXY *UProxy)
 
 		bufferevent_write(UProxy->assocBufferEvent, buff, 9);
 		bufferevent_setwatermark(UProxy->assocBufferEvent, EV_READ, 8, 0);
-	} else if (UProxy->stage == 2) {
+	} else if (UProxy->stage == UPROXY_STAGE_INITIAL_RESPONSE) {
 		size_t len = evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent));
 		uint8_t data[2];
 		if (len != 8)
@@ -162,7 +161,7 @@ static bool SOCKS5(SOCKS_TYPE Type, uint16_t *Port, UNCHECKED_PROXY *UProxy)
 	*/
 
 	switch (UProxy->stage) {
-		case 0:
+		case UPROXY_STAGE_INITIAL_PACKET:
 		{
 			uint8_t buff[3];
 			buff[0] = 0x05;
@@ -172,7 +171,7 @@ static bool SOCKS5(SOCKS_TYPE Type, uint16_t *Port, UNCHECKED_PROXY *UProxy)
 			bufferevent_setwatermark(UProxy->assocBufferEvent, EV_READ, 2, 0);
 			break;
 		}
-		case 1:
+		case UPROXY_STAGE_INITIAL_RESPONSE:
 		{
 			size_t len = evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent));
 			uint8_t data[2];
@@ -185,7 +184,7 @@ static bool SOCKS5(SOCKS_TYPE Type, uint16_t *Port, UNCHECKED_PROXY *UProxy)
 			return data[1] == 0x00;
 			break;
 		}
-		case 2:
+		case UPROXY_STAGE_SOCKS5_MAIN_PACKET:
 		{
 			IP_TYPE ipType = GetIPType(UProxy->ip); // Prefered
 
@@ -219,8 +218,9 @@ static bool SOCKS5(SOCKS_TYPE Type, uint16_t *Port, UNCHECKED_PROXY *UProxy)
 			bufferevent_setwatermark(UProxy->assocBufferEvent, EV_READ, 10, 0);
 			break;
 		}
-		case 3:
+		case UPROXY_STAGE_SOCKS5_RESPONSE:
 		{
+			bufferevent_setwatermark(UProxy->assocBufferEvent, EV_READ, 1, 0);
 			size_t len = evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent));
 			uint8_t data[10];
 			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 data len: %d", len);
@@ -254,20 +254,33 @@ void ProxyDNSResolved(int Err, struct evutil_addrinfo *Addr, UNCHECKED_PROXY *UP
 		for (ai = Addr; ai; ai = ai->ai_next) {
 			if (UProxy->targetIPv4 != NULL && UProxy->targetIPv6 != NULL)
 				break;
-			if (ai->ai_family == AF_INET && UProxy->targetIPv4 == NULL)
-				UProxy->targetIPv4 = RawToIPv6Map((struct sockaddr_in *)ai->ai_addr);
-			else if (ai->ai_family == AF_INET6 && UProxy->targetIPv6 == NULL)
-				UProxy->targetIPv6 = RawToIPv6Map((struct sockaddr_in6 *)ai->ai_addr);
+			if (ai->ai_family == AF_INET && UProxy->targetIPv4 == NULL) {
+				UProxy->targetIPv4 = RawToIPv6Map((struct sockaddr*)((struct sockaddr_in *)ai->ai_addr));
+#if DEBUG
+				char *ip = IPv6MapToString2(UProxy->targetIPv4); {
+					Log(LOG_LEVEL_DEBUG, "ProxyDNSResolved IPv4 %s", ip);
+				} free(ip);
+#endif
+			}
+			else if (ai->ai_family == AF_INET6 && UProxy->targetIPv6 == NULL) {
+				UProxy->targetIPv6 = RawToIPv6Map((struct sockaddr*)((struct sockaddr_in6 *)ai->ai_addr));
+#if DEBUG
+				char *ip = IPv6MapToString2(UProxy->targetIPv6); {
+					Log(LOG_LEVEL_DEBUG, "ProxyDNSResolved IPv6 %s", ip);
+				} free(ip);
+#endif
+			}
 		}
 		evutil_freeaddrinfo(Addr);
+		Log(LOG_LEVEL_DEBUG, "ProxyDNSResolved -> ProxyHandleData CONNECT");
 		ProxyHandleData(UProxy, EV_TYPE_CONNECT);
 	}
 }
 
-static bool ProxyDNSResolve(UNCHECKED_PROXY *UProxy, char *Domain)
+static void ProxyDNSResolve(UNCHECKED_PROXY *UProxy, char *Domain)
 {
 	if (UProxy->pageTarget == NULL)
-		return false;
+		return;
 	struct evutil_addrinfo hints;
 	struct evdns_getaddrinfo_request *req;
 	struct user_data *user_data;
@@ -277,36 +290,42 @@ static bool ProxyDNSResolve(UNCHECKED_PROXY *UProxy, char *Domain)
 	hints.ai_socktype = SOCK_STREAM;
 	hints.ai_protocol = IPPROTO_TCP;
 
-	if (evdns_getaddrinfo(levRequestDNSBase, Domain, NULL, &hints, ProxyDNSResolved, UProxy) == NULL)
-		return false;
+	evdns_getaddrinfo(levRequestDNSBase, Domain, NULL, &hints, (evdns_getaddrinfo_cb)ProxyDNSResolved, UProxy);
 }
 
 int sslCreated2 = 0;
 
 static MEM_OUT char *ProxyParseUrl(UNCHECKED_PROXY *UProxy, bool OnlyDomain, bool IncludePort, OUT char **Path)
 {
-	char *domain = strdup(UProxy->pageTarget);
+	char *domain;
 
-	if (strstr(domain, "https://") == NULL && strstr(domain, "http://") == NULL && strstr(domain, "udp://") == NULL) {
-		free(domain);
+	if (strstr(UProxy->pageTarget, "https://") == NULL && strstr(UProxy->pageTarget, "http://") == NULL && strstr(UProxy->pageTarget, "udp://") == NULL)
 		return NULL;
-	}
 
-	domain = domain + (8 * sizeof(char));
+	if (strncmp(UProxy->pageTarget, "https", 5) == 0) {
+		domain = strdup(UProxy->pageTarget + (8 * sizeof(char)));
+	} else if (strncmp(UProxy->pageTarget, "http", 4) == 0)
+		domain = strdup(UProxy->pageTarget + (7 * sizeof(char)));
+	else
+		domain = strdup(UProxy->pageTarget + (6 * sizeof(char)));
+
 	char *pathStart = strstr(domain, "/");
 	if (pathStart != NULL) {
-		*Path = strdup(pathStart);
+		if (Path != NULL)
+			*Path = strdup(pathStart);
 		*pathStart = 0x00;
-	} else
-		*Path = NULL;
+	} else {
+		if (Path != NULL)
+			*Path = NULL;
+	}
 
-	char *portStart = strchr(domain, ":");
+	char *portStart = strchr(domain, ':');
 	if (portStart == NULL) {
 		if (!OnlyDomain)
 			UProxy->targetPort = strstr(UProxy->pageTarget, "https://") != NULL ? HTTPS_DEFAULT_PORT : HTTP_DEFAULT_PORT;
 	} else {
 		*portStart = 0x00;
-		if (!OnlyDomain && IncludePort) {
+		if (IncludePort) {
 			UProxy->targetPort = atoi(portStart + sizeof(char));
 			if (UProxy->targetPort == 80 || UProxy->targetPort == 443)
 				*portStart = ':';
@@ -335,19 +354,27 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 
 	switch (UProxy->type) {
 		case PROXY_TYPE_HTTP: {
-			EVTYPE_CASE(EV_TYPE_CONNECT);
-			UProxy->stage = 7;
+			// Initial plain HTTP stage, go straight to sending HTTP request
+
+			if (UProxy->stage != UPROXY_STAGE_HTTP_RESPONSE && UProxy->stage != UPROXY_STAGE_HTTP_DDL_PAGE) {
+				EVTYPE_CASE(EV_TYPE_CONNECT);
+				UProxy->stage = UPROXY_STAGE_HTTP_REQUEST;
+			}
 			break;
 		}
 		case PROXY_TYPE_HTTPS: {
 			switch (UProxy->stage) {
-				case 0: {
+				case UPROXY_STAGE_INITIAL_PACKET: {
+					// Initial HTTPS stage, format CONNECT request and send it, proceed to stage 1
+
 					EVTYPE_CASE(EV_TYPE_CONNECT);
 
 					if (UProxy->pageTarget == NULL) {
+						Log(LOG_LEVEL_DEBUG, "Proxy type HTTPS target const");
 						char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
+						Log(LOG_LEVEL_DEBUG, "Proxy type HTTPS target const host %s", host);
 
-						reqString = StrReplaceToNew(RequestStringSSL, "{HOST}", host, NULL); {
+						reqString = StrReplaceToNew(RequestStringSSL, "{HOST}", host); {
 							if (strstr(reqString, "{KEY_VAL}") != NULL) {
 								char *key;
 								size_t key64Len = Base64Encode(UProxy->hash, 512 / 8, &key); {
@@ -355,12 +382,17 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 								} free(key);
 							}
 
+							Log(LOG_LEVEL_DEBUG, "HTTPS ReqString:");
+							Log(LOG_LEVEL_DEBUG, reqString);
+
 							bufferevent_write(UProxy->assocBufferEvent, (void*)reqString, strlen(reqString) * sizeof(char));
 						} free(reqString);
 					} else {
-						char *domain = ProxyParseUrl(UProxy, true, true); {
+						Log(LOG_LEVEL_DEBUG, "Proxy type HTTPS target page");
+						char *domain = ProxyParseUrl(UProxy, true, true, NULL); {
 							if (domain == NULL)
 								goto fail;
+
 							reqString = StrReplaceToNew(RequestStringSSL, "{HOST}", domain);
 							if (strstr(reqString, "{KEY_VAL}") != NULL) {
 								char *key;
@@ -368,16 +400,22 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 									StrReplaceOrig(&reqString, "{KEY_VAL}", key);
 								} free(key);
 							}
+							Log(LOG_LEVEL_DEBUG, "Proxy type HTTPS target page domain", domain);
 						} free(domain);
+
+						Log(LOG_LEVEL_DEBUG, "HTTPS ReqString:");
+						Log(LOG_LEVEL_DEBUG, reqString);
 
 						bufferevent_write(UProxy->assocBufferEvent, (void*)reqString, strlen(reqString) * sizeof(char));
 						free(reqString);
 					}
 
-					UProxy->stage = 1;
+					UProxy->stage = UPROXY_STAGE_INITIAL_RESPONSE;
 					break;
 				}
-				case 1: {
+				case UPROXY_STAGE_INITIAL_RESPONSE: {
+					// HTTPS stage 1, check if CONNECT request response is 200
+
 					EVTYPE_CASE(EV_TYPE_READ);
 					// HTTP/1.1 200
 
@@ -390,7 +428,9 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 					if (strncmp(data + 9, "200", 3) != 0)
 						goto fail;
 
-					UProxy->stage = 6;
+					Log(LOG_LEVEL_DEBUG, "Proxy type HTTPS CONNECT read OK");
+
+					UProxy->stage = UPROXY_STAGE_SSL_HANDSHAKE;
 					break;
 				}
 			}
@@ -404,35 +444,34 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 				goto fail;
 
 			switch (UProxy->stage) {
-				case 0: {
+				case UPROXY_STAGE_INITIAL_PACKET: {
 					EVTYPE_CASE(EV_TYPE_CONNECT);
 
 					if (UProxy->pageTarget == NULL) {
 						SOCKS4(SOCKS_TYPE_CONNECT, UProxy);
-						UProxy->stage = 1;
+						UProxy->stage = UPROXY_STAGE_INITIAL_RESPONSE;
 					} else {
 						char *domain = ProxyParseUrl(UProxy, false, false, NULL); {
 							if (domain == NULL)
 								goto fail;
 							if (UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL) {
-								if (!ProxyDNSResolve(UProxy, domain)) {
-									free(domain);
-									goto fail;
-								}
+								ProxyDNSResolve(UProxy, domain);
+								free(domain);
+								return;
 							} else {
 								SOCKS4(SOCKS_TYPE_CONNECT, UProxy);
-								UProxy->stage = 1;
+								UProxy->stage = UPROXY_STAGE_INITIAL_RESPONSE;
 							}
 						} free(domain);
 					}
 					break;
 				}
-				case 1: {
+				case UPROXY_STAGE_INITIAL_RESPONSE: {
 					EVTYPE_CASE(EV_TYPE_READ);
 
 					if (!SOCKS4(SOCKS_TYPE_CONNECT, UProxy))
 						goto fail;
-					UProxy->stage = ProxyIsSSL(UProxy->type) ? 6 : 7;
+					UProxy->stage = ProxyIsSSL(UProxy->type) ? UPROXY_STAGE_SSL_HANDSHAKE : UPROXY_STAGE_HTTP_REQUEST;
 				}
 			}
 			break;
@@ -440,51 +479,54 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 		case PROXY_TYPE_SOCKS5:
 		case PROXY_TYPE_SOCKS5_TO_SSL:
 		case PROXY_TYPE_SOCKS5_WITH_UDP: {
-			uint16_t port = UProxy->type == PROXY_TYPE_SOCKS5_WITH_UDP ? ServerPortUDP : (ProxyIsSSL(UProxy->type) ? SSLServerPort : ServerPort);
+			uint16_t port = UProxy->targetPort;
 			SOCKS_TYPE socksType = UProxy->type == PROXY_TYPE_SOCKS5_WITH_UDP ? SOCKS_TYPE_UDP_ASSOCIATE : SOCKS_TYPE_CONNECT;
 
 			Log(LOG_LEVEL_DEBUG, "SOCKS5 port %d", port);
 
 			switch (UProxy->stage) {
-				case 0: {
+				case UPROXY_STAGE_INITIAL_PACKET: {
 					EVTYPE_CASE(EV_TYPE_CONNECT);
 
 					SOCKS5(0, NULL, UProxy);
 					Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 1");
-					UProxy->stage = 1;
+					UProxy->stage = UPROXY_STAGE_INITIAL_RESPONSE;
 					break;
 				}
-				case 1: {
+				case UPROXY_STAGE_INITIAL_RESPONSE: {
 					EVTYPE_CASE(EV_TYPE_READ);
 
 					if (SOCKS5(0, NULL, UProxy)) {
 						Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 2");
-						UProxy->stage = 2;
+						UProxy->stage = UPROXY_STAGE_SOCKS5_MAIN_PACKET;
 						if (UProxy->pageTarget != NULL) {
 							char *domain = ProxyParseUrl(UProxy, false, false, NULL); {
-								if (domain == NULL)
+								if (domain == NULL) {
+									Log(LOG_LEVEL_DEBUG, "SOCKS5 stage 2 domain NULL");
 									goto fail;
-
-								if (UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL) {
-									UProxy->stage = 2;
-									if (!ProxyDNSResolve(UProxy, domain)) {
-										free(domain);
-										goto fail;
-									}
-									return;
 								}
+
+								assert(UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL);
+								UProxy->stage = UPROXY_STAGE_SOCKS5_DNS_RESOLVE;
+								ProxyDNSResolve(UProxy, domain);
+								Log(LOG_LEVEL_DEBUG, "SOCKS5 stage 2 pending resolve");
 							} free(domain);
+							return;
 						}
 						SOCKS5(socksType, &port, UProxy);
 						Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 3");
-						UProxy->stage = 3;
+						UProxy->stage = UPROXY_STAGE_SOCKS5_RESPONSE;
 
 						// This handles two stages because after first stage, there's no one to send packet after receiving response
 					} else
 						goto fail;
 					break;
 				}
-				case 2: {
+				case UPROXY_STAGE_SOCKS5_DNS_RESOLVE: {
+					EVTYPE_CASE(EV_TYPE_CONNECT);
+
+					Log(LOG_LEVEL_DEBUG, "SOCKS5 DNS stage");
+
 					if (UProxy->pageTarget == NULL)
 						goto fail;
 
@@ -493,16 +535,16 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 					// Execute stage 2 ending after DNS resolve
 					SOCKS5(socksType, &port, UProxy);
 					Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 3 (DNS)");
-					UProxy->stage = 3;
+					UProxy->stage = UPROXY_STAGE_SOCKS5_RESPONSE;
 					break;
 				}
-				case 3: {
+				case UPROXY_STAGE_SOCKS5_RESPONSE: {
 					EVTYPE_CASE(EV_TYPE_READ);
 
 					if (SOCKS5(socksType, &port, UProxy)) {
 						if (UProxy->type == PROXY_TYPE_SOCKS5_WITH_UDP) {
-							Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 4 (UDP)");
-							UProxy->stage = 8;
+							Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage UDP");
+							UProxy->stage = UPROXY_STAGE_HTTP_RESPONSE;
 
 							int hSock;
 
@@ -541,16 +583,15 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 
 								if (UProxy->pageTarget != NULL) {
 									Log(LOG_LEVEL_DEBUG, "Waiting for UDP response...");
-									UProxy->udpRead = event_new(levRequestBase, hSock, EV_READ | EV_PERSIST, EVRead, UProxy);
+									UProxy->udpRead = event_new(levRequestBase, hSock, EV_READ | EV_PERSIST, (event_callback_fn)EVRead, UProxy);
 									event_add(UProxy->udpRead, NULL);
-									UProxy->stage = 8;
-								} else {
+								} else
 									close(hSock);
-								}
 							}
 						} else {
-							Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage %d (%s)", ProxyIsSSL(UProxy->type) ? 6 : 7, ProxyIsSSL(UProxy->type) ? "SSL" : "HTTP");
-							UProxy->stage = ProxyIsSSL(UProxy->type) ? 6 : 7;
+							Log(LOG_LEVEL_DEBUG, "SOCKS5 stage 3");
+							UProxy->stage = ((UProxy->targetPort == HTTPS_DEFAULT_PORT && UProxy->pageTarget != NULL) || ProxyIsSSL(UProxy->type)) ? UPROXY_STAGE_SSL_HANDSHAKE : UPROXY_STAGE_HTTP_REQUEST;
+							Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage %d (%s)", UProxy->stage, UProxy->stage == UPROXY_STAGE_SSL_HANDSHAKE ? "SSL" : "HTTP");
 						}
 					} else
 						goto fail;
@@ -562,13 +603,14 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 	}
 
 	switch (UProxy->stage) {
-		case 6: {
+		case UPROXY_STAGE_SSL_HANDSHAKE: {
 			struct evbuffer *buff = bufferevent_get_input(UProxy->assocBufferEvent);
 			evbuffer_drain(buff, evbuffer_get_length(buff));
 			Log(LOG_LEVEL_DEBUG, "Establishing SSL connection...");
 			// Begin REAL SSL
-
+#if DEBUG
 			struct bufferevent *test = UProxy->assocBufferEvent;
+#endif
 
 			UProxy->assocBufferEvent = bufferevent_openssl_filter_new(levRequestBase,
 																	  UProxy->assocBufferEvent,
@@ -576,9 +618,10 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 																	  BUFFEREVENT_SSL_CONNECTING,
 																	  BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
 			Log(LOG_LEVEL_DEBUG, "SSL2 created %d", ++sslCreated2);
-			bufferevent_openssl_set_allow_dirty_shutdown(UProxy->assocBufferEvent, 1);
+			bufferevent_openssl_set_allow_dirty_shutdown(UProxy->assocBufferEvent, false);
 
 			if (UProxy->assocBufferEvent != NULL) {
+#if DEBUG
 				if (bufferevent_openssl_get_ssl(UProxy->assocBufferEvent) == NULL) {
 					Log(LOG_LEVEL_DEBUG, "SSL2 NULL!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
 				} else {
@@ -588,26 +631,28 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 					else
 						Log(LOG_LEVEL_DEBUG, "SSL2 UNDERLYING NEGATIVE, WHAT'S GOING ON???? (y) -> %p vs %p", bufferevent_get_underlying(UProxy->assocBufferEvent), test);
 				}
+#endif
 				bufferevent_setcb(UProxy->assocBufferEvent, (bufferevent_data_cb)EVRead, (bufferevent_data_cb)EVWrite, (bufferevent_event_cb)EVEvent, UProxy);
 				bufferevent_set_timeouts(UProxy->assocBufferEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
+				bufferevent_enable(UProxy->assocBufferEvent, EV_READ | EV_WRITE);
 			} else {
 				Log(LOG_LEVEL_DEBUG, "SSL BuffEvent fail");
 				goto fail;
 			}
 
-			UProxy->stage = 7;
+			UProxy->stage = UPROXY_STAGE_HTTP_REQUEST;
 			// SSL handshake brings up EVEvent connect so this falls to stage 7 later
 			break;
 		}
-		case 7: {
+		case UPROXY_STAGE_HTTP_REQUEST: {
 			EVTYPE_CASE_NOT(EV_TYPE_WRITE);
 
-			if (ProxyIsSSL(UProxy->type)) {
+			if ((UProxy->targetPort == HTTPS_DEFAULT_PORT && UProxy->pageTarget != NULL) || ProxyIsSSL(UProxy->type)) {
 				// SSL
 				SSL *ssl = bufferevent_openssl_get_ssl(UProxy->assocBufferEvent);
 				X509 *cert = SSL_get_peer_certificate(ssl); {
 					uint8_t hash[EVP_MAX_MD_SIZE];
-					size_t trash;
+					unsigned int trash;
 
 					X509_digest(cert, EVP_sha512(), hash, &trash);
 
@@ -629,7 +674,7 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 					char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
 
 					reqString = StrReplaceToNew(RequestString, "{HOST}", host);
-					StrReplaceOrig(reqString, "{PAGE_PATH}", "/prxchk");
+					StrReplaceOrig(&reqString, "{PAGE_PATH}", "/prxchk");
 				} else {
 					char *path;
 					char *domain = ProxyParseUrl(UProxy, true, true, &path); {
@@ -637,7 +682,7 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 							goto fail;
 
 						reqString = StrReplaceToNew(RequestString, "{HOST}", domain);
-						StrReplaceOrig(reqString, "{PAGE_PATH}", path == NULL ? "/" : path);
+						StrReplaceOrig(&reqString, "{PAGE_PATH}", path == NULL ? "/" : path);
 					} free(domain);
 					if (path != NULL)
 						free(path);
@@ -648,26 +693,50 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 					goto fail;
 			} free(key);
 
+			Log(LOG_LEVEL_DEBUG, "ReqString:");
+			Log(LOG_LEVEL_DEBUG, reqString);
+
 			bufferevent_write(UProxy->assocBufferEvent, (void*)reqString, strlen(reqString) * sizeof(char));
 			free(reqString);
-			UProxy->stage = 8;
+			UProxy->stage = UPROXY_STAGE_HTTP_RESPONSE;
 			Log(LOG_LEVEL_DEBUG, "Advance to stage 8 (final)");
 			break;
 		}
-		case 8:
+		case UPROXY_STAGE_HTTP_RESPONSE:
+		case UPROXY_STAGE_HTTP_DDL_PAGE:
 		{
-			// TODO: Handle chunked responses for HTTP?
+			EVTYPE_CASE(EV_TYPE_READ);
 
 			UProxy->checkSuccess = true;
-			pthread_mutex_lock(&(UProxy->processing));
 
-			if (UProxy->pageTarget != NULL)
-				UProxy->singleCheckCallback(UProxy);
+			Log(LOG_LEVEL_DEBUG, "Stage 7 / 8 len %d", evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)));
 
-			bufferevent_setcb(UProxy->assocBufferEvent, NULL, NULL, NULL, NULL);
-			break;
+			if (UProxy->pageTarget != NULL) {
+				if (evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)) == 0) {
+					Log(LOG_LEVEL_DEBUG, "ProxyHandleData stage 8 / 9 DROP");
+					return;
+				}
+				// ????
+
+#if DEBUG
+				char testBuff[evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent))];
+				evbuffer_copyout(bufferevent_get_input(UProxy->assocBufferEvent), &testBuff, evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)));
+				Log(LOG_LEVEL_DEBUG, "In buffer: %s (%d)", testBuff, evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)));
+#endif
+				pthread_mutex_lock(&(UProxy->processing));
+				((SingleCheckCallbackCPage)(UProxy->singleCheckCallback))(UProxy, UProxy->stage == UPROXY_STAGE_HTTP_RESPONSE ? UPROXY_CUSTOM_PAGE_STAGE_INITIAL_PACKET : UPROXY_CUSTOM_PAGE_STAGE_DDL_PAGE);
+				UProxy->stage = UPROXY_STAGE_HTTP_DDL_PAGE;
+				// EOF is called out as an error to RequestFree
+
+				/*if (UProxy->timeout != NULL)
+					event_active(UProxy->timeout, EV_TIMEOUT, 0);*/
+			}
 		}
+		break;
 	}
+
+#undef EVTYPE_CASE
+#undef EVTYPE_CASE_NOT
 
 	return;
 fail:
@@ -681,6 +750,9 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 {
 	Log(LOG_LEVEL_DEBUG, "EVEvent %02x", Event);
 
+	if (Event == BEV_EVENT_EOF)
+		__asm("nop");
+
 	if (Event == BEV_EVENT_CONNECTED) {
 		char *ip = IPv6MapToString(UProxy->ip); {
 			Log(LOG_LEVEL_DEBUG, "EVEvent: event connected %s (size %d)", ip, SizeUncheckedProxies);
@@ -688,8 +760,8 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 
 		ProxyHandleData(UProxy, EV_TYPE_CONNECT);
 	} else {
-		if (ProxyIsSSL(UProxy->type))
-			Log(LOG_LEVEL_DEBUG, "SSL stage %d error %02x", UProxy->stage, Event);
+		if ((UProxy->targetPort == HTTPS_DEFAULT_PORT && UProxy->pageTarget != NULL) || ProxyIsSSL(UProxy->type))
+			Log(LOG_LEVEL_DEBUG, "SSL stage %d error %02x -> %d", UProxy->stage, Event, bufferevent_get_openssl_error(BuffEvent));
 
 #if DEBUG
 		char *ip = IPv6MapToString(UProxy->ip); {

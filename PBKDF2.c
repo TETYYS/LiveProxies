@@ -2,6 +2,7 @@
 #include "Base64.h"
 #include "Global.h"
 #include <stdint.h>
+#include <math.h>
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <openssl/crypto.h>

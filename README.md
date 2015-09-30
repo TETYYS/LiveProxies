@@ -1,5 +1,5 @@
 # LiveProxies
-Latest Version: **0.8.1** (beta)
+Latest Version: **0.9.0** (beta)
 
 LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 
@@ -68,7 +68,8 @@ See [Auth](docs/auth.md) for preparing users for interface. **Access to interfac
 Push requests welcome. See TODO list.
 
 ## TODO
- - Implement legit page checking
+ - Switch GeoIP module
+ - Custom page request automation and interface
  - Windows support
  - Daemon mode
  - Change asynchronous DNS mode from thread to signal

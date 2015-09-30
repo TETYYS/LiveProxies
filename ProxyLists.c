@@ -14,6 +14,7 @@
 #include <assert.h>
 #include "Base64.h"
 #include "Websocket.h"
+#include "Config.h"
 
 static bool MultiFlag(uint64_t Flag)
 {
@@ -372,9 +373,9 @@ void UProxyFree(UNCHECKED_PROXY *In)
 	pthread_mutex_destroy(&(In->processing));
 	if (In->pageTarget != NULL)
 		free(In->pageTarget);
-	if (In->targetIPv4 != NULL)
+	if (In->targetIPv4 != NULL && In->targetIPv4 != GlobalIp4)
 		free(In->targetIPv4);
-	if (In->targetIPv6 != NULL)
+	if (In->targetIPv6 != NULL && In->targetIPv6 != GlobalIp6)
 		free(In->targetIPv6);
 	free(In->ip);
 	free(In);

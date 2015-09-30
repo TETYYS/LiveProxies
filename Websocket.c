@@ -556,13 +556,13 @@ void WebsocketSwitch(struct bufferevent *BuffEvent, char *Buff)
 {
 	Log(LOG_LEVEL_DEBUG, "Websocket SWITCH");
 	char *key;
-	if (!ServerFindHeader("Sec-WebSocket-Key: ", Buff, &key, NULL, NULL)) {
+	if (!HTTPFindHeader("Sec-WebSocket-Key: ", Buff, &key, NULL, NULL)) {
 		Log(LOG_LEVEL_DEBUG, "Websocket no sec key");
 		bufferevent_write(BuffEvent, "HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nBad Request", 59 * sizeof(char));
 		return;
 	}
 
-	char *concated[((strlen(key) + strlen(WEB_SOCKET_MAGIC)) * sizeof(char)) + 1];
+	char concated[((strlen(key) + strlen(WEB_SOCKET_MAGIC)) * sizeof(char)) + 1];
 	strcpy(concated, key);
 	strcat(concated, WEB_SOCKET_MAGIC);
 	concated[((strlen(key) + strlen(WEB_SOCKET_MAGIC)) * sizeof(char))] = 0x00;
