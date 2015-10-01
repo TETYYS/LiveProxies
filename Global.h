@@ -5,7 +5,7 @@
 #include <math.h>
 #include <sys/time.h>
 
-#define VERSION "0.9.0"
+#define VERSION "0.9.1"
 #define CALLBACK
 #define OUT
 #define MEM_OUT

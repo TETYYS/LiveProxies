@@ -5,7 +5,7 @@
 #include "IPv6Map.h"
 #include "ProxyLists.h"
 #include "Global.h"
-#include "GeoIP.h"
+#include <maxminddb.h>
 #include "ProxyRequest.h"
 #include "ProxyRemove.h"
 #include "Interface.h"
@@ -32,17 +32,45 @@
 
 static const char *GetCountryByIPv6Map(IPv6Map *In)
 {
-	if (GetIPType(In) == IPV4) {
-		if (GeoIPDB == NULL)
-			GeoIPDB = GeoIP_open("/usr/local/share/GeoIP/GeoIP.dat", GEOIP_MEMORY_CACHE);
-		assert(GeoIPDB != NULL);
-	} else {
-		if (GeoIPDB6 == NULL)
-			GeoIPDB6 = GeoIP_open("/usr/local/share/GeoIP/GeoIPv6.dat", GEOIP_MEMORY_CACHE);
-		assert(GeoIPDB6 != NULL);
+	int status;
+	MMDB_lookup_result_s data;
+	struct sockaddr* sa = IPv6MapToRaw(In, 0); {
+		data = MMDB_lookup_sockaddr(&GeoIPDB, sa, &status);
+	} free(sa);
+
+	if (status != MMDB_SUCCESS) {
+		char *ip = IPv6MapToString2(In); {
+			Log(LOG_LEVEL_WARNING, "(1) Failed to lookup country for %s (%s)", ip, MMDB_strerror(status));
+		} free(ip);
+		return "--";
 	}
 
-	const char *ret;
+	if (data.found_entry) {
+		MMDB_entry_data_s entry;
+
+		int status = MMDB_get_value(&data.entry, &entry, "country", "iso_code", NULL);
+		if (status != MMDB_SUCCESS) {
+			char *ip = IPv6MapToString2(In); {
+				Log(LOG_LEVEL_WARNING, "(3) Failed to lookup country for %s (%s)", ip, MMDB_strerror(status));
+			} free(ip);
+			return "--";
+		}
+		if (entry.has_data)
+			return entry.utf8_string;
+		else {
+			char *ip = IPv6MapToString2(In); {
+				Log(LOG_LEVEL_DEBUG, "(4) Failed to lookup country for %s (%s)", ip, MMDB_strerror(status));
+			} free(ip);
+			return "--";
+		}
+	} else {
+		char *ip = IPv6MapToString2(In); {
+			Log(LOG_LEVEL_WARNING, "(2) Failed to lookup country for %s (%s)", ip, MMDB_strerror(status));
+		} free(ip);
+		return "--";
+	}
+
+	/*const char *ret;
 	if (GetIPType(In) == IPV4) {
 		ret = GeoIP_country_code_by_ipnum(GeoIPDB, In->Data[3]);
 	} else {
@@ -51,7 +79,7 @@ static const char *GetCountryByIPv6Map(IPv6Map *In)
 		ret = GeoIP_country_code_by_ipnum_v6(GeoIPDB6, ip);
 	}
 
-	return ret == NULL ? "--" : ret;
+	return ret == NULL ? "--" : ret;*/
 }
 
 void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...)

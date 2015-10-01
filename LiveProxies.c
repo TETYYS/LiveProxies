@@ -33,6 +33,7 @@
 #include <math.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <assert.h>
 
 #include <curl/curl.h>
 
@@ -136,6 +137,7 @@ int main(int argc, char** argv)
 	}
 	printf("LiveProxes "VERSION" started\n");
 #if DEBUG
+	#define MMDB_DEBUG 1
 	printf("========================DEBUG========================\n");
 	//evthread_enable_lock_debugging();
 	//event_enable_debug_mode();
@@ -165,6 +167,13 @@ int main(int argc, char** argv)
 	InterfaceInit();
 	HtmlTemplateLoadAll(); // These two must be called in this order
 	HtmlTemplateMimeTypesInit(); // These two must be called in this order
+
+	int status = MMDB_open("/usr/local/share/GeoIP/GeoLite2-Country.mmdb", MMDB_MODE_MMAP, &GeoIPDB);
+
+	if (status != MMDB_SUCCESS) {
+		Log(LOG_LEVEL_ERROR, "Can't open GeoLite2 database /usr/local/share/GeoIP/GeoLite2-Country.mmdb - %s", MMDB_strerror(status));
+		exit(1);
+	}
 
 	config_t cfg;
 	config_init(&cfg);
@@ -429,7 +438,6 @@ int main(int argc, char** argv)
 	pthread_mutex_init(&LockStatsHarvesterPrxsrc, NULL);
 	pthread_mutex_init(&LockStatsProxyCount, NULL);
 
-	int status;
 #define THREAD_START(var, fx, name) pthread_t var; status = pthread_create(&var, NULL, (void*)fx, NULL); if (status != 0) { Log(LOG_LEVEL_ERROR, name" creation error, code %d", status); return status; } pthread_setname_np(var, name); pthread_detach(var);
 
 	THREAD_START(serverBase, ServerBase, "Server base")

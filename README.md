@@ -1,5 +1,5 @@
 # LiveProxies
-Latest Version: **0.9.0** (beta)
+Latest Version: **0.9.1** (beta)
 
 LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 
@@ -25,7 +25,7 @@ LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 ## Get it running
 If you still haven't installed [depencencies](#dependencies):
 ```
-apt-get install libevent-dev python2.7-dev libssl-dev libgeoip-dev libpcre3-dev libconfig-dev
+apt-get install libevent-dev python2.7-dev libssl-dev libgeoip-dev libpcre3-dev libconfig-dev libmaxminddb0 libmaxminddb-dev mmdb-bin
 ```
 ### Compilation: 
 ```
@@ -40,12 +40,9 @@ cp -R config/* /etc/liveproxies
 nano /etc/liveproxies.conf # Modify configuration here, see docs/liveproxies.conf for commented file
 
 mkdir /usr/local/share/GeoIP
-wget http://geolite.maxmind.com/download/geoip/database/GeoLiteCountry/GeoIP.dat.gz
+wget http://geolite.maxmind.com/download/geoip/database/GeoLite2-Country.mmdb.gz
 gunzip GeoIP.dat.gz
-mv GeoIP.dat /usr/local/share/GeoIP/
-wget http://geolite.maxmind.com/download/geoip/database/GeoIPv6.dat.gz
-gunzip GeoIPv6.dat.gz
-mv GeoIPv6.dat /usr/local/share/GeoIP/
+mv GeoLite2-Country.mmdb /usr/local/share/GeoIP/
 ```
 ### Usage:
 
@@ -58,7 +55,7 @@ See [Auth](docs/auth.md) for preparing users for interface. **Access to interfac
 ## Dependencies <a name="dependencies"></a>
  - libevent >= 2.1.5-beta
  - python >= 2.7
- - [Maxmind's GeoIP]
+ - [libmaxminddb] (PPA ppa:maxmind/ppa)
  - libconfig
  - pcre
  - openssl
@@ -68,11 +65,12 @@ See [Auth](docs/auth.md) for preparing users for interface. **Access to interfac
 Push requests welcome. See TODO list.
 
 ## TODO
- - Switch GeoIP module
- - Custom page request automation and interface
+ - Custom page request automatization and interface
  - Windows support
+ - Custom SOCKS5 UDP requests
  - Daemon mode
  - Change asynchronous DNS mode from thread to signal
+ - Check and fix unicode
  - Suggesstions?
 
-[Maxmind's GeoIP]:https://github.com/maxmind/geoip-api-c/
+[libmaxminddb]:https://github.com/maxmind/libmaxminddb

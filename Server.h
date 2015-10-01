@@ -2,10 +2,9 @@
 
 #include <pcre.h>
 #include <openssl/ssl.h>
-#include "GeoIP.h"
+#include <maxminddb.h>
 
-GeoIP *GeoIPDB;
-GeoIP *GeoIPDB6;
+MMDB_s GeoIPDB;
 pcre *ipv6Regex;
 pcre_extra *ipv6RegexEx;
 pcre *ipv4Regex;

@@ -15,12 +15,13 @@
 #include <event2/buffer.h>
 #include <assert.h>
 #include "Harvester.h"
-#include "GeoIP.h"
+#include <maxminddb.h>
 #include "Websocket.h"
 #include "Config.h"
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include "Stats.h"
+#include "Server.h"
 
 char *HtmlTemplateTags[] = { "{T_VERSION}",						"{T_CURRENT_PAGE}",					"{T_CFG_HOME_ACTIVE}",				"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",		"{T_CFG_SOURCES_ACTIVE}",
 								"{T_CFG_STATS_ACTIVE}",				"{T_USER}",							"{T_COUNT_UPROXIES}",				"{T_COUNT_PROXIES}",			"{T_UPROXIES_HEAD}",			"{T_UPROXIES_TABLE_ITEMS_START}",
@@ -912,7 +913,43 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_COUNTRY_FULL: {
-				evbuffer_add_printf(Buffer, "%s", GeoIP_name_by_id(GeoIP_id_by_code(((PROXY*)(TableInfo.tableObject))->country)));
+
+				char *country;
+				size_t len;
+				int status;
+				MMDB_lookup_result_s data;
+				struct sockaddr* sa = IPv6MapToRaw(((PROXY*)(TableInfo.tableObject))->ip, 0); {
+					data = MMDB_lookup_sockaddr(&GeoIPDB, sa, &status);
+				} free(sa);
+
+				if (status != MMDB_SUCCESS) {
+					country = "Unknown";
+					len = 7;
+					goto countryEnd;
+				}
+
+				if (data.found_entry) {
+					MMDB_entry_data_s entry;
+
+					int status = MMDB_get_value(&data.entry, &entry, "country", "names", "en", NULL);
+					if (status != MMDB_SUCCESS) {
+						country = "Unknown";
+						len = 7;
+					} else if (entry.has_data) {
+						country = entry.utf8_string;
+						len = entry.data_size;
+					} else {
+						country = "Unknown";
+						len = 7;
+						goto countryEnd;
+					}
+				} else {
+					country = "Unknown";
+					len = 7;
+				}
+countryEnd:
+
+				evbuffer_add_printf(Buffer, "%.*s", len, country);
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_UPROXIES_TABLE_ITEMS_END:
