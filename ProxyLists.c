@@ -15,6 +15,7 @@
 #include "Base64.h"
 #include "Websocket.h"
 #include "Config.h"
+#include <openssl/rand.h>
 
 static bool MultiFlag(uint64_t Flag)
 {
@@ -72,7 +73,8 @@ bool ProxyAdd(PROXY *Proxy)
 	WebsocketClientsNotify(&network, sizeof(network), WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES);
 
 	uint8_t ipType = GetIPType(Proxy->ip) == IPV4 ? 0x04 : 0x06;
-	char *uid = GenerateUidForProxy(Proxy); {
+	char *identifierb64;
+	Base64Encode(Proxy->identifier, PROXY_IDENTIFIER_LEN, &identifierb64); {
 		size_t offset = 0;
 		uint8_t buffer[sizeof(uint8_t) /* ipType */ +
 			(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
@@ -83,7 +85,7 @@ bool ProxyAdd(PROXY *Proxy)
 			(sizeof(uint64_t) * 4) + /* Connection, HTTP/S timeouts, live since and last checked */
 			sizeof(uint8_t) + /* retries */
 			(sizeof(uint32_t) * 2) + /* successful and failed checks */
-			strlen(uid) /* uid */];
+			strlen(identifierb64) /* uid */];
 
 #define MAP_TYPE(x, type) *((type*)(&(x)))
 
@@ -100,10 +102,10 @@ bool ProxyAdd(PROXY *Proxy)
 		buffer[offset] = Proxy->retries; offset += sizeof(uint8_t);
 		MAP_TYPE(buffer[offset], uint32_t) = htonl(Proxy->successfulChecks); offset += sizeof(uint32_t);
 		MAP_TYPE(buffer[offset], uint32_t) = htonl(Proxy->failedChecks); offset += sizeof(uint32_t);
-		memcpy(buffer + offset, uid, strlen(uid));
+		memcpy(buffer + offset, identifierb64, strlen(identifierb64));
 
 		WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_PROXY_ADD);
-	} free(uid);
+	} free(identifierb64);
 
 	return true;
 }
@@ -113,7 +115,7 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 	uint8_t ret = 0;
 	pthread_mutex_lock(&LockUncheckedProxies); {
 		for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
-			if (MemEqual(UProxy->hash, UncheckedProxies[x]->hash, 512 / 8)) {
+			if (MemEqual(UProxy->identifier, UncheckedProxies[x]->identifier, PROXY_IDENTIFIER_LEN)) {
 				char *ip = IPv6MapToString2(UProxy->ip); {
 					Log(LOG_LEVEL_WARNING, "Warning: tried to add already added unchecked proxy (%s:%d) (type %d)", ip, UProxy->port, UProxy->type);
 				} free(ip);
@@ -286,7 +288,7 @@ UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct
 	UProxy->checkSuccess = false;
 	pthread_mutex_init(&(UProxy->processing), NULL);
 	UProxy->timeout = Timeout;
-	GenerateHashForUProxy(UProxy);
+	RAND_pseudo_bytes((unsigned char*)(&UProxy->identifier), PROXY_IDENTIFIER_LEN);
 	UProxy->associatedProxy = AssociatedProxy;
 	UProxy->singleCheckCallback = NULL;
 	UProxy->invalidCert = NULL;
@@ -307,59 +309,17 @@ UNCHECKED_PROXY *UProxyFromProxy(PROXY *In)
 	return AllocUProxy(ip, In->port, In->type, NULL, In);
 }
 
-void GenerateHashForUProxy(UNCHECKED_PROXY *In)
+PROXY *GetProxyByIdentifier(uint8_t *In)
 {
-	size_t dataSize = IPV6_SIZE + sizeof(uint16_t) + sizeof(In->type) + sizeof(hashSalt);
-
-	char *data = malloc(dataSize); {
-		memcpy(data, In->ip->Data, IPV6_SIZE);
-		memcpy(data + IPV6_SIZE, &(In->port), sizeof(uint16_t));
-		memcpy(data + IPV6_SIZE + sizeof(uint16_t), &(In->type), sizeof(In->type));
-		memcpy(data + IPV6_SIZE + sizeof(uint16_t) + sizeof(In->type), hashSalt, sizeof(hashSalt));
-
-		SHA512(data, dataSize, In->hash);
-	} free(data);
-
-	// 👌
-}
-
-char *GenerateUidForProxy(PROXY *In)
-{
-	uint8_t uid[IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE)];
-	memcpy(uid, In->ip->Data, IPV6_SIZE);
-	*((uint16_t*)(uid + IPV6_SIZE)) = In->port;
-	*((PROXY_TYPE*)(uid + IPV6_SIZE + sizeof(uint16_t))) = In->type;
-
-	char *uidb64;
-	Base64Encode(uid, IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE), &uidb64);
-	return uidb64;
-}
-
-PROXY *GetProxyFromUid(char *Uid)
-{
-	PROXY *proxy = NULL;
-
-	uint8_t *uid;
-	size_t len;
-	if (!Base64Decode(Uid, &uid, &len))
-		return NULL;
-	{
-		if (len != IPV6_SIZE + sizeof(uint16_t) + sizeof(PROXY_TYPE)) {
-			free(uid);
-			return NULL;
-		}
-
-		pthread_mutex_lock(&LockCheckedProxies); {
-			for (uint64_t x = 0;x < SizeCheckedProxies;x++) {
-				if (MemEqual(uid, CheckedProxies[x]->ip->Data, IPV6_SIZE) && *((uint16_t*)(uid + IPV6_SIZE)) == CheckedProxies[x]->port && *((PROXY_TYPE*)(uid + IPV6_SIZE + sizeof(uint16_t))) == CheckedProxies[x]->type) {
-					proxy = CheckedProxies[x];
-					break;
-				}
+	pthread_mutex_lock(&LockCheckedProxies); {
+		for (uint64_t x = 0;x < SizeCheckedProxies;x++) {
+			if (MemEqual(In, CheckedProxies[x]->identifier, PROXY_IDENTIFIER_LEN)) {
+				pthread_mutex_unlock(&LockCheckedProxies);
+				return CheckedProxies[x];
 			}
-		} pthread_mutex_unlock(&LockCheckedProxies);
-	} free(uid);
-
-	return proxy;
+		}
+	} pthread_mutex_unlock(&LockCheckedProxies);
+	return NULL;
 }
 
 void UProxyFree(UNCHECKED_PROXY *In)

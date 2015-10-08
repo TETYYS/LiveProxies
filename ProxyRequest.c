@@ -294,6 +294,7 @@ static void ProxyDNSResolve(UNCHECKED_PROXY *UProxy, char *Domain)
 }
 
 int sslCreated2 = 0;
+size_t bts = 0;
 
 static MEM_OUT char *ProxyParseUrl(UNCHECKED_PROXY *UProxy, bool OnlyDomain, bool IncludePort, OUT char **Path)
 {
@@ -347,7 +348,7 @@ static MEM_OUT char *ProxyParseUrl(UNCHECKED_PROXY *UProxy, bool OnlyDomain, boo
 
 void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 {
-	Log(LOG_LEVEL_DEBUG, "ProxyHandleData: Proxy %s (%d), stage %d", ProxyGetTypeString(UProxy->type), UProxy->type, UProxy->stage);
+	//Log(LOG_LEVEL_DEBUG, "ProxyHandleData: Proxy %s (%d), stage %d", ProxyGetTypeString(UProxy->type), UProxy->type, UProxy->stage);
 	char *reqString;
 #define EVTYPE_CASE(x) if (EVType != x) return;
 #define EVTYPE_CASE_NOT(x) if (EVType == x) return;
@@ -377,7 +378,7 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 						reqString = StrReplaceToNew(RequestStringSSL, "{HOST}", host); {
 							if (strstr(reqString, "{KEY_VAL}") != NULL) {
 								char *key;
-								size_t key64Len = Base64Encode(UProxy->hash, 512 / 8, &key); {
+								size_t key64Len = Base64Encode(UProxy->identifier, PROXY_IDENTIFIER_LEN, &key); {
 									StrReplaceOrig(&reqString, "{KEY_VAL}", key);
 								} free(key);
 							}
@@ -396,7 +397,7 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 							reqString = StrReplaceToNew(RequestStringSSL, "{HOST}", domain);
 							if (strstr(reqString, "{KEY_VAL}") != NULL) {
 								char *key;
-								size_t key64Len = Base64Encode(UProxy->hash, 512 / 8, &key); {
+								size_t key64Len = Base64Encode(UProxy->identifier, PROXY_IDENTIFIER_LEN, &key); {
 									StrReplaceOrig(&reqString, "{KEY_VAL}", key);
 								} free(key);
 							}
@@ -561,18 +562,18 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 
 								Log(LOG_LEVEL_DEBUG, "UDP IP Type %d", ipType);
 
-								uint8_t buff[512 / 8 + 6 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)];
+								uint8_t buff[PROXY_IDENTIFIER_LEN + 6 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)];
 								buff[0] = 0x00;
 								buff[1] = 0x00;
 								buff[2] = 0x00;
 								buff[3] = ipType == IPV4 ? 0x01 : 0x04;
 								memcpy(&(buff[4]), ipType == IPV4 ? &(UProxy->targetIPv4->Data[3]) : UProxy->targetIPv6->Data, ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE);
 								*((uint16_t*)&(buff[4 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)])) = htons(ServerPortUDP);
-								memcpy(&(buff[6 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)]), UProxy->hash, 512 / 8);
+								memcpy(&(buff[6 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE)]), UProxy->identifier, PROXY_IDENTIFIER_LEN);
 
 								Log(LOG_LEVEL_DEBUG, "UDP buff construct");
 								struct sockaddr *sa = IPv6MapToRaw(UProxy->ip, port); {
-									if (sendto(hSock, buff, 512 / 8 + 6 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE), 0, sa, GetIPType(UProxy->ip) == IPV4 ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) == -1) {
+									if (sendto(hSock, buff, PROXY_IDENTIFIER_LEN + 6 + (ipType == IPV4 ? IPV4_SIZE : IPV6_SIZE), 0, sa, GetIPType(UProxy->ip) == IPV4 ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6)) == -1) {
 										Log(LOG_LEVEL_DEBUG, "UDP send fail");
 										free(sa);
 										close(hSock);
@@ -667,7 +668,7 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 			UProxy->requestTimeHttpMs = GetUnixTimestampMilliseconds();
 			Log(LOG_LEVEL_DEBUG, "Sending HTTP request");
 			char *key;
-			size_t key64Len = Base64Encode(UProxy->hash, 512 / 8, &key); {
+			size_t key64Len = Base64Encode(UProxy->identifier, PROXY_IDENTIFIER_LEN, &key); {
 				Log(LOG_LEVEL_DEBUG, "Page target: %s", UProxy->pageTarget);
 
 				if (UProxy->pageTarget == NULL) {
@@ -709,7 +710,7 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 
 			UProxy->checkSuccess = true;
 
-			Log(LOG_LEVEL_DEBUG, "Stage 7 / 8 len %d", evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)));
+			//Log(LOG_LEVEL_DEBUG, "Stage 7 / 8 len %d", evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)));
 
 			if (UProxy->pageTarget != NULL) {
 				if (evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)) == 0) {
@@ -721,7 +722,9 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 #if DEBUG
 				char testBuff[evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent))];
 				evbuffer_copyout(bufferevent_get_input(UProxy->assocBufferEvent), &testBuff, evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)));
-				Log(LOG_LEVEL_DEBUG, "In buffer: %s (%d)", testBuff, evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)));
+				bts += evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent));
+				Log(LOG_LEVEL_DEBUG, "BTS %d", bts);
+				//Log(LOG_LEVEL_DEBUG, "In buffer: %s (%d)", testBuff, evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)));
 #endif
 				pthread_mutex_lock(&(UProxy->processing));
 				((SingleCheckCallbackCPage)(UProxy->singleCheckCallback))(UProxy, UProxy->stage == UPROXY_STAGE_HTTP_RESPONSE ? UPROXY_CUSTOM_PAGE_STAGE_INITIAL_PACKET : UPROXY_CUSTOM_PAGE_STAGE_DDL_PAGE);
@@ -750,8 +753,8 @@ void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_P
 {
 	Log(LOG_LEVEL_DEBUG, "EVEvent %02x", Event);
 
-	if (Event == BEV_EVENT_EOF)
-		__asm("nop");
+	if (Event == BEV_EVENT_EOF && UProxy->stage == UPROXY_STAGE_HTTP_DDL_PAGE)
+		UProxy->checkSuccess = true;
 
 	if (Event == BEV_EVENT_CONNECTED) {
 		char *ip = IPv6MapToString(UProxy->ip); {

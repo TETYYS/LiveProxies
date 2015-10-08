@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <openssl/ossl_typ.h>
 
-uint8_t hashSalt[64];
+#define PROXY_IDENTIFIER_LEN 32
 
 typedef enum _PROXY_TYPE {
 	PROXY_TYPE_HTTP = 1,
@@ -48,6 +48,7 @@ typedef struct _PROXY {
 	uint32_t successfulChecks;
 	uint32_t failedChecks;
 	X509 *invalidCert;
+	uint8_t identifier[PROXY_IDENTIFIER_LEN];
 } PROXY;
 
 typedef void(*SingleCheckCallback)(void *UProxy);
@@ -139,7 +140,7 @@ typedef struct _UNCHECKED_PROXY {
 	struct event *timeout;
 	struct event *udpRead;
 
-	uint8_t hash[512 / 8]; // SHA-512
+	uint8_t identifier[PROXY_IDENTIFIER_LEN];
 	uint64_t requestTimeMs;
 	uint64_t requestTimeHttpMs;
 	PROXY *associatedProxy;
@@ -170,5 +171,4 @@ void UProxyFree(UNCHECKED_PROXY *In);
 void ProxyFree(PROXY *In);
 UNCHECKED_PROXY *UProxyFromProxy(PROXY *In);
 UNCHECKED_PROXY *AllocUProxy(IPv6Map *Ip, uint16_t Port, PROXY_TYPE Type, struct event *Timeout, PROXY *AssociatedProxy);
-char *GenerateUidForProxy(PROXY *In);
-PROXY *GetProxyFromUid(char *Uid);
+PROXY *GetProxyByIdentifier(uint8_t *In);

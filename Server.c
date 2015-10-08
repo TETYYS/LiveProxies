@@ -29,6 +29,7 @@
 #if DEBUG
 #include <valgrind/memcheck.h>
 #endif
+#include <openssl/rand.h>
 
 static const char *GetCountryByIPv6Map(IPv6Map *In)
 {
@@ -115,7 +116,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 	size_t buffLen = strlen(*Buff);
 
 	/* Get UProxy pointer */ {
-		if (!HTTPFindHeader("LPKey: ", *Buff, &keyRaw, &lpKeyStart, &lpKeyEnd) || strlen(keyRaw) < 512 / 8)
+		if (!HTTPFindHeader("LPKey: ", *Buff, &keyRaw, &lpKeyStart, &lpKeyEnd))
 			return;
 
 		char *key;
@@ -127,7 +128,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 
 		pthread_mutex_lock(&LockUncheckedProxies); {
 			for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
-				if (MemEqual(key, UncheckedProxies[x]->hash, 512 / 8)) {
+				if (MemEqual(key, UncheckedProxies[x]->identifier, PROXY_IDENTIFIER_LEN)) {
 					UProxy = UncheckedProxies[x];
 					pthread_mutex_lock(&(UProxy->processing));
 				}
@@ -154,6 +155,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 			proxy->failedChecks = 0;
 			proxy->httpTimeoutMs = GetUnixTimestampMilliseconds() - UProxy->requestTimeHttpMs;
 			proxy->timeoutMs = GetUnixTimestampMilliseconds() - UProxy->requestTimeMs;
+			RAND_pseudo_bytes((unsigned char*)(&proxy->identifier), PROXY_IDENTIFIER_LEN);
 			proxy->rechecking = false;
 			proxy->retries = 0;
 			proxy->successfulChecks = 1;
@@ -244,15 +246,10 @@ freeProxy:
 	}
 }
 
-int sslFree = 0;
-
 void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx)
 {
-	if (Event & BEV_EVENT_CONNECTED != BEV_EVENT_CONNECTED) {
-		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p event %x", BuffEvent, Event);
+	if ((Event & BEV_EVENT_CONNECTED) != BEV_EVENT_CONNECTED)
 		bufferevent_free(BuffEvent);
-		Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
-	}
 }
 
 static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL)
@@ -312,6 +309,12 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 			InterfaceRawGetCustomPage(BuffEvent, *Buff, false);
 		} else if (pathLen == 6 && strncmp(path, "/tools", 6) == 0)
 			InterfaceTools(BuffEvent, *Buff);
+		else if (pathLen >= 9 && strncmp(path, "/settings", 9) == 0)
+			InterfaceSettings(BuffEvent, *Buff);
+#if DEBUG
+		else if (pathLen == 24 && strncmp(path, "/tools?action=tmplreload", 24) == 0)
+			InterfaceHtmlTemplatesReload(BuffEvent, *Buff);
+#endif
 		else if (pathLen > 6 && strncmp(path, "/check", 6) == 0) {
 			Log(LOG_LEVEL_DEBUG, "/check on %p", BuffEvent);
 			freeBufferEvent = false; // Free'd in second stage of raw recheck
@@ -382,17 +385,6 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 
 free:
 	if (freeBufferEvent) {
-		Log(LOG_LEVEL_DEBUG, "BuffEvent free on write %p", BuffEvent);
-		if (IsSSL) { // ???
-			SSL *ssl = bufferevent_openssl_get_ssl(BuffEvent);
-			if (ssl != NULL) {
-				Log(LOG_LEVEL_DEBUG, "SSL NOT NULL2");
-				//SSL_free(ssl);
-			} else {
-				Log(LOG_LEVEL_DEBUG, "SSL NULL2");
-			}
-		}
-		Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
 		if (evbuffer_get_length(bufferevent_get_output(BuffEvent)))
 			bufferevent_setcb(BuffEvent, ServerRead, (bufferevent_data_cb)bufferevent_free, ServerEvent, NULL);
 		else
@@ -407,61 +399,12 @@ typedef enum _SERVER_TYPE {
 	SSL6
 } SERVER_TYPE;
 
-static void HexDump(char *desc, void *addr, int len)
-{
-	int i;
-	unsigned char buff[17];
-	unsigned char *pc = (unsigned char*)addr;
-
-	// Output description if given.
-	if (desc != NULL)
-		printf("%s:\n", desc);
-
-	// Process every byte in the data.
-	for (i = 0; i < len; i++) {
-		// Multiple of 16 means new line (with line offset).
-
-		if ((i % 16) == 0) {
-			// Just don't print ASCII for the zeroth line.
-			if (i != 0)
-				printf("  %s\n", buff);
-
-			// Output the offset.
-			printf("  %04x ", i);
-		}
-
-		// Now the hex code for the specific character.
-		printf(" %02x", pc[i]);
-
-		// And store a printable ASCII character for later.
-		if ((pc[i] < 0x20) || (pc[i] > 0x7e))
-			buff[i % 16] = '.';
-		else
-			buff[i % 16] = pc[i];
-		buff[(i % 16) + 1] = '\0';
-	}
-
-	// Pad out last line if not exactly 16 characters.
-	while ((i % 16) != 0) {
-		printf("   ");
-		i++;
-	}
-
-	// And print the final ASCII bit.
-	printf("  %s\n", buff);
-}
-
 void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 {
-	Log(LOG_LEVEL_DEBUG, "HTTPRead");
-
 	struct evbuffer *evBuff = bufferevent_get_input(BuffEvent);
 
 	size_t len = evbuffer_get_length(evBuff);
-	Log(LOG_LEVEL_DEBUG, "HTTPRead len %d", len);
 	if (len <= 3) {
-		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
-		Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
 		bufferevent_free(BuffEvent);
 		return;
 	}
@@ -473,22 +416,16 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 	VALGRIND_MAKE_MEM_DEFINED(buff, len + 1);
 #endif
 
-	HexDump("Server buffer", buff, len);
-
 	// Websockets
 	if (!HtmlTemplateUseStock) {
 		uint8_t opcode = (*buff & 0xF); // get rid of 4 bits on left
-		Log(LOG_LEVEL_DEBUG, "Server read websocket opcode %x", opcode);
 		if ((opcode == WEBSOCKET_OPCODE_CONTINUATION || opcode == WEBSOCKET_OPCODE_CLOSE || opcode == WEBSOCKET_OPCODE_PING || opcode == WEBSOCKET_OPCODE_PONG || opcode == WEBSOCKET_OPCODE_UNICODE) &&
 			!GET_BIT(*buff, 6) && !GET_BIT(*buff, 5) && !GET_BIT(*buff, 4)) {
 			// Websocket message (probably)
-			Log(LOG_LEVEL_DEBUG, "Server read detected websocket");
 			evbuffer_drain(evBuff, len); // No clear data function?
 			buff = realloc(buff, len);
-			Log(LOG_LEVEL_DEBUG, "Server read REALLOC");
 			WebsocketLanding(BuffEvent, buff, len);
 			free(buff);
-			Log(LOG_LEVEL_DEBUG, "Server read landing done");
 			return;
 		}
 	}
@@ -496,19 +433,15 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 	for (size_t x = 0;x < len;x++) {
 		// Stop the Ruse man
 		if (buff[x] == 0x00) {
-			Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
 			free(buff);
 			bufferevent_free(BuffEvent);
-			Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
 			return;
 		}
 	}
 
 	if (buff[0] != 'G' && buff[0] != 'P' && buff[1] != 'O') {
-		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", BuffEvent);
 		free(buff);
 		bufferevent_free(BuffEvent);
-		Log(LOG_LEVEL_DEBUG, "SSL FREE %d", ++sslFree);
 		return;
 	}
 
@@ -550,7 +483,6 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 		case HTTP4:
 		case HTTP6:
 		{
-			Log(LOG_LEVEL_DEBUG, "ServerAccept: HTTP");
 			struct bufferevent *bev = bufferevent_socket_new(base, Fd, BEV_OPT_CLOSE_ON_FREE);
 			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, false);
@@ -560,9 +492,7 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 		case SSL4:
 		case SSL6:
 		{
-			Log(LOG_LEVEL_DEBUG, "ServerAccept: SSL");
 			struct bufferevent *bev = bufferevent_openssl_socket_new(base, Fd, SSL_new(levServerSSL), BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
-			Log(LOG_LEVEL_DEBUG, "SSL created %d", ++sslCreated);
 			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			bufferevent_setcb(bev, ServerRead, NULL, (bufferevent_event_cb)ServerEvent, (void*)true);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
@@ -680,7 +610,7 @@ void ServerBase()
 
 static void ServerUDP(int hSock)
 {
-	char buff[512 / 8];
+	char buff[PROXY_IDENTIFIER_LEN];
 	struct sockaddr_in remote;
 	socklen_t len;
 	size_t size;
@@ -688,9 +618,9 @@ static void ServerUDP(int hSock)
 	for (;;) {
 		len = sizeof(remote);
 		Log(LOG_LEVEL_DEBUG, "WServerUDP: Waiting...");
-		size = recvfrom(hSock, buff, 512 / 8, 0, (struct sockaddr *)&remote, &len);
+		size = recvfrom(hSock, buff, PROXY_IDENTIFIER_LEN, 0, (struct sockaddr *)&remote, &len);
 		Log(LOG_LEVEL_DEBUG, "WServerUDP: Got data");
-		if (size != 512 / 8) {
+		if (size != PROXY_IDENTIFIER_LEN) {
 			Log(LOG_LEVEL_DEBUG, "WServerUDP: Drop on len");
 			continue;
 		}
@@ -700,7 +630,7 @@ static void ServerUDP(int hSock)
 		IPv6Map *ip = RawToIPv6Map((struct sockaddr*)(&remote)); {
 			pthread_mutex_lock(&LockUncheckedProxies); {
 				for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
-					if (MemEqual(buff, UncheckedProxies[x]->hash, 512 / 8) && IPv6MapEqual(ip, UncheckedProxies[x]->ip)) {
+					if (MemEqual(buff, UncheckedProxies[x]->identifier, PROXY_IDENTIFIER_LEN) && IPv6MapEqual(ip, UncheckedProxies[x]->ip)) {
 						UProxy = UncheckedProxies[x];
 						pthread_mutex_lock(&(UProxy->processing));
 					}

@@ -85,7 +85,9 @@ int main(int argc, char** argv)
 		char *pbkdf2;
 		char *passwd = StdinDynamic(); {
 			pbkdf2 = PBKDF2_HMAC_SHA_512(passwd, strlen(passwd));
+#pragma optimize("-no-dead-code-removal")
 			memset(passwd, 0, strlen(passwd)); // safety!
+#pragma optimize("-dead-code-removal")
 		} free(passwd);
 
 		char confirmation;
@@ -430,8 +432,6 @@ int main(int argc, char** argv)
 		Log(LOG_LEVEL_ERROR, "Couldn't study PCRE IPv4 regex");
 		return EXIT_FAILURE;
 	}
-
-	RAND_pseudo_bytes((unsigned char*)(&hashSalt), 64);
 
 	pthread_mutex_init(&LockUncheckedProxies, NULL);
 	pthread_mutex_init(&LockCheckedProxies, NULL);

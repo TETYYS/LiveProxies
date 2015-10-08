@@ -19,6 +19,46 @@ void PageRequest(PROXY *In, void CALLBACK *FinishedCallback, char *Page, void *E
 	UProxy->singleCheckCallback = FinishedCallback;
 	UProxy->singleCheckCallbackExtraData = Ex;
 	UProxy->pageTarget = strdup(Page);
+	if (strncmp(UProxy->pageTarget, "https://", 8) == NULL && !ProxyIsSSL(UProxy->type)) {
+		switch (UProxy->type) {
+			case PROXY_TYPE_HTTP: {
+				UProxy->type = PROXY_TYPE_HTTPS;
+				break;
+			}
+			case PROXY_TYPE_SOCKS4: {
+				UProxy->type = PROXY_TYPE_SOCKS4_TO_SSL;
+				break;
+			}
+			case PROXY_TYPE_SOCKS4A: {
+				UProxy->type = PROXY_TYPE_SOCKS4A_TO_SSL;
+				break;
+			}
+			case PROXY_TYPE_SOCKS5: {
+				UProxy->type = PROXY_TYPE_SOCKS5_TO_SSL;
+				break;
+			}
+		}
+	}
+	if (strncmp(UProxy->pageTarget, "http://", 7) == NULL && ProxyIsSSL(UProxy->type)) {
+		switch (UProxy->type) {
+			case PROXY_TYPE_HTTPS: {
+				UProxy->type = PROXY_TYPE_HTTP;
+				break;
+			}
+			case PROXY_TYPE_SOCKS4_TO_SSL: {
+				UProxy->type = PROXY_TYPE_SOCKS4;
+				break;
+			}
+			case PROXY_TYPE_SOCKS4A_TO_SSL: {
+				UProxy->type = PROXY_TYPE_SOCKS4A;
+				break;
+			}
+			case PROXY_TYPE_SOCKS5_TO_SSL: {
+				UProxy->type = PROXY_TYPE_SOCKS5;
+				break;
+			}
+		}
+	}
 
 	UProxyAdd(UProxy);
 	RequestAsync(UProxy);

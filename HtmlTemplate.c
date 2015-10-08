@@ -22,8 +22,9 @@
 #include <openssl/x509.h>
 #include "Stats.h"
 #include "Server.h"
+#include "Base64.h"
 
-char *HtmlTemplateTags[] = { "{T_VERSION}",						"{T_CURRENT_PAGE}",					"{T_CFG_HOME_ACTIVE}",				"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",		"{T_CFG_SOURCES_ACTIVE}",
+char *HtmlTemplateTags[] = {	"{T_VERSION}",						"{T_CURRENT_PAGE}",					"{T_CFG_HOME_ACTIVE}",				"{T_CFG_UPROXIES_ACTIVE}",		"{T_CFG_PROXIES_ACTIVE}",		"{T_CFG_SOURCES_ACTIVE}",
 								"{T_CFG_STATS_ACTIVE}",				"{T_USER}",							"{T_COUNT_UPROXIES}",				"{T_COUNT_PROXIES}",			"{T_UPROXIES_HEAD}",			"{T_UPROXIES_TABLE_ITEMS_START}",
 								"{T_UPROXIES_TABLE_ITEMS_END}",		"{T_CFG_TABLE_ODD}",				"{T_CFG_TABLE_EVEN}",				"{T_CFG_TABLE_OK}",				"{T_CFG_TABLE_WARN}",			"{T_CFG_TABLE_ERR}",
 								"{T_UPROXIES_ITEM}",				"{T_PROXIES_HEAD}",					"{T_PROXIES_TABLE_ITEMS_START}",	"{T_PROXIES_TABLE_ITEMS_END}",	"{T_PROXIES_ITEM}",				"{T_PRXSRC_HEAD}",
@@ -34,7 +35,7 @@ char *HtmlTemplateTags[] = { "{T_VERSION}",						"{T_CURRENT_PAGE}",					"{T_CFG
 								"{T_SUB_SIZE_PROXIES}",				"{T_SUB_AUTH_COOKIE}",				"{T_SUB_MSG_INTERVAL}",				"{T_SUB_PROXY_ADD}",			"{T_SUB_UPROXY_ADD}",			"{T_SUB_PROXY_REMOVE}",
 								"{T_SUB_UPROXY_REMOVE}",			"{T_CFG_ENABLED}",					"{T_CFG_DISABLED}",					"{T_CFG_TOOLS_ACTIVE}",			"{T_CHECK_COND_INVALID_CERT}",	"{T_CHECK_COND_INVALID_CERT_FINGERPRINT}",
 								"{T_CHECK_ELSE_COND_INVALID_CERT}",	"{T_CHECK_END_COND_INVALID_CERT}",	"{T_CHECK_COND_INVALID_CERT_INFO}",	"{T_STATS_PCOUNT_HEAD}",		"{T_STATS_PCOUNT_ITEMS_START}",	"{T_STATS_PCOUNT_ITEMS_END}",
-								"{T_STATS_PCOUNT_ITEM}",			"{T_CPAGE_RAW_HTTP}"
+								"{T_STATS_PCOUNT_ITEM}",			"{T_CPAGE_RAW_HTTP}",				"{T_CFG_SETTINGS_ACTIVE}"
 };
 
 void HtmlTemplateLoadAll()
@@ -54,7 +55,7 @@ void HtmlTemplateLoadAll()
 		fullPath = true;
 	}
 
-	char *files[] = { "head.tmpl", "foot.tmpl", "home.tmpl", "iface.tmpl", "ifaceu.tmpl", "prxsrc.tmpl", "stats.tmpl", "check.tmpl", "tools.tmpl", "cpageraw.tmpl" };
+	char *files[] = { "head.tmpl", "foot.tmpl", "home.tmpl", "iface.tmpl", "ifaceu.tmpl", "prxsrc.tmpl", "stats.tmpl", "check.tmpl", "tools.tmpl", "cpageraw.tmpl", "settings.tmpl" };
 
 	if (d) {
 		config_t cfg;
@@ -102,6 +103,8 @@ void HtmlTemplateLoadAll()
 							HtmlTemplateParse(hFile, &HtmlTemplateTools, &HtmlTemplateToolsSize, cfgRoot);
 						if (strcmp(dir->d_name, files[9]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateCPageRaw, &HtmlTemplateCPageRawSize, cfgRoot);
+						if (strcmp(dir->d_name, files[10]) == 0)
+							HtmlTemplateParse(hFile, &HtmlTemplateSettings, &HtmlTemplateSettingsSize, cfgRoot);
 
 						itemsFound++;
 					}
@@ -111,7 +114,7 @@ void HtmlTemplateLoadAll()
 
 		//config_destroy(&cfg); // TODO: fix segfault here
 
-		if (itemsFound != 10) {
+		if (itemsFound != 11) {
 			Log(LOG_LEVEL_ERROR, "Not all HTML templates found, using stock HTML...");
 			HtmlTemplateUseStock = true;
 		}
@@ -274,6 +277,10 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TOOLS_ACTIVE: {
 						CONFIG_STRING(CfgRoot, "ToolsActive", comp.content);
+						break;
+					}
+					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_SETTINGS_ACTIVE: {
+						CONFIG_STRING(CfgRoot, "SettingsActive", comp.content);
 						break;
 					}
 					case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CFG_TABLE_ODD: {
@@ -642,9 +649,10 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 					}
 					case 11: {
 						if (item) {
-							char *uid = GenerateUidForProxy(proxy); {
-								evbuffer_add_printf(Buffer, "<a href=\"/recheck?uid=%s\">Check</a>", uid);
-							} free(uid);
+							char *identifierb64;
+							Base64Encode(proxy->identifier, PROXY_IDENTIFIER_LEN, &identifierb64); {
+								evbuffer_add_printf(Buffer, "<a href=\"/recheck?uid=%s\">Check</a>", identifierb64);
+							} free(identifierb64);
 						} else
 							evbuffer_add(Buffer, "Full check", 10 * sizeof(char));
 						TableInfo.tableHeadOrItemIteration = -1; // line+4 sets it to 0
@@ -883,9 +891,10 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_UID: {
-				char *uid = GenerateUidForProxy((PROXY*)(TableInfo.tableObject)); {
-					evbuffer_add_printf(Buffer, "%s", uid);
-				} free(uid);
+				char *identifierb64;
+				Base64Encode(((PROXY*)(TableInfo.tableObject))->identifier, PROXY_IDENTIFIER_LEN, &identifierb64); {
+					evbuffer_add_printf(Buffer, "%s", identifierb64);
+				} free(identifierb64);
 				break;
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_PORT: {

@@ -17,7 +17,7 @@
 
 void InterfaceInit()
 {
-	InterfacePagesSize = 8;
+	InterfacePagesSize = 9;
 	InterfacePages = malloc(InterfacePagesSize * sizeof(INTERFACE_PAGE));
 	InterfacePages[0].name = "Home";
 	InterfacePages[0].page = INTERFACE_PAGE_HOME;
@@ -35,6 +35,8 @@ void InterfaceInit()
 	InterfacePages[6].page = INTERFACE_PAGE_TOOLS;
 	InterfacePages[7].name = "CPAGE_RAW";
 	InterfacePages[7].page = INTERFACE_PAGE_CPAGE_RAW;
+	InterfacePages[8].name = "Settings";
+	InterfacePages[8].page = INTERFACE_PAGE_SETTINGS;
 }
 
 // Please lock AuthWebLock
@@ -139,85 +141,86 @@ endCookie:
 				username = authStr;
 			}
 
-			pthread_mutex_lock(&AuthLocalLock);
-			for (size_t x = 0; x < AuthLocalCount; x++) {
-				if (strcmp(AuthLocalList[x]->username, username) != 0)
-					continue;
+			pthread_mutex_lock(&AuthLocalLock); {
+				for (size_t x = 0; x < AuthLocalCount; x++) {
+					if (strcmp(AuthLocalList[x]->username, username) != 0)
+						continue;
 
-				char *saltb64;
-				uint8_t *salt;
-				size_t saltLen;
-				char *firstDelimiter = strchr(AuthLocalList[x]->password, '$');
-				char *secondDelimiter = strchr(firstDelimiter + (1 * sizeof(char)), '$');
+					char *saltb64;
+					uint8_t *salt;
+					size_t saltLen;
+					char *firstDelimiter = strchr(AuthLocalList[x]->password, '$');
+					char *secondDelimiter = strchr(firstDelimiter + (1 * sizeof(char)), '$');
 
-				size_t iterations = atoll(AuthLocalList[x]->password);
-				size_t saltb64Len = (secondDelimiter - (firstDelimiter + 1)) * (sizeof(char));
+					size_t iterations = atoll(AuthLocalList[x]->password);
+					size_t saltb64Len = (secondDelimiter - (firstDelimiter + 1)) * (sizeof(char));
 
-				saltb64 = malloc(saltb64Len + 1 /* NUL */); {
-					memcpy(saltb64, firstDelimiter + (1 * sizeof(char)), saltb64Len);
-					saltb64[saltb64Len] = 0x00;
-					Base64Decode(saltb64, &salt, &saltLen);
-				} free(saltb64);
+					saltb64 = malloc(saltb64Len + 1 /* NUL */); {
+						memcpy(saltb64, firstDelimiter + (1 * sizeof(char)), saltb64Len);
+						saltb64[saltb64Len] = 0x00;
+						Base64Decode(saltb64, &salt, &saltLen);
+					} free(saltb64);
 
-				char *pbkdf2 = PBKDF2_HMAC_SHA_512Ex(password, strlen(password), salt, saltLen, iterations); // TODO: Possible DoS, needs login limit
-				free(salt);
+					char *pbkdf2 = PBKDF2_HMAC_SHA_512Ex(password, strlen(password), salt, saltLen, iterations); // TODO: Possible DoS, needs login limit
+					free(salt);
 
-				if (strcmp(AuthLocalList[x]->password, pbkdf2) == 0) {
-					pthread_mutex_unlock(&AuthLocalLock);
-					free(pbkdf2);
+					if (strcmp(AuthLocalList[x]->password, pbkdf2) == 0) {
+						pthread_mutex_unlock(&AuthLocalLock);
+						free(pbkdf2);
 
-					IPv6Map *ip = GetIPFromHSock(Fd);
+						IPv6Map *ip = GetIPFromHSock(Fd);
 
-					pthread_mutex_lock(&AuthWebLock); {
-						for (size_t x = 0; x < AuthWebCount; x++) {
-							if (IPv6MapEqual(ip, AuthWebList[x]->ip)) {
-								free(ip);
-								free(authStr);
+						pthread_mutex_lock(&AuthWebLock); {
+							for (size_t x = 0; x < AuthWebCount; x++) {
+								if (IPv6MapEqual(ip, AuthWebList[x]->ip)) {
+									free(ip);
+									free(authStr);
 
-								if (AuthWebList[x]->expiry >= (GetUnixTimestampMilliseconds() / 1000)) {
-									AuthWebList[x]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
-									InterfaceInfo->user = AuthWebList[x]->username;
-									pthread_mutex_unlock(&AuthWebLock);
-									evbuffer_add(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char));
-									return true;
+									if (AuthWebList[x]->expiry >= (GetUnixTimestampMilliseconds() / 1000)) {
+										AuthWebList[x]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
+										InterfaceInfo->user = AuthWebList[x]->username;
+										pthread_mutex_unlock(&AuthWebLock);
+										evbuffer_add(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char));
+										return true;
+									} else {
+										AuthWebRemove(x);
+
+										pthread_mutex_unlock(&AuthWebLock);
+										goto end; // Auth expired
+									}
 								} else {
-									AuthWebRemove(x);
-
-									pthread_mutex_unlock(&AuthWebLock);
-									goto end; // Auth expired
-								}
-							} else {
-								if (AuthWebList[x]->expiry < (GetUnixTimestampMilliseconds() / 1000)) {
-									AuthWebRemove(x);
+									if (AuthWebList[x]->expiry < (GetUnixTimestampMilliseconds() / 1000)) {
+										AuthWebRemove(x);
+									}
 								}
 							}
-						}
 
-						if (AuthWebList == NULL)
-							AuthWebList = malloc(++AuthWebCount * sizeof(*AuthWebList));
+							if (AuthWebList == NULL)
+								AuthWebList = malloc(++AuthWebCount * sizeof(*AuthWebList));
 
-						AuthWebList[AuthWebCount - 1] = malloc(sizeof(AUTH_WEB));
-						AuthWebList[AuthWebCount - 1]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
-						AuthWebList[AuthWebCount - 1]->username = malloc(strlen(username) + 1 /* NUL */);
-						AuthWebList[AuthWebCount - 1]->ip = ip;
-						strcpy(AuthWebList[AuthWebCount - 1]->username, username);
-						InterfaceInfo->user = AuthWebList[AuthWebCount - 1]->username;
+							AuthWebList[AuthWebCount - 1] = malloc(sizeof(AUTH_WEB));
+							AuthWebList[AuthWebCount - 1]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
+							AuthWebList[AuthWebCount - 1]->username = malloc(strlen(username) + 1 /* NUL */);
+							AuthWebList[AuthWebCount - 1]->ip = ip;
+							strcpy(AuthWebList[AuthWebCount - 1]->username, username);
+							InterfaceInfo->user = AuthWebList[AuthWebCount - 1]->username;
 
-						free(authStr); // invalidates username and password from headers
+							free(authStr); // invalidates username and password from headers
 
-						uint8_t randBytes[SIZE_RND_VERIFY];
-						RAND_pseudo_bytes(randBytes, SIZE_RND_VERIFY);
-						size_t b64VerifyLen = Base64Encode(randBytes, SIZE_RND_VERIFY, (char**)(&(AuthWebList[AuthWebCount - 1]->rndVerify)));
+							uint8_t randBytes[SIZE_RND_VERIFY];
+							RAND_pseudo_bytes(randBytes, SIZE_RND_VERIFY);
+							size_t b64VerifyLen = Base64Encode(randBytes, SIZE_RND_VERIFY, (char**)(&(AuthWebList[AuthWebCount - 1]->rndVerify)));
 
-						evbuffer_add_printf(OutBuff, "HTTP/1.1 200 OK\r\nSet-Cookie: "AUTH_COOKIE"=%s\r\nContent-Length: ", AuthWebList[AuthWebCount - 1]->rndVerify);
-					} pthread_mutex_unlock(&AuthWebLock);
-					return true;
-				} else {
-					pthread_mutex_unlock(&AuthLocalLock);
-					free(pbkdf2);
+							evbuffer_add_printf(OutBuff, "HTTP/1.1 200 OK\r\nSet-Cookie: "AUTH_COOKIE"=%s\r\nContent-Length: ", AuthWebList[AuthWebCount - 1]->rndVerify);
+						} pthread_mutex_unlock(&AuthWebLock);
+						return true;
+					} else {
+						pthread_mutex_unlock(&AuthLocalLock);
+						free(pbkdf2);
+					}
+					break;
 				}
-				break;
-			}
+			} pthread_mutex_unlock(&AuthLocalLock);
 
 			free(authStr);
 		}
@@ -339,9 +342,10 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 				evbuffer_add_printf(body, "<td>%d</td>", CheckedProxies[x]->successfulChecks);
 				evbuffer_add_printf(body, "<td>%d</td>", CheckedProxies[x]->failedChecks);
 
-				char *uid = GenerateUidForProxy(CheckedProxies[x]); {
-					evbuffer_add_printf(body, "<td><a href=\"/recheck?uid=%s\">Check</a></td>", uid);
-				} free(uid);
+				char *identifierb64;
+				Base64Encode(CheckedProxies[x]->identifier, PROXY_IDENTIFIER_LEN, &identifierb64); {
+					evbuffer_add_printf(body, "<td><a href=\"/recheck?uid=%s\">Check</a></td>", identifierb64);
+				} free(identifierb64);
 			}
 		} pthread_mutex_unlock(&LockCheckedProxies);
 
@@ -615,7 +619,12 @@ static PROXY *GetProxyFromUidBuff(char *Buff)
 
 	*uidEnd = 0x00;
 
-	return GetProxyFromUid(uidStart + (5 * sizeof(char)));
+	uint8_t *ident;
+	size_t len;
+	if (!Base64Decode(uidStart + (5 * sizeof(char)), &ident, &len) || len != PROXY_IDENTIFIER_LEN)
+		return NULL;
+
+	return GetProxyByIdentifier(ident);
 }
 
 void InterfaceProxyRecheck(struct bufferevent *BuffEvent, char *Buff)
@@ -844,14 +853,14 @@ static void InterfaceRawRecheckStage2(UNCHECKED_PROXY *UProxy)
 	else
 		anon = 'n';
 
-	char *uid = GenerateUidForProxy(proxy); {
+	char *identifierb64;
+	Base64Encode(proxy->identifier, PROXY_IDENTIFIER_LEN, &identifierb64); {
 		char *liveSinceTime = FormatTime(proxy->liveSinceMs); {
 			char *lastCheckedTime = FormatTime(proxy->lastCheckedMs); {
-				evbuffer_add_printf(body, "{ \"success\": true, \"anonymity\": \"%c\", \"httpTimeoutMs\": %d, \"timeoutMs\": %d, \"liveSince\": \"%s\", \"lastChecked\": \"%s\", \"retries\": %d, \"successfulChecks\": %d, \"failedChecks\": %d, \"uid\": \"%s\" }",
-											anon, proxy->httpTimeoutMs, proxy->timeoutMs, liveSinceTime, lastCheckedTime, proxy->retries, proxy->successfulChecks, proxy->failedChecks, uid);
+				evbuffer_add_printf(body, "{ \"success\": true, \"anonymity\": \"%c\", \"httpTimeoutMs\": %d, \"timeoutMs\": %d, \"liveSince\": \"%s\", \"lastChecked\": \"%s\", \"retries\": %d, \"successfulChecks\": %d, \"failedChecks\": %d, \"uid\": \"%s\" }", anon, proxy->httpTimeoutMs, proxy->timeoutMs, liveSinceTime, lastCheckedTime, proxy->retries, proxy->successfulChecks, proxy->failedChecks, identifierb64);
 			} free(lastCheckedTime);
 		} free(liveSinceTime);
-	} free(uid);
+	} free(identifierb64);
 	evbuffer_add_printf(http, "%d", evbuffer_get_length(body) * sizeof(char)); // To Content-Length
 	evbuffer_add(http, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 	bufferevent_write_buffer(buffEvent, http);
@@ -1212,7 +1221,11 @@ static bool InterfaceRawGetCustomPageStage2(UNCHECKED_PROXY *UProxy, UPROXY_CUST
 
 		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
-		bufferevent_free(buffEvent);
+
+		if (evbuffer_get_length(bufferevent_get_output(buffEvent)))
+			bufferevent_setcb(buffEvent, ServerRead, (bufferevent_data_cb)bufferevent_free, ServerEvent, NULL);
+		else
+			bufferevent_free(buffEvent);
 	}
 	return true;
 }
@@ -1236,7 +1249,11 @@ static bool InterfaceRawGetCustomPageStage2Render(UNCHECKED_PROXY *UProxy, UPROX
 	if (Stage == UPROXY_CUSTOM_PAGE_STAGE_END) {
 		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
-		bufferevent_free(buffEvent);
+
+		if (evbuffer_get_length(bufferevent_get_output(buffEvent)))
+			bufferevent_setcb(buffEvent, ServerRead, (bufferevent_data_cb)bufferevent_free, ServerEvent, NULL);
+		else
+			bufferevent_free(buffEvent);
 	}
 	return true;
 }
@@ -1302,4 +1319,75 @@ fail:
 	evbuffer_free(headers);
 	evbuffer_free(body);
 	bufferevent_free(BuffEvent);
+}
+
+void InterfaceSettings(struct bufferevent *BuffEvent, char *Buff)
+{
+	struct evbuffer *headers = evbuffer_new();
+	struct evbuffer *body = evbuffer_new();
+
+	INTERFACE_INFO info;
+	for (size_t x = 0;x < InterfacePagesSize;x++) {
+		if (InterfacePages[x].page == INTERFACE_PAGE_SETTINGS)
+			info.currentPage = &(InterfacePages[x]);
+	}
+
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
+		bufferevent_write_buffer(BuffEvent, headers);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(headers);
+		evbuffer_free(body);
+		return;
+	}
+
+	if (HtmlTemplateUseStock) {
+		evbuffer_add_printf(body, "<html><head><title>LiveProxies %s interface: Settings</title></head><body>Not available in stock version.</body></html>", VERSION);
+	} else {
+		HTML_TEMPALTE_TABLE_INFO tableInfo;
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateHead, HtmlTemplateHeadSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateSettings, HtmlTemplateSettingsSize, info, tableInfo);
+		memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
+		HtmlTemplateBufferInsert(body, HtmlTemplateFoot, HtmlTemplateFootSize, info, tableInfo);
+	}
+
+	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body)); // To Content-Length
+	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
+
+	bufferevent_write_buffer(BuffEvent, headers);
+	bufferevent_write_buffer(BuffEvent, body);
+	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+	evbuffer_free(headers);
+	evbuffer_free(body);
+}
+
+void InterfaceHtmlTemplatesReload(struct bufferevent *BuffEvent, char *Buff)
+{
+	struct evbuffer *headers = evbuffer_new();
+
+	INTERFACE_INFO info;
+
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
+		bufferevent_write_buffer(BuffEvent, headers);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(headers);
+		return;
+	}
+
+	pthread_mutex_lock(&AuthWebLock); {
+		InterfaceInit();
+		HtmlTemplateLoadAll(); // These two must be called in this order
+		HtmlTemplateMimeTypesInit(); // These two must be called in this order
+	} pthread_mutex_unlock(&AuthWebLock);
+
+	evbuffer_add(headers, "8\r\nContent-Type: text/plain\r\n\r\nReloaded", 39 * sizeof(char));
+
+	bufferevent_write_buffer(BuffEvent, headers);
+	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+	evbuffer_free(headers);
 }

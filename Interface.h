@@ -16,7 +16,8 @@ typedef enum _INTERFACE_PAGES {
 	INTERFACE_PAGE_STATS = 4,
 	INTERFACE_PAGE_RECHECK = 5,
 	INTERFACE_PAGE_TOOLS = 6,
-	INTERFACE_PAGE_CPAGE_RAW = 7
+	INTERFACE_PAGE_CPAGE_RAW = 7,
+	INTERFACE_PAGE_SETTINGS = 8
 } INTERFACE_PAGES;
 
 typedef struct _INTERFACE_PAGE {
@@ -67,3 +68,5 @@ void InterfaceRawUProxyAdd				(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceTools						(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawUProxyAddProcessPost	(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawGetCustomPage			(struct bufferevent *BuffEvent, char *Buff, bool Render);
+void InterfaceSettings					(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceHtmlTemplatesReload		(struct bufferevent *BuffEvent, char *Buff);
