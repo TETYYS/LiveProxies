@@ -1,5 +1,5 @@
 # LiveProxies
-Latest Version: **0.9.1** (beta)
+Latest Version: **0.9.2** (beta)
 
 LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 
@@ -65,7 +65,6 @@ See [Auth](docs/auth.md) for preparing users for interface. **Access to interfac
 Push requests welcome. See TODO list.
 
 ## TODO
- - Custom page request automatization and interface
  - Windows support
  - Custom SOCKS5 UDP requests
  - Daemon mode
