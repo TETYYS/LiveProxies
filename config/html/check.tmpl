@@ -191,6 +191,23 @@
 							JobDone();
 						}
 					});
+					
+					var cpageList = JSON.parse(localStorage.getItem("cpageList"));
+					if (cpageList != null) {
+						var fxAdd = function(page, x) { $('#cpages').append('<button class="btn btn-default" onclick="$(\'#iframePage' + x +
+							'\').attr(\'src\', \'cpagerender' + window.location.search + '&page=' + page + '\').modal();">' +
+							page + '</button> ' +
+							'<div id="iframePage' + x + '" class="modal fade" role="dialog"><div class="modal-dialog"><div class="modal-content">' +
+							'<div class="modal-header"><button class="btn btn-xs" onclick="$(\'#iframe' + x + '\').attr(\'src\', $(\'#iframe' + x + '\').attr(\'src\'));">Refresh</button></div>' +
+							'<iframe style="width:100%;height:100%" id="iframe' + x + '" src="cpagerender' + window.location.search + '&page=' + page + '"></iframe>' +
+							'</div></div></div>'); };
+						for (var x = 0;x < cpageList.length;x++) {
+							fxAdd(cpageList[x], x);
+							//setTimeout(fxAdd, x * 2000, cpageList[x]);
+						}
+					} else {
+						$('#cpages').append('<i class="fa fa-check fa-4x"></i> Not configured');
+					}
 				});
 			</script>
 			<style>
@@ -225,7 +242,7 @@
 						</div>
 					</div>
 					<div class="col-lg-2 text-right">
-						<spam class="flag flag-{T_CHECK_COUNTRY_LOWER} flag-6x" title="{T_CHECK_COUNTRY_FULL}"></span>
+						<span class="flag flag-{T_CHECK_COUNTRY_LOWER} flag-6x" title="{T_CHECK_COUNTRY_FULL}"></span>
 					</div>
 				</div>
 				<div class="row">
@@ -280,6 +297,14 @@
 						<i class="fa fa-check fa-4x"></i> None
 					{T_CHECK_END_COND_INVALID_CERT}
 					</div>
+				</div>
+				<div class="panel panel-default">
+					<div class="panel-heading">
+						<h3 class="panel-title">
+							<i class="fa fa-flag"></i> Custom page requests
+						</h3>
+					</div>
+					<div class="panel-body" id="cpages"></div>
 				</div>
 			</div>
 			<!-- /.container-fluid -->

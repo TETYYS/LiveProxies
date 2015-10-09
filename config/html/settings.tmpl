@@ -1,0 +1,65 @@
+        <div id="page-wrapper">
+            <div class="container-fluid">
+                <!-- Page Heading -->
+                <div class="row">
+                    <div class="col-lg-12">
+                        <h1 class="page-header"> Settings</h1>
+                    </div>
+                </div
+                <!-- /.row -->
+		<script>
+$(document).ready(function() {
+	var list = JSON.parse(localStorage.getItem("cpageList"));
+	var curList = $('#cpageList');
+	if (list != null) {
+		for (var x = 0;x < list.length;x++)
+			curList.append('<li>' + list[x] + ' <button class="btn btn-xs btn-default" type="button" onclick="remove(this)">Remove</button></li>');
+	}
+});
+
+function listReload() {
+	var list = [];
+	var curList = $('#cpageList li');
+	
+	for (var x = 0;x < curList.length;x++) {
+		var text = $(curList[x]).text();
+		list.push(text.substring(0, text.length - 7)); // Remove " Remove"
+	}
+	
+	localStorage.setItem("cpageList", JSON.stringify(list));
+}
+
+function add() {
+	$('#cpageList').append('<li>' + $('#cpage').val() + ' <button class="btn btn-xs btn-default" type="button" onclick="remove(this)">Remove</button></li>');
+	listReload();
+	$('#cpage').val('');
+}
+
+function remove(x) {
+	$(x).parent().remove();
+	listReload();
+}
+		</script>
+                <div class="row">
+                    <div class="col-lg-12">
+                        <div class="panel panel-default">
+                            <div class="panel-heading">
+                                <i class="fa fa-download"></i> Quick custom page load
+                            </div>
+                            <div class="panel-body">
+                                <div class="input-group">
+                                    <input type="text" class="form-control" placeholder="https/http/udp://..." id="cpage">
+                                    <span class="input-group-btn">
+                                        <button class="btn btn-default" type="button" onclick="add()">Add</button>
+                                    </span>
+                                </div>
+                                <br />
+                                <ul id="cpageList"></ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- /.container-fluid -->
+        </div>
+        <!-- /#page-wrapper -->

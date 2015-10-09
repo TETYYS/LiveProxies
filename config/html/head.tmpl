@@ -10,7 +10,6 @@
     <title>LiveProxies {T_VERSION} interface: {T_CURRENT_PAGE}</title>
     
     <script src="//code.jquery.com/jquery-2.1.4.js"></script>
-   <!-- <script src="//code.jquery.com/ui/1.11.4/jquery-ui.min.js"></script> -->
     <script src="//code.jquery.com/color/jquery.color-2.1.2.min.js"></script>
     <script src="/js/ws.js"></script>
     
@@ -52,7 +51,10 @@
                         <a href="/stats"><i class="fa fa-fw fa-bar-chart-o"></i> Statistics</a>
                     </li>
                     <li{T_CFG_TOOLS_ACTIVE}>
-                        <a href="/tools"><i class="fa fa-fw fa-cogs"></i> Tools</a>
+                        <a href="/tools"><i class="fa fa-fw fa-wrench"></i> Tools</a>
+                    </li>
+                    <li{T_CFG_SETTINGS_ACTIVE}>
+                        <a href="/settings"><i class="fa fa-fw fa-cogs"></i> Settings</a>
                     </li>
                 </ul>
             </div>
