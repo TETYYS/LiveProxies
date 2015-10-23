@@ -7,4 +7,6 @@ script:
   - make
 
 before_install:
-  - sudo apt-get install -y libevent-dev python2.7-dev libssl-dev libgeoip-dev libpcre3-dev libconfig-dev libmaxminddb-dev mmdb-bin
+  - sudo add-apt-repository ppa:maxmind/ppa
+  - sudo aptitude update
+  - sudo apt-get install -y libevent-dev python2.7-dev libssl-dev libgeoip-dev libpcre3-dev libconfig-dev libmaxminddb0 libmaxminddb-dev mmdb-bin
