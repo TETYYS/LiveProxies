@@ -1,6 +1,7 @@
 cmake_minimum_required (VERSION 2.6)
 project (LiveProxies)
-set(CMAKE_BUILD_TYPE Debug)
+set(CMAKE_BUILD_TYPE RelWithDebInfo)
+set (CMAKE_C_FLAGS "-DDEBUG -g ${CMAKE_C_FLAGS}")
 
 if (WIN32)
 	set (CMAKE_C_FLAGS "--std=gnu99 -Wall ${CMAKE_C_FLAGS}")

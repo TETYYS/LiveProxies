@@ -4,12 +4,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define DEBUG 1
-
 void _Log(char *File, int Line, LOG_LEVEL Level, const char *Format, ...)
 {
 	if (Level == LOG_LEVEL_DEBUG) {
-#if !DEBUG
+#ifndef DEBUG
 		return;
 #endif
 	}

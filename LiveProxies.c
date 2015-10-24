@@ -443,8 +443,8 @@ int main(int argc, char** argv)
 		"Accept-Encoding: gzip, deflate, sdch\r\n"
 		"Accept-Language: en-US,en;q=0.8\r\n"
 		"{KEY_NAME}: {KEY_VAL}")
-		// Host and LPKey is injected upon request
-		StrReplaceOrig(&RequestString, "{VERSION}", VERSION);
+	// Host and LPKey is injected upon request
+	StrReplaceOrig(&RequestString, "{VERSION}", VERSION);
 	StrReplaceOrig(&RequestString, "{UA}", RequestUA);
 	StrReplaceOrig(&RequestString, "{KEY_NAME}", RequestHeaderKey);
 	RequestStringLen = strlen(RequestString);
@@ -459,23 +459,40 @@ int main(int argc, char** argv)
 	/* Auth init */ {
 		config_t cfg;
 		config_init(&cfg);
-		bool noAuth = false;
+		bool authExists = true;
 		AuthLocalList = NULL;
 		AuthLocalCount = 0;
 
-		if (config_read_file(&cfg, "passwd.conf") == CONFIG_FALSE) {
-			Log(LOG_LEVEL_DEBUG, "Failed to open passwd.conf in working directory, opening in global...: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
-			noAuth = true;
+#ifdef __linux__
+		globalPath = "/etc/liveproxies/passwd.conf";
+#elif defined _WIN32 || defined _WIN64
+		globalPath = malloc((strlen(WinAppData) + 29) * sizeof(char) + 1);
+		strcpy(globalPath, WinAppData);
+		strcat(globalPath, "\\liveproxies\\passwd.conf");
+#endif
+#ifdef __linux__
+		localPath = "./passwd.conf";
+#elif defined _WIN32 || defined _WIN64
+		localPath = ".\\passwd.conf";
+#endif
+
+		if (config_read_file(&cfg, localPath) == CONFIG_FALSE) {
+			Log(LOG_LEVEL_DEBUG, "Failed to open %s in working directory, opening in global...: %s (line %d)", localPath, config_error_text(&cfg), config_error_line(&cfg));
+			authExists = false;
 		}
 
-		if (noAuth) {
-			if (config_read_file(&cfg, "/etc/liveproxies/passwd.conf") == CONFIG_FALSE)
-				Log(LOG_LEVEL_DEBUG, "Failed to open /etc/liveproxies/passwd.conf: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
+		if (!authExists) {
+			if (config_read_file(&cfg, globalPath) == CONFIG_FALSE)
+				Log(LOG_LEVEL_DEBUG, "Failed to open %s: %s (line %d)", globalPath, config_error_text(&cfg), config_error_line(&cfg));
 			else
-				noAuth = false;
+				authExists = false;
 		}
 
-		if (!noAuth) {
+#if defined _WIN32 || defined _WIN64
+		free(globalPath);
+#endif
+
+		if (authExists) {
 			pthread_mutex_init(&AuthLocalLock, NULL);
 			config_setting_t *cfgRoot = config_root_setting(&cfg);
 			size_t x = 0;
@@ -495,6 +512,7 @@ int main(int argc, char** argv)
 
 						AuthLocalList[AuthLocalCount - 1]->username = malloc((strlen(val) * sizeof(char)) + 1);
 						strcpy((char*)AuthLocalList[AuthLocalCount - 1]->username, val);
+						Log(LOG_LEVEL_DEBUG, "Added user %s", AuthLocalList[AuthLocalCount - 1]->username);
 					} else {
 						AuthLocalList[AuthLocalCount - 1]->password = malloc((strlen(val) * sizeof(char)) + 1);
 						strcpy((char*)AuthLocalList[AuthLocalCount - 1]->password, val);

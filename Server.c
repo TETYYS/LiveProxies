@@ -29,7 +29,7 @@
 #include "HtmlTemplate.h"
 #include "Websocket.h"
 #include <stdio.h>
-#if DEBUG
+#if defined DEBUG && defined __linux__
 #include <valgrind/memcheck.h>
 #endif
 #include <openssl/rand.h>
@@ -411,7 +411,7 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 	char *buff = malloc(len + 1);
 	evbuffer_copyout(evBuff, buff, len);
 
-#if DEBUG
+#if defined DEBUG && defined __linux__
 	VALGRIND_MAKE_MEM_DEFINED(buff, len + 1);
 #endif
 

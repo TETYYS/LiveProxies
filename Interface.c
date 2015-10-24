@@ -107,7 +107,7 @@ static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, WEB_INTERFA
 		} pthread_mutex_unlock(&AuthWebLock);
 	} /* End authorize by cookie */
 endCookie:
-
+	
 	if (!AllowOnlyCookie) { /* Authorize by login */
 		char *username, *password;
 		char *authStr;
@@ -163,6 +163,8 @@ endCookie:
 
 					char *pbkdf2 = PBKDF2_HMAC_SHA_512Ex(password, strlen(password), salt, saltLen, iterations); // TODO: Possible DoS, needs login limit
 					free(salt);
+
+					Log(LOG_LEVEL_DEBUG, "PBKDF2 CMP: %s vs %s", AuthLocalList[x]->password, pbkdf2);
 
 					if (strcmp(AuthLocalList[x]->password, pbkdf2) == 0) {
 						pthread_mutex_unlock(&AuthLocalLock);

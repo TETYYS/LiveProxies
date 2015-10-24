@@ -116,17 +116,17 @@ void HarvestLoop()
 		HANDLE d = NULL;
 
 		size_t harvestersPathLen = strlen(HarvestersPath);
-		char *fullPath = malloc((harvestersPathLen + 4) * sizeof(char)); {
+		char *fullPath = malloc((harvestersPathLen + 3) * sizeof(char)); {
 			strcpy(fullPath, HarvestersPath);
-			if (HarvestersPath[harvestersPathLen - 1] == '\\') {
-				strcat(fullPath, "*.*");
-				HarvestersPath[harvestersPathLen + 3] = 0x00;
-			} else
-				strcat(fullPath, "\\*.*");
-			HarvestersPath[harvestersPathLen + 4] = 0x00;
+			strcat(fullPath, "\\*");
+			fullPath[harvestersPathLen + 2] = 0x00;
 
-			if ((d = FindFirstFile(WINDOWS_LOCAL_HTML_PATH"*.*", &fdFile)) == INVALID_HANDLE_VALUE) {
-				d = false;
+			if ((d = FindFirstFile(WINDOWS_LOCAL_HTML_PATH"\\*.*", &fdFile)) == INVALID_HANDLE_VALUE) {
+				Log(LOG_LEVEL_DEBUG, "WIN32: Failed to search files: %d (%s)", GetLastError(), WINDOWS_LOCAL_HTML_PATH"*.*");
+				if ((d = FindFirstFile(fullPath, &fdFile)) == INVALID_HANDLE_VALUE) {
+					Log(LOG_LEVEL_ERROR, "WIN32: Failed to search files: %d (%s)", GetLastError(), fullPath);
+					d = false;
+				}
 			}
 		} free(fullPath);
 #endif
@@ -158,17 +158,13 @@ void HarvestLoop()
 				sourceType = URL;
 			if (sourceType == NONE)
 				continue;
-
 			char *path = (char*)malloc(10 + strlen(name) + 1 /* NULL */);
 			sprintf(path, "%s", name);
 			path[strlen(path) - (sourceType == SCRIPT ? 3 : 4)] = '\0';
-
 			Log(LOG_LEVEL_SUCCESS, "Executing %s... (%s)", path, ProxySourceTypeToString(sourceType));
-
 			char *result;
 			uint32_t added = 0, addedPrev = 0, total = 0;
 			PROXY_TYPE curType = PROXY_TYPE_HTTP;
-
 			if (sourceType == SCRIPT) {
 				pName = PyString_FromString(path);
 				pModule = PyImport_Import(pName);
@@ -214,9 +210,13 @@ void HarvestLoop()
 				} free(pathFull);
 			}
 			if (sourceType == URL) {
-				char pathFull = malloc((strlen(HarvestersPath) + 1 + fileNameLen) * sizeof(char)); {
+				char *pathFull = malloc((strlen(HarvestersPath) + 1 + fileNameLen) * sizeof(char) + 1); {
 					strcpy(pathFull, HarvestersPath);
+#ifdef __linux__
 					strcat(pathFull, "/");
+#elif defined _WIN32 || defined _WIN64
+					strcat(pathFull, "\\");
+#endif
 					strcat(pathFull, name);
 
 					FILE *hFile = fopen(pathFull, "r"); {
@@ -243,15 +243,13 @@ void HarvestLoop()
 							if (url[strlen(url) - 1] == '\n')
 								url[strlen(url) - 1] = 0x00;
 
-							result = malloc(1);
+							result = malloc(0);
 							CURL *hCurl = curl_easy_init(); {
 								curl_easy_setopt(hCurl, CURLOPT_URL, url);
 								curl_easy_setopt(hCurl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
 								curl_easy_setopt(hCurl, CURLOPT_WRITEDATA, &result);
 								curl_easy_setopt(hCurl, CURLOPT_USERAGENT, REQUEST_UA);
-
 								CURLcode res = curl_easy_perform(hCurl);
-
 								if (res != CURLE_OK) {
 									Log(LOG_LEVEL_WARNING, "Request to %s failed: %s", url, curl_easy_strerror(res));
 								} else {
