@@ -28,17 +28,6 @@ if (WIN32)
 		"C:/Program Files (x86)/GnuWin32/include"
 		C:/LIB/curl-7.45.0/builds/libcurl-vc-x86-release-dll-ssl-dll-zlib-dll-ipv6-sspi/include
 	)
-	#link_directories(
-	#	C:/LIB/openssl/lib
-	#	C:/LIB/openssl/lib
-	#	C:/LIB/libevent/bin/lib/Release
-	#	C:/LIB/libconfig/libconfig-1.5/Release
-	#	C:/LIB/libmaxminddb/projects/VS12/Release
-	#	C:/LIB/unbound-1.5.5/.libs/libunbound.a
-	#	C:/Python27/libs
-	#	"C:/Program Files (x86)/GnuWin32/lib"
-	#	C:/LIB/curl-7.45.0/builds/libcurl-vc-x86-release-dll-ssl-dll-zlib-dll-ipv6-sspi/lib
-	#)
 	IF (MINGW)
 		# MINGW
 		target_link_libraries(
@@ -56,6 +45,7 @@ if (WIN32)
 		)
 	ELSE()
 		# MSVC
+		message(AUTHOR_WARNING "LiveProxies is not compiled with MSVC and most likely to fail.")
 		target_link_libraries(
 			LiveProxies
 			C:/LIB/libevent/bin/lib/Release/event.lib
