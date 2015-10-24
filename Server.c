@@ -29,7 +29,7 @@
 #include "HtmlTemplate.h"
 #include "Websocket.h"
 #include <stdio.h>
-#if defined DEBUG && defined __linux__
+#if defined DEBUG && defined HAVE_VALGRIND
 #include <valgrind/memcheck.h>
 #endif
 #include <openssl/rand.h>

@@ -3,6 +3,9 @@ project (LiveProxies)
 set(CMAKE_BUILD_TYPE RelWithDebInfo)
 set (CMAKE_C_FLAGS "-DDEBUG -g ${CMAKE_C_FLAGS}")
 
+include(CheckIncludeFile)
+check_include_file("valgrind/memcheck.h" HAVE_VALGRIND)
+
 if (WIN32)
 	set (CMAKE_C_FLAGS "--std=gnu99 -Wall ${CMAKE_C_FLAGS}")
 ELSE()
