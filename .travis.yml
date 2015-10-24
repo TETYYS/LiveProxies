@@ -3,10 +3,12 @@ compiler:
   - gcc
 
 script:
+  - echo "Libevent"
   - cd libevent
   - cmake .
   - make
-  - make install
+  - mv lib/* ..
+  - echo "Main"
   - cd ..
   - cmake .
   - make
