@@ -8,13 +8,14 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
-#include <pthread.h>
+#include "CPH_Threads.h"
 #include <openssl/sha.h>
 #include <event2/event.h>
 #include <assert.h>
 #include "Base64.h"
 #include "Websocket.h"
 #include "Config.h"
+#include "PortableEndian.h"
 #include <openssl/rand.h>
 
 static bool MultiFlag(uint64_t Flag)
@@ -76,7 +77,7 @@ bool ProxyAdd(PROXY *Proxy)
 	char *identifierb64;
 	Base64Encode(Proxy->identifier, PROXY_IDENTIFIER_LEN, &identifierb64); {
 		size_t offset = 0;
-		uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+		uint8_t *buffer = malloc(sizeof(uint8_t) /* ipType */ +
 			(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
 			sizeof(uint16_t) + /* port */
 			sizeof(uint16_t) + /* type */
@@ -85,26 +86,27 @@ bool ProxyAdd(PROXY *Proxy)
 			(sizeof(uint64_t) * 4) + /* Connection, HTTP/S timeouts, live since and last checked */
 			sizeof(uint8_t) + /* retries */
 			(sizeof(uint32_t) * 2) + /* successful and failed checks */
-			strlen(identifierb64) /* uid */];
+			strlen(identifierb64) /* uid */); {
 
 #define MAP_TYPE(x, type) *((type*)(&(x)))
 
-		buffer[offset] = ipType; offset += sizeof(uint8_t);
-		memcpy(buffer + offset, ipType == 0x04 ? &(Proxy->ip->Data[3]) : Proxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
-		MAP_TYPE(buffer[offset], uint16_t) = htons(Proxy->port); offset += sizeof(uint16_t);
-		MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)Proxy->type); offset += sizeof(uint16_t);
-		memcpy(buffer + offset, Proxy->country, 2 * sizeof(char)); offset += 2 * sizeof(char);
-		buffer[offset] = (uint8_t)Proxy->anonymity; offset += sizeof(uint8_t);
-		MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->timeoutMs); offset += sizeof(uint64_t);
-		MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->httpTimeoutMs); offset += sizeof(uint64_t);
-		MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->liveSinceMs); offset += sizeof(uint64_t);
-		MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->lastCheckedMs); offset += sizeof(uint64_t);
-		buffer[offset] = Proxy->retries; offset += sizeof(uint8_t);
-		MAP_TYPE(buffer[offset], uint32_t) = htonl(Proxy->successfulChecks); offset += sizeof(uint32_t);
-		MAP_TYPE(buffer[offset], uint32_t) = htonl(Proxy->failedChecks); offset += sizeof(uint32_t);
-		memcpy(buffer + offset, identifierb64, strlen(identifierb64));
+			buffer[offset] = ipType; offset += sizeof(uint8_t);
+			memcpy(buffer + offset, ipType == 0x04 ? &(Proxy->ip->Data[3]) : Proxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+			MAP_TYPE(buffer[offset], uint16_t) = htons(Proxy->port); offset += sizeof(uint16_t);
+			MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)Proxy->type); offset += sizeof(uint16_t);
+			memcpy(buffer + offset, Proxy->country, 2 * sizeof(char)); offset += 2 * sizeof(char);
+			buffer[offset] = (uint8_t)Proxy->anonymity; offset += sizeof(uint8_t);
+			MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->timeoutMs); offset += sizeof(uint64_t);
+			MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->httpTimeoutMs); offset += sizeof(uint64_t);
+			MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->liveSinceMs); offset += sizeof(uint64_t);
+			MAP_TYPE(buffer[offset], uint64_t) = htobe64(Proxy->lastCheckedMs); offset += sizeof(uint64_t);
+			buffer[offset] = Proxy->retries; offset += sizeof(uint8_t);
+			MAP_TYPE(buffer[offset], uint32_t) = htonl(Proxy->successfulChecks); offset += sizeof(uint32_t);
+			MAP_TYPE(buffer[offset], uint32_t) = htonl(Proxy->failedChecks); offset += sizeof(uint32_t);
+			memcpy(buffer + offset, identifierb64, strlen(identifierb64));
 
-		WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_PROXY_ADD);
+			WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_PROXY_ADD);
+		} free(buffer);
 	} free(identifierb64);
 
 	return true;
@@ -146,25 +148,26 @@ uint8_t UProxyAdd(UNCHECKED_PROXY *UProxy)
 
 		uint8_t ipType = GetIPType(UProxy->ip) == IPV4 ? 0x04 : 0x06;
 		size_t offset = 0;
-		uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+		uint8_t *buffer = malloc(sizeof(uint8_t) /* ipType */ +
 			(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
 			sizeof(uint16_t) + /* port */
 			sizeof(uint16_t) + /* type */
 			sizeof(bool) + /* currently checking */
 			sizeof(uint8_t) + /* retries */
-			sizeof(bool) /* rechecking */];
+			sizeof(bool) /* rechecking */); {
 
 #define MAP_TYPE(x, type) *((type*)(&(x)))
 
-		buffer[offset] = ipType; offset += sizeof(uint8_t);
-		memcpy(buffer + offset, ipType == 0x04 ? &(UProxy->ip->Data[3]) : UProxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
-		MAP_TYPE(buffer[offset], uint16_t) = htons(UProxy->port); offset += sizeof(uint16_t);
-		MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)UProxy->type); offset += sizeof(uint16_t);
-		buffer[offset] = UProxy->checking; offset += sizeof(bool);
-		buffer[offset] = UProxy->retries; offset += sizeof(uint8_t);
-		buffer[offset] = UProxy->associatedProxy != NULL;
+			buffer[offset] = ipType; offset += sizeof(uint8_t);
+			memcpy(buffer + offset, ipType == 0x04 ? &(UProxy->ip->Data[3]) : UProxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+			MAP_TYPE(buffer[offset], uint16_t) = htons(UProxy->port); offset += sizeof(uint16_t);
+			MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)UProxy->type); offset += sizeof(uint16_t);
+			buffer[offset] = UProxy->checking; offset += sizeof(bool);
+			buffer[offset] = UProxy->retries; offset += sizeof(uint8_t);
+			buffer[offset] = UProxy->associatedProxy != NULL;
 
-		WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_UPROXY_ADD);
+			WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_UPROXY_ADD);
+		} free(buffer);
 
 		ret++;
 	}
@@ -177,35 +180,37 @@ bool UProxyRemove(UNCHECKED_PROXY *UProxy)
 
 	uint8_t ipType = GetIPType(UProxy->ip) == IPV4 ? 0x04 : 0x06;
 	size_t offset = 0;
-	uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+	uint8_t *buffer = malloc(sizeof(uint8_t) /* ipType */ +
 		(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
 		sizeof(uint16_t) + /* port */
-		sizeof(uint16_t) /* type */];
+		sizeof(uint16_t) /* type */); {
 
 #define MAP_TYPE(x, type) *((type*)(&(x)))
 
-	buffer[offset] = ipType; offset += sizeof(uint8_t);
-	memcpy(buffer + offset, ipType == 0x04 ? &(UProxy->ip->Data[3]) : UProxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
-	MAP_TYPE(buffer[offset], uint16_t) = htons(UProxy->port); offset += sizeof(uint16_t);
-	MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)UProxy->type); offset += sizeof(uint16_t);
+		buffer[offset] = ipType; offset += sizeof(uint8_t);
+		memcpy(buffer + offset, ipType == 0x04 ? &(UProxy->ip->Data[3]) : UProxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+		MAP_TYPE(buffer[offset], uint16_t) = htons(UProxy->port); offset += sizeof(uint16_t);
+		MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)UProxy->type); offset += sizeof(uint16_t);
 
-	WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE);
+		WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE);
+	} free(buffer);
 
 	pthread_mutex_lock(&LockUncheckedProxies); {
 		for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 			if (UProxy == UncheckedProxies[x]) {
 				uint8_t ipType = GetIPType(UProxy->ip) == IPV4 ? 0x04 : 0x06;
 				size_t offset = 0;
-				uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+				buffer = malloc(sizeof(uint8_t) /* ipType */ +
 					(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
 					sizeof(uint16_t) + /* port */
-					sizeof(uint16_t) /* type */];
-				buffer[offset] = ipType; offset += sizeof(uint8_t);
-				memcpy(buffer + offset, UProxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
-				buffer[offset] = htons(UProxy->port); offset += sizeof(uint16_t);
-				buffer[offset] = htons((uint16_t)UProxy->type); offset += sizeof(uint16_t);
+					sizeof(uint16_t) /* type */); {
+					buffer[offset] = ipType; offset += sizeof(uint8_t);
+					memcpy(buffer + offset, UProxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+					buffer[offset] = htons(UProxy->port); offset += sizeof(uint16_t);
+					buffer[offset] = htons((uint16_t)UProxy->type); offset += sizeof(uint16_t);
 
-				WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE);
+					WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE);
+				} free(buffer);
 
 				UProxyFree(UncheckedProxies[x]);
 				SizeUncheckedProxies--;
@@ -230,35 +235,37 @@ bool ProxyRemove(PROXY *Proxy)
 
 	uint8_t ipType = GetIPType(Proxy->ip) == IPV4 ? 0x04 : 0x06;
 	size_t offset = 0;
-	uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+	uint8_t *buffer = malloc(sizeof(uint8_t) /* ipType */ +
 		(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
 		sizeof(uint16_t) + /* port */
-		sizeof(uint16_t) /* type */];
+		sizeof(uint16_t) /* type */); {
 
 #define MAP_TYPE(x, type) *((type*)(&(x)))
 
-	buffer[offset] = ipType; offset += sizeof(uint8_t);
-	memcpy(buffer + offset, ipType == 0x04 ? &(Proxy->ip->Data[3]) : Proxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
-	MAP_TYPE(buffer[offset], uint16_t) = htons(Proxy->port); offset += sizeof(uint16_t);
-	MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)Proxy->type); offset += sizeof(uint16_t);
+		buffer[offset] = ipType; offset += sizeof(uint8_t);
+		memcpy(buffer + offset, ipType == 0x04 ? &(Proxy->ip->Data[3]) : Proxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+		MAP_TYPE(buffer[offset], uint16_t) = htons(Proxy->port); offset += sizeof(uint16_t);
+		MAP_TYPE(buffer[offset], uint16_t) = htons((uint16_t)Proxy->type); offset += sizeof(uint16_t);
 
-	WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE);
+		WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE);
+	} free(buffer);
 
 	pthread_mutex_lock(&LockCheckedProxies); {
 		for (uint64_t x = 0; x < SizeCheckedProxies; x++) {
 			if (Proxy == CheckedProxies[x]) {
 				uint8_t ipType = GetIPType(Proxy->ip) == IPV4 ? 0x04 : 0x06;
 				size_t offset = 0;
-				uint8_t buffer[sizeof(uint8_t) /* ipType */ +
+				uint8_t *buffer = malloc(sizeof(uint8_t) /* ipType */ +
 					(ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE) /* IP */ +
 					sizeof(uint16_t) + /* port */
-					sizeof(uint16_t) /* type */];
-				buffer[offset] = ipType; offset += sizeof(uint8_t);
-				memcpy(buffer + offset, Proxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
-				buffer[offset] = htons(Proxy->port); offset += sizeof(uint16_t);
-				buffer[offset] = htons((uint16_t)Proxy->type); offset += sizeof(uint16_t);
+					sizeof(uint16_t) /* type */); {
+					buffer[offset] = ipType; offset += sizeof(uint8_t);
+					memcpy(buffer + offset, Proxy->ip->Data, (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE)); offset += (ipType == 0x04 ? IPV4_SIZE : IPV6_SIZE);
+					buffer[offset] = htons(Proxy->port); offset += sizeof(uint16_t);
+					buffer[offset] = htons((uint16_t)Proxy->type); offset += sizeof(uint16_t);
 
-				WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE);
+					WebsocketClientsNotify(buffer, sizeof(buffer), WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE);
+				} free(buffer);
 
 				ProxyFree(CheckedProxies[x]);
 				SizeCheckedProxies--;

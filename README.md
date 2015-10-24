@@ -1,5 +1,5 @@
 # LiveProxies
-Latest Version: **0.9.2** (beta)
+Latest Version: **0.10.0** (beta) ![Travis-CI](https://api.travis-ci.org/TETYYS/LiveProxies.svg)
 
 LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 
@@ -65,11 +65,11 @@ See [Auth](docs/auth.md) for preparing users for interface. **Access to interfac
 Push requests welcome. See TODO list.
 
 ## TODO
- - Windows support
+ - **Windows support**
  - Custom SOCKS5 UDP requests
  - Daemon mode
- - Change asynchronous DNS mode from thread to signal
  - Check and fix unicode
+ - vasprintf for windows on stock HTML mode
  - Suggesstions?
 
 [libmaxminddb]:https://github.com/maxmind/libmaxminddb

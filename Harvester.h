@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
-#include <pthread.h>
+#include "CPH_Threads.h"
 #include "ProxyLists.h"
 
 #define HARVEST_TIMEOUT 1000 * 60 * 30

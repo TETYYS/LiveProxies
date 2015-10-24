@@ -2,7 +2,6 @@
 
 #include "LiveProxies.h"
 #include "ProxyRequest.h"
-#include "GeoIP.h"
 #include "ProxyLists.h"
 #include "Logger.h"
 #include "Global.h"
@@ -29,13 +28,18 @@
 #include <limits.h>
 #include <libconfig.h>
 #include <stdio.h>
+#ifdef __linux__
 #include <unistd.h>
+#elif defined _WIN32 || defined _WIN64
+#include <Shlwapi.h>
+#endif
 #include <math.h>
 #include <fcntl.h>
-#include <pthread.h>
+#include "CPH_Threads.h"
 #include <assert.h>
 
 #include <curl/curl.h>
+#include <maxminddb.h>
 
 static char *StdinDynamic()
 {
@@ -77,6 +81,10 @@ static void EvLog(int Level, char *Format, va_list VA)
 
 int main(int argc, char** argv)
 {
+#if defined _WIN32 || defined _WIN64
+	WinAppData = getenv("AppData");
+#endif
+
 	if (argc == 2) {
 		printf("Enter username to use for interface:\n");
 		char *uname = StdinDynamic();
@@ -85,9 +93,13 @@ int main(int argc, char** argv)
 		char *pbkdf2;
 		char *passwd = StdinDynamic(); {
 			pbkdf2 = PBKDF2_HMAC_SHA_512(passwd, strlen(passwd));
+//#ifdef __linux__
 #pragma optimize("-no-dead-code-removal")
 			memset(passwd, 0, strlen(passwd)); // safety!
 #pragma optimize("-dead-code-removal")
+/*#elif defined _WIN32 || defined _WIN64
+			SecureZeroMemory(passwd, strlen(passwd));
+#endif*/
 		} free(passwd);
 
 		char confirmation;
@@ -103,21 +115,35 @@ int main(int argc, char** argv)
 		if (confirmation == 'y' || confirmation == 'Y')
 			globalWrite = true;
 
+		char *path;
+
 		if (globalWrite) {
-			if (access("/etc/liveproxies/passwd.conf", F_OK) == -1)
-				creat("/etc/liveproxies/passwd.conf", S_IRUSR | S_IWUSR);
-			if (config_read_file(&cfg, "/etc/liveproxies/passwd.conf") == CONFIG_FALSE) {
-				Log(LOG_LEVEL_ERROR, "Failed to open /etc/liveproxies/passwd.conf, exiting...");
-				exit(EXIT_FAILURE);
-			}
+#ifdef __linux__
+			path = "/etc/liveproxies/passwd.conf";
+#elif defined _WIN32 || defined _WIN64
+			path = malloc((strlen(WinAppData) + 29) * sizeof(char) + 1);
+			strcpy(path, WinAppData);
+			strcat(path, "\\liveproxies\\passwd.conf");
+#endif
 		} else {
-			if (access("./passwd.conf", F_OK) == -1)
-				creat("./passwd.conf", S_IRUSR | S_IWUSR);
-			if (config_read_file(&cfg, "./passwd.conf") == CONFIG_FALSE) {
-				Log(LOG_LEVEL_ERROR, "Failed to open ./passwd.conf, exiting...");
-				exit(EXIT_FAILURE);
+#ifdef __linux__
+			path = "./passwd.conf";
+#elif defined _WIN32 || defined _WIN64
+			path = ".\\passwd.conf";
+#endif
+		}
+
+#ifdef __linux__
+		if (access(path, F_OK) == -1)
+			creat(path, S_IRUSR | S_IWUSR);
+#elif defined _WIN32 || defined _WIN64
+		if (!PathFileExists(path)) {
+			HANDLE hFile = CreateFile(path, FILE_READ_DATA, FILE_SHARE_READ, NULL, OPEN_ALWAYS, 0, NULL);
+			if (hFile != INVALID_HANDLE_VALUE) {
+				CloseHandle(hFile);
 			}
 		}
+#endif
 
 		config_setting_t *cfgRoot = config_root_setting(&cfg);
 		config_setting_t *authBlock;
@@ -130,16 +156,19 @@ int main(int argc, char** argv)
 		config_setting_set_string(username, uname);
 		config_setting_set_string(password, pbkdf2);
 
-		if (globalWrite)
-			config_write_file(&cfg, "/etc/liveproxies/passwd.conf");
-		else
-			config_write_file(&cfg, "./passwd.conf");
+		config_write_file(&cfg, path);
+
+		if (globalWrite) {
+#if defined _WIN32 || defined _WIN64
+			free(path);
+#endif
+		}
 
 		return 0;
 	}
 	printf("LiveProxes "VERSION" started\n");
 #if DEBUG
-	#define MMDB_DEBUG 1
+#define MMDB_DEBUG 1
 	printf("========================DEBUG========================\n");
 	//evthread_enable_lock_debugging();
 	//event_enable_debug_mode();
@@ -147,15 +176,49 @@ int main(int argc, char** argv)
 	//event_enable_debug_logging(EVENT_DBG_ALL);
 #endif
 
+#if defined _WIN32 || defined _WIN64
+	int res;
+	WSADATA wsaData;
+
+	if ((res = WSAStartup(MAKEWORD(2, 2), &wsaData)) != 0) {
+		Log(LOG_LEVEL_ERROR, "WSAStartup failed: %d\n", res);
+		return res;
+	}
+#endif
+
+	char *globalPath, *localPath;
+
+#ifdef __linux__
 	if (access("/etc/liveproxies/passwd.conf", F_OK) == -1 && access("./passwd.conf", F_OK) == -1)
+#elif defined _WIN32 || defined _WIN64
+	globalPath = malloc((strlen(WinAppData) + 29) * sizeof(char) + 1);
+	strcpy(globalPath, WinAppData);
+	strcat(globalPath, "\\liveproxies\\passwd.conf");
+	if (!PathFileExists(globalPath) && !PathFileExists(".\\passwd.conf"))
+#endif
 		Log(LOG_LEVEL_WARNING, "No credentials present for interface pages. Access blocked by default.");
 
+#if defined _WIN32 || defined _WIN64
+	free(globalPath);
+#endif
+
 	curl_global_init(CURL_GLOBAL_ALL);
+
+#if __linux__
 	evthread_use_pthreads();
+#elif defined _WIN32 || defined _WIN64
+	evthread_use_windows_threads();
+#endif
 	AuthWebList = NULL;
+
 	pthread_mutex_init(&AuthWebLock, NULL);
 	pthread_mutex_init(&WebSocketUnfinishedPacketsLock, NULL);
 	pthread_mutex_init(&WebSocketSubscribedClientsLock, NULL);
+	pthread_mutex_init(&LockUncheckedProxies, NULL);
+	pthread_mutex_init(&LockCheckedProxies, NULL);
+	pthread_mutex_init(&LockStatsHarvesterPrxsrc, NULL);
+	pthread_mutex_init(&LockStatsProxyCount, NULL);
+
 	AuthWebCount = 0;
 	levRequestBase = event_base_new();
 	levRequestDNSBase = evdns_base_new(levRequestBase, 1);
@@ -170,24 +233,60 @@ int main(int argc, char** argv)
 	HtmlTemplateLoadAll(); // These two must be called in this order
 	HtmlTemplateMimeTypesInit(); // These two must be called in this order
 
-	int status = MMDB_open("/usr/local/share/GeoIP/GeoLite2-Country.mmdb", MMDB_MODE_MMAP, &GeoIPDB);
+#ifdef __linux__
+	globalPath = "/usr/local/share/GeoIP/GeoLite2-Country.mmdb";
+	localPath = "./GeoLite2-Country.mmdb";
+#elif defined _WIN32 || defined _WIN64
+	globalPath = malloc((strlen(WinAppData) + 34) * sizeof(char) + 1);
+	strcpy(globalPath, WinAppData);
+	strcat(globalPath, "\\liveproxies\\GeoLite2-Country.mmdb");
+	localPath = ".\\GeoLite2-Country.mmdb";
+#endif
+	int status = MMDB_open(globalPath, MMDB_MODE_MMAP, &GeoIPDB);
 
 	if (status != MMDB_SUCCESS) {
-		Log(LOG_LEVEL_ERROR, "Can't open GeoLite2 database /usr/local/share/GeoIP/GeoLite2-Country.mmdb - %s", MMDB_strerror(status));
-		exit(1);
+		Log(LOG_LEVEL_ERROR, "Can't open GeoLite2 database in global path (%s) (%s), opening in local...", globalPath, MMDB_strerror(status));
+
+		status = MMDB_open(localPath, MMDB_MODE_MMAP, &GeoIPDB);
+		if (status != MMDB_SUCCESS) {
+			Log(LOG_LEVEL_ERROR, "Can't open GeoLite2 database %s - %s", localPath, MMDB_strerror(status));
+			exit(1);
+		}
 	}
+
+#if defined _WIN32 || defined _WIN64
+	free(globalPath);
+#endif
+
 
 	config_t cfg;
 	config_init(&cfg);
 
-	if (config_read_file(&cfg, "liveproxies.conf") == CONFIG_FALSE) {
-		Log(LOG_LEVEL_DEBUG, "Failed to open liveproxies.conf in working directory, opening in global...: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
+#ifdef __linux__
+	globalPath = "/etc/liveproxies/liveproxies.conf";
+#elif defined _WIN32 || defined _WIN64
+	globalPath = malloc((strlen(WinAppData) + 29) * sizeof(char) + 1);
+	strcpy(globalPath, WinAppData);
+	strcat(globalPath, "\\liveproxies\\liveproxies.conf");
+#endif
+#ifdef __linux__
+	localPath = "./liveproxies.conf";
+#elif defined _WIN32 || defined _WIN64
+	localPath = ".\\liveproxies.conf";
+#endif
 
-		if (config_read_file(&cfg, "/etc/liveproxies/liveproxies.conf") == CONFIG_FALSE) {
-			Log(LOG_LEVEL_ERROR, "Failed to open /etc/liveproxies/liveproxies.conf: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
+	if (config_read_file(&cfg, localPath) == CONFIG_FALSE) {
+		Log(LOG_LEVEL_DEBUG, "Failed to open %s in working directory, opening in global...: %s (line %d)", localPath, config_error_text(&cfg), config_error_line(&cfg));
+
+		if (config_read_file(&cfg, globalPath) == CONFIG_FALSE) {
+			Log(LOG_LEVEL_ERROR, "Failed to open in global path: %s (line %d)", globalPath, config_error_text(&cfg), config_error_line(&cfg));
 			exit(EXIT_FAILURE);
 		}
 	}
+
+#if defined _WIN32 || defined _WIN64
+	free(globalPath);
+#endif
 
 	config_setting_t *cfgRoot = config_root_setting(&cfg);
 
@@ -224,75 +323,75 @@ int main(int argc, char** argv)
 		config_setting_t *sslGroup = config_setting_get_member(cfgRoot, "SSL");
 
 		CONFIG_BOOL(sslGroup, "Enable", SSLEnabled, false)
-		CONFIG_STRING(sslGroup, "Private", SSLPrivateKey, "/etc/liveproxies/private.key")
-		CONFIG_STRING(sslGroup, "Public", SSLPublicKey, "/etc/liveproxies/public.cer")
-		CONFIG_STRING(sslGroup, "CipherList", SSLCipherList, "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH")
-		CONFIG_INT(sslGroup, "ServerPort", SSLServerPort, 8085)
+			CONFIG_STRING(sslGroup, "Private", SSLPrivateKey, "/etc/liveproxies/private.key")
+			CONFIG_STRING(sslGroup, "Public", SSLPublicKey, "/etc/liveproxies/public.cer")
+			CONFIG_STRING(sslGroup, "CipherList", SSLCipherList, "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH")
+			CONFIG_INT(sslGroup, "ServerPort", SSLServerPort, 8085)
 
-		if (SSLEnabled) {
-			SSL_load_error_strings();
-			SSL_library_init();
-			if (!RAND_poll()) {
-				Log(LOG_LEVEL_ERROR, "RAND_poll, exiting...");
-				exit(EXIT_FAILURE);
+			if (SSLEnabled) {
+				SSL_load_error_strings();
+				SSL_library_init();
+				if (!RAND_poll()) {
+					Log(LOG_LEVEL_ERROR, "RAND_poll, exiting...");
+					exit(EXIT_FAILURE);
+				}
+
+				levServerSSL = SSL_CTX_new(SSLv23_server_method());
+				SSL_CTX_set_session_cache_mode(levServerSSL, SSL_SESS_CACHE_OFF);
+
+				SSL_CTX *CTX;
+				X509 *cert = NULL;
+				RSA *rsa = NULL;
+				BIO *bio;
+				uint8_t *certBuff;
+				size_t size;
+
+				FILE *hFile = fopen(SSLPublicKey, "r"); {
+					if (hFile == NULL) {
+						Log(LOG_LEVEL_ERROR, "Failed to read public key (1), exiting...");
+						exit(EXIT_FAILURE);
+					}
+					fseek(hFile, 0, SEEK_END);
+					size = ftell(hFile);
+					fseek(hFile, 0, SEEK_SET);
+
+					certBuff = malloc(size);
+					fread(certBuff, size, 1, hFile);
+				} fclose(hFile);
+
+				bio = BIO_new_mem_buf(certBuff, size); {
+					cert = PEM_read_bio_X509(bio, NULL, 0, NULL);
+					if (cert == NULL) {
+						Log(LOG_LEVEL_ERROR, "Failed to read public key (2), exiting...");
+						exit(EXIT_FAILURE);
+					}
+
+					if (!SSL_CTX_use_certificate(levServerSSL, cert) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
+						Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
+						exit(EXIT_FAILURE);
+					}
+					SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+					SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
+
+					uint8_t *buff;
+					size_t len;
+					SSLFingerPrint = malloc(EVP_MAX_MD_SIZE);
+					unsigned int trash;
+					X509_digest(cert, EVP_sha512(), SSLFingerPrint, &trash);
+					Log(LOG_LEVEL_DEBUG, "SSL fingerprint: %128x", SSLFingerPrint);
+				} BIO_free(bio);
+
+				CONFIG_STRING(sslGroup, "RequestHeaders", RequestStringSSL, "CONNECT {HOST} HTTP/1.1\r\nHost: {HOST}\r\nUser-Agent: {UA}\r\n\r\n")
+					StrReplaceOrig(&RequestStringSSL, "{VERSION}", VERSION);
+				StrReplaceOrig(&RequestStringSSL, "{UA}", RequestUA);
+				StrReplaceOrig(&RequestStringSSL, "{KEY_NAME}", RequestHeaderKey);
 			}
-
-			levServerSSL = SSL_CTX_new(SSLv23_server_method());
-			SSL_CTX_set_session_cache_mode(levServerSSL, SSL_SESS_CACHE_OFF);
-
-			SSL_CTX *CTX;
-			X509 *cert = NULL;
-			RSA *rsa = NULL;
-			BIO *bio;
-			uint8_t *certBuff;
-			size_t size;
-
-			FILE *hFile = fopen(SSLPublicKey, "r"); {
-				if (hFile == NULL) {
-					Log(LOG_LEVEL_ERROR, "Failed to read public key (1), exiting...");
-					exit(EXIT_FAILURE);
-				}
-				fseek(hFile, 0, SEEK_END);
-				size = ftell(hFile);
-				fseek(hFile, 0, SEEK_SET);
-
-				certBuff = malloc(size);
-				fread(certBuff, size, 1, hFile);
-			} fclose(hFile);
-
-			bio = BIO_new_mem_buf(certBuff, size); {
-				cert = PEM_read_bio_X509(bio, NULL, 0, NULL);
-				if (cert == NULL) {
-					Log(LOG_LEVEL_ERROR, "Failed to read public key (2), exiting...");
-					exit(EXIT_FAILURE);
-				}
-
-				if (!SSL_CTX_use_certificate(levServerSSL, cert) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
-					Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
-					exit(EXIT_FAILURE);
-				}
-				SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-				SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
-
-				uint8_t *buff;
-				size_t len;
-				SSLFingerPrint = malloc(EVP_MAX_MD_SIZE);
-				unsigned int trash;
-				X509_digest(cert, EVP_sha512(), SSLFingerPrint, &trash);
-				Log(LOG_LEVEL_DEBUG, "SSL fingerprint: %128x", SSLFingerPrint);
-			} BIO_free(bio);
-
-			CONFIG_STRING(sslGroup, "RequestHeaders", RequestStringSSL, "CONNECT {HOST} HTTP/1.1\r\nHost: {HOST}\r\nUser-Agent: {UA}\r\n\r\n")
-			StrReplaceOrig(&RequestStringSSL, "{VERSION}", VERSION);
-			StrReplaceOrig(&RequestStringSSL, "{UA}", RequestUA);
-			StrReplaceOrig(&RequestStringSSL, "{KEY_NAME}", RequestHeaderKey);
-		}
 	} /* End SSL */
 
-	/* Stats */	{
+	/* Stats */ {
 		config_setting_t *statsGroup = config_setting_get_member(cfgRoot, "Stats");
 		CONFIG_INT(statsGroup, "CollectionInterval", StatsCollectionInterval, 10000)
-		CONFIG_INT(statsGroup, "MaxItems", StatsMaxItems, 1000)
+			CONFIG_INT(statsGroup, "MaxItems", StatsMaxItems, 1000)
 	} /* End stats */
 
 	/* GlobalIP */ {
@@ -344,8 +443,8 @@ int main(int argc, char** argv)
 		"Accept-Encoding: gzip, deflate, sdch\r\n"
 		"Accept-Language: en-US,en;q=0.8\r\n"
 		"{KEY_NAME}: {KEY_VAL}")
-	// Host and LPKey is injected upon request
-	StrReplaceOrig(&RequestString, "{VERSION}", VERSION);
+		// Host and LPKey is injected upon request
+		StrReplaceOrig(&RequestString, "{VERSION}", VERSION);
 	StrReplaceOrig(&RequestString, "{UA}", RequestUA);
 	StrReplaceOrig(&RequestString, "{KEY_NAME}", RequestHeaderKey);
 	RequestStringLen = strlen(RequestString);
@@ -433,33 +532,32 @@ int main(int argc, char** argv)
 		return EXIT_FAILURE;
 	}
 
-	pthread_mutex_init(&LockUncheckedProxies, NULL);
-	pthread_mutex_init(&LockCheckedProxies, NULL);
-	pthread_mutex_init(&LockStatsHarvesterPrxsrc, NULL);
-	pthread_mutex_init(&LockStatsProxyCount, NULL);
-
 #define THREAD_START(var, fx, name) pthread_t var; status = pthread_create(&var, NULL, (void*)fx, NULL); if (status != 0) { Log(LOG_LEVEL_ERROR, name" creation error, code %d", status); return status; } pthread_setname_np(var, name); pthread_detach(var);
 
 	THREAD_START(serverBase, ServerBase, "Server base")
-	THREAD_START(serverBaseSSL, ServerBaseSSL, "Server base SSL")
+		THREAD_START(serverBaseSSL, ServerBaseSSL, "Server base SSL")
 
-	if (EnableUDP) {
-		if (GlobalIp4 != NULL)
-			ServerUDP4();
-		if (GlobalIp6 != NULL)
-			ServerUDP6();
-	}
+		if (EnableUDP) {
+			if (GlobalIp4 != NULL)
+				ServerUDP4();
+			if (GlobalIp6 != NULL)
+				ServerUDP6();
+		}
 
 	THREAD_START(harvestThread, HarvestLoop, "Harvest thread")
-	THREAD_START(removeThread, RemoveThread, "Removal thread")
-	THREAD_START(checkThread, CheckLoop, "Check thread")
-	THREAD_START(requestBase, RequestBase, "Request base")
-	THREAD_START(statsThread, StatsCollection, "Stats thread")
+		THREAD_START(removeThread, RemoveThread, "Removal thread")
+		THREAD_START(checkThread, CheckLoop, "Check thread")
+		THREAD_START(requestBase, RequestBase, "Request base")
+		THREAD_START(statsThread, StatsCollection, "Stats thread")
 
-	Log(LOG_LEVEL_SUCCESS, "Non-interactive mode active");
+		Log(LOG_LEVEL_SUCCESS, "Non-interactive mode active");
 
 	for (;;) {
+#ifdef __linux__
 		sleep(INT_MAX); // gdb is flipping out when we exit main thread
+#elif defined _WIN32 || defined _WIN64
+		Sleep(INT_MAX);
+#endif
 		ERR_free_strings();
 		EVP_cleanup();
 		CONF_modules_finish();

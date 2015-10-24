@@ -10,6 +10,7 @@
 #include "ProxyRemove.h"
 #include "Interface.h"
 #include "Config.h"
+#include "CPH_Threads.h"
 #include <openssl/ssl.h>
 #include <pcre.h>
 #include <assert.h>
@@ -19,7 +20,9 @@
 #include <assert.h>
 #include "Server.h"
 #include <event2/buffer.h>
+#ifdef __linux__
 #include <unistd.h>
+#endif
 #include <stdbool.h>
 #include <stdint.h>
 #include <math.h>
@@ -70,17 +73,6 @@ static const char *GetCountryByIPv6Map(IPv6Map *In)
 		} free(ip);
 		return "--";
 	}
-
-	/*const char *ret;
-	if (GetIPType(In) == IPV4) {
-		ret = GeoIP_country_code_by_ipnum(GeoIPDB, In->Data[3]);
-	} else {
-		geoipv6_t ip;
-		memcpy(ip.s6_addr, In->Data, IPV6_SIZE);
-		ret = GeoIP_country_code_by_ipnum_v6(GeoIPDB6, ip);
-	}
-
-	return ret == NULL ? "--" : ret;*/
 }
 
 void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...)
@@ -90,7 +82,8 @@ void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...)
 
 	va_list args;
 	va_start(args, Format); {
-		vasprintf(&body, Format, args);
+		assert(0); // TODO: MINGW
+		//vasprintf(&body, Format, args);
 	} va_end(args);
 	size_t bodyLen = strlen(body);
 
@@ -273,123 +266,129 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 
 		size_t pathLen = secondIndex - (firstIndex + 1);
 
-		char path[pathLen * sizeof(char) + 1];
-		memcpy(path, firstIndex + 1, pathLen * sizeof(char) + 1);
-		path[pathLen] = 0x00;
+		char *path = malloc(pathLen * sizeof(char) + 1); {
+			memcpy(path, firstIndex + 1, pathLen * sizeof(char) + 1);
+			path[pathLen] = 0x00;
 
-		Log(LOG_LEVEL_DEBUG, "Server -> %s", path);
+			Log(LOG_LEVEL_DEBUG, "Server -> %s", path);
 
-		if (pathLen == 7 && strncmp(path, "/prxchk", 7) == 0) {
-			bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
-			ProxyCheckLanding(BuffEvent, Buff);
-		} else if (pathLen == 7 && strncmp(path, "/ifaceu", 7) == 0)
-			InterfaceUncheckedProxies(BuffEvent, *Buff);
-		else if (pathLen == 6 && strncmp(path, "/iface", 6) == 0)
-			InterfaceProxies(BuffEvent, *Buff);
-		else if (pathLen == 7 && strncmp(path, "/prxsrc", 7) == 0)
-			InterfaceProxySources(BuffEvent, *Buff);
-		else if (pathLen == 6 && strncmp(path, "/stats", 6) == 0)
-			InterfaceStats(BuffEvent, *Buff);
-		else if (pathLen > 4 && strncmp(path, "/zen", 4) == 0) {
-			freeBufferEvent = false; // Free'd in second stage of ZEN DNS lookup
-			InterfaceRawSpamhausZen(BuffEvent, *Buff);
-		} else if (pathLen > 7 && strncmp(path, "/httpbl", 7) == 0) {
-			freeBufferEvent = false; // Free'd in second stage of Http:BL DNS lookup
-			InterfaceRawHttpBL(BuffEvent, *Buff);
-		} else if (pathLen > 5 && strncmp(path, "/rdns", 5) == 0)
-			InterfaceRawReverseDNS(BuffEvent, *Buff);
-		else if (pathLen >= 4 && strncmp(path, "/add", 4) == 0) {
-			freeBufferEvent = false; // Needed by POST
-			InterfaceRawUProxyAdd(BuffEvent, *Buff);
-		} else if (pathLen > 12 && strncmp(path, "/cpagerender", 12) == 0) {
-			freeBufferEvent = false; // Free'd in second stage of custom page request
-			InterfaceRawGetCustomPage(BuffEvent, *Buff, true);
-		} else if (pathLen > 6 && strncmp(path, "/cpage", 6) == 0) {
-			freeBufferEvent = false; // Free'd in second stage of custom page request
-			InterfaceRawGetCustomPage(BuffEvent, *Buff, false);
-		} else if (pathLen == 6 && strncmp(path, "/tools", 6) == 0)
-			InterfaceTools(BuffEvent, *Buff);
-		else if (pathLen >= 9 && strncmp(path, "/settings", 9) == 0)
-			InterfaceSettings(BuffEvent, *Buff);
+			bufferevent_setcb(BuffEvent, NULL, NULL, NULL, NULL);
+
+			if (pathLen == 7 && strncmp(path, "/prxchk", 7) == 0) {
+				bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
+				ProxyCheckLanding(BuffEvent, Buff);
+			} else if (pathLen == 7 && strncmp(path, "/ifaceu", 7) == 0)
+				InterfaceUncheckedProxies(BuffEvent, *Buff);
+			else if (pathLen == 6 && strncmp(path, "/iface", 6) == 0)
+				InterfaceProxies(BuffEvent, *Buff);
+			else if (pathLen == 7 && strncmp(path, "/prxsrc", 7) == 0)
+				InterfaceProxySources(BuffEvent, *Buff);
+			else if (pathLen == 6 && strncmp(path, "/stats", 6) == 0)
+				InterfaceStats(BuffEvent, *Buff);
+			else if (pathLen > 4 && strncmp(path, "/zen", 4) == 0) {
+				freeBufferEvent = false; // Free'd in second stage of ZEN DNS lookup
+				InterfaceRawSpamhausZen(BuffEvent, *Buff);
+			} else if (pathLen > 7 && strncmp(path, "/httpbl", 7) == 0) {
+				freeBufferEvent = false; // Free'd in second stage of Http:BL DNS lookup
+				InterfaceRawHttpBL(BuffEvent, *Buff);
+			} else if (pathLen > 5 && strncmp(path, "/rdns", 5) == 0)
+				InterfaceRawReverseDNS(BuffEvent, *Buff);
+			else if (pathLen >= 4 && strncmp(path, "/add", 4) == 0) {
+				freeBufferEvent = false; // Needed by POST
+				InterfaceRawUProxyAdd(BuffEvent, *Buff);
+			} else if (pathLen > 12 && strncmp(path, "/cpagerender", 12) == 0) {
+				freeBufferEvent = false; // Free'd in second stage of custom page request
+				InterfaceRawGetCustomPage(BuffEvent, *Buff, true);
+			} else if (pathLen > 6 && strncmp(path, "/cpage", 6) == 0) {
+				freeBufferEvent = false; // Free'd in second stage of custom page request
+				InterfaceRawGetCustomPage(BuffEvent, *Buff, false);
+			} else if (pathLen == 6 && strncmp(path, "/tools", 6) == 0)
+				InterfaceTools(BuffEvent, *Buff);
+			else if (pathLen >= 9 && strncmp(path, "/settings", 9) == 0)
+				InterfaceSettings(BuffEvent, *Buff);
 #if DEBUG
-		else if (pathLen == 24 && strncmp(path, "/tools?action=tmplreload", 24) == 0)
-			InterfaceHtmlTemplatesReload(BuffEvent, *Buff);
+			else if (pathLen == 24 && strncmp(path, "/tools?action=tmplreload", 24) == 0)
+				InterfaceHtmlTemplatesReload(BuffEvent, *Buff);
 #endif
-		else if (pathLen > 6 && strncmp(path, "/check", 6) == 0) {
-			Log(LOG_LEVEL_DEBUG, "/check on %p", BuffEvent);
-			freeBufferEvent = false; // Free'd in second stage of raw recheck
-			InterfaceRawRecheck(BuffEvent, *Buff);
-		} else if (pathLen == 1 && strncmp(path, "/", 1) == 0)
-			InterfaceHome(BuffEvent, *Buff);
-		else if (pathLen > 8 && strncmp(path, "/recheck", 8) == 0) {
-			if (HtmlTemplateUseStock)
-				freeBufferEvent = false; // Free'd in second stage of stock html recheck
-			InterfaceProxyRecheck(BuffEvent, *Buff);
-		} else if (pathLen == 4 && strncmp(path, "/wsn", 4) == 0) {
-			// Websocket notifications
-			WebsocketSwitch(BuffEvent, *Buff);
-			freeBufferEvent = false; // Handled by websocket file
-		} else {
-			if (HtmlTemplateUseStock)
-				goto free;
-			/* Ruse filter */ {
-				// We don't resolve unicode or http %hex so we don't care
-				// Absolute path traversal doesn't apply
-
-				if (strstr(path, "..") != 0) {
-					// no
+			else if (pathLen > 6 && strncmp(path, "/check", 6) == 0) {
+				Log(LOG_LEVEL_DEBUG, "/check on %p", BuffEvent);
+				freeBufferEvent = false; // Free'd in second stage of raw recheck
+				InterfaceRawRecheck(BuffEvent, *Buff);
+			} else if (pathLen == 1 && strncmp(path, "/", 1) == 0)
+				InterfaceHome(BuffEvent, *Buff);
+			else if (pathLen > 8 && strncmp(path, "/recheck", 8) == 0) {
+				if (HtmlTemplateUseStock)
+					freeBufferEvent = false; // Free'd in second stage of stock html recheck
+				InterfaceProxyRecheck(BuffEvent, *Buff);
+			} else if (pathLen == 4 && strncmp(path, "/wsn", 4) == 0) {
+				// Websocket notifications
+				WebsocketSwitch(BuffEvent, *Buff);
+				freeBufferEvent = false; // Handled by websocket file
+			} else {
+				if (HtmlTemplateUseStock)
 					goto free;
-				}
-			} /* End ruse filter */
-			char filePath[pathLen + (13 * sizeof(char)) + 1];
-			strcpy(filePath, "./html/files/");
-			strcat(filePath, path);
+				/* Ruse filter */ {
+					// We don't resolve unicode or http %hex so we don't care
+					// Absolute path traversal doesn't apply
 
-			FILE *hFile;
-			if ((hFile = fopen(filePath, "r")) == NULL) {
-				char filePath[pathLen + (28 * sizeof(char)) + 1];
-				strcpy(filePath, "/etc/liveproxies/html/files/");
-				strcat(filePath, path);
-				hFile = fopen(filePath, "r"); // uwaga
-
-				// evbuffer_add_file() or evbuffer_add_file_segment
-			}
-			if (hFile != NULL) {
-				fseek(hFile, 0, SEEK_END);
-				size_t size = ftell(hFile);
-				fseek(hFile, 0, SEEK_SET);
-
-				char fileContents[size];
-				fread(fileContents, size, 1, hFile);
-				fclose(hFile);
-
-				char *mime = "text/plain";
-
-				for (size_t x = 0;x < HtmlTemplateMimeTypesSize;x++) {
-					if (strcmp(&(path[pathLen - strlen(HtmlTemplateMimeTypes[x].extension)]), HtmlTemplateMimeTypes[x].extension) == 0) {
-						mime = HtmlTemplateMimeTypes[x].type;
-						break;
+					if (strstr(path, "..") != 0) {
+						// no
+						goto free;
 					}
-				}
+				} /* End ruse filter */
 
-				size_t intSize = INTEGER_VISIBLE_SIZE(size);
+				// TODO: Open static files in AppData on WIN32
 
-				char header[((53 + intSize + strlen(mime)) * sizeof(char)) + 1];
-				sprintf(header, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: %s\r\n\r\n", size, mime);
-				bufferevent_write(BuffEvent, header, (53 + intSize + strlen(mime)) * sizeof(char));
-				bufferevent_write(BuffEvent, fileContents, size);
-				bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+				char *filePath = malloc(pathLen + (13 * sizeof(char)) + 1); {
+					strcpy(filePath, "./html/files/");
+					strcat(filePath, path);
+
+					FILE *hFile;
+					if ((hFile = fopen(filePath, "r")) == NULL) {
+						char *filePathGlobal = malloc(pathLen + (28 * sizeof(char)) + 1); {
+							strcpy(filePathGlobal, "/etc/liveproxies/html/files/");
+							strcat(filePathGlobal, path);
+							hFile = fopen(filePathGlobal, "r"); // uwaga
+						} free(filePathGlobal);
+
+						// TODO: evbuffer_add_file() or evbuffer_add_file_segment
+					}
+					if (hFile != NULL) {
+						fseek(hFile, 0, SEEK_END);
+						size_t size = ftell(hFile);
+						fseek(hFile, 0, SEEK_SET);
+
+						char *fileContents = malloc(size); {
+							fread(fileContents, size, 1, hFile);
+							fclose(hFile);
+
+							char *mime = "text/plain";
+
+							for (size_t x = 0;x < HtmlTemplateMimeTypesSize;x++) {
+								if (strcmp(&(path[pathLen - strlen(HtmlTemplateMimeTypes[x].extension)]), HtmlTemplateMimeTypes[x].extension) == 0) {
+									mime = HtmlTemplateMimeTypes[x].type;
+									break;
+								}
+							}
+
+							size_t intSize = INTEGER_VISIBLE_SIZE(size);
+
+							char *header = malloc(((53 + intSize + strlen(mime)) * sizeof(char)) + 1); {
+								sprintf(header, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: %s\r\n\r\n", size, mime);
+								bufferevent_write(BuffEvent, header, (53 + intSize + strlen(mime)) * sizeof(char));
+							} free(header);
+							bufferevent_write(BuffEvent, fileContents, size);
+						} free(fileContents);
+						bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+					}
+				} free(filePath);
 			}
-		}
+		} free(path);
 	} /* End page dispatch */
 
 free:
-	if (freeBufferEvent) {
-		if (evbuffer_get_length(bufferevent_get_output(BuffEvent)))
-			bufferevent_setcb(BuffEvent, ServerRead, (bufferevent_data_cb)bufferevent_free, ServerEvent, NULL);
-		else
-			bufferevent_free(BuffEvent);
-	}
+	if (freeBufferEvent)
+		BufferEventFreeOnWrite(BuffEvent);
 }
 
 typedef enum _SERVER_TYPE {
@@ -485,7 +484,7 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 		{
 			struct bufferevent *bev = bufferevent_socket_new(base, Fd, BEV_OPT_CLOSE_ON_FREE);
 			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
-			bufferevent_setcb(bev, ServerRead, NULL, ServerEvent, false);
+			bufferevent_setcb(bev, ServerRead, NULL, (bufferevent_event_cb)ServerEvent, false);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
 		}
@@ -510,27 +509,31 @@ static struct evconnlistener *LevConnListenerBindCustom(struct event_base *Base,
 	evutil_socket_t fd;
 	int on = 1;
 	int family = GetIPType(Ip) == IPV4 ? AF_INET : AF_INET6;
+#if defined LEV_OPT_REUSEABLE_PORT && defined LEV_OPT_DEFERRED_ACCEPT
 	int flags = LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE | LEV_OPT_REUSEABLE_PORT | LEV_OPT_DEFERRED_ACCEPT;
+#else
+	int flags = LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE;
+#endif
 
-	fd = socket(family, SOCK_STREAM | SOCK_NONBLOCK, 0);
+	fd = socket(family, SOCK_STREAM, 0);
+
 	if (fd == -1)
 		return NULL;
 
 	if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, (void*)&on, sizeof(on)) < 0)
 		goto err;
 
-	if (evutil_make_listen_socket_reuseable(fd) < 0)
-		goto err;
-
-	if (evutil_make_listen_socket_reuseable_port(fd) < 0)
-		goto err;
-
-	if (evutil_make_tcp_listen_socket_deferred(fd) < 0)
+	if (evutil_make_socket_nonblocking(fd) < 0 ||
+		evutil_make_listen_socket_reuseable(fd) < 0 ||
+		evutil_make_listen_socket_reuseable_port(fd) < 0 ||
+		evutil_make_tcp_listen_socket_deferred(fd) < 0)
 		goto err;
 
 	if (family == AF_INET6) {
+#ifdef IPV6_V6ONLY
 		if (setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, (void *)&on, sizeof(on)) < 0)
 			goto err;
+#endif
 	}
 
 	struct sockaddr *sin = IPv6MapToRaw(Ip, Port); {
@@ -610,24 +613,24 @@ void ServerBase()
 
 static void ServerUDP(int hSock)
 {
-	char buff[PROXY_IDENTIFIER_LEN];
-	struct sockaddr_in remote;
+	char *buff = malloc(PROXY_IDENTIFIER_LEN);
+	struct sockaddr_in6 remote;
 	socklen_t len;
 	size_t size;
 
 	for (;;) {
-		len = sizeof(remote);
+		len = sizeof(struct sockaddr_in6);
 		Log(LOG_LEVEL_DEBUG, "WServerUDP: Waiting...");
-		size = recvfrom(hSock, buff, PROXY_IDENTIFIER_LEN, 0, (struct sockaddr *)&remote, &len);
+		size = recvfrom(hSock, buff, PROXY_IDENTIFIER_LEN, 0, &remote, &len);
 		Log(LOG_LEVEL_DEBUG, "WServerUDP: Got data");
 		if (size != PROXY_IDENTIFIER_LEN) {
-			Log(LOG_LEVEL_DEBUG, "WServerUDP: Drop on len");
+			Log(LOG_LEVEL_DEBUG, "WServerUDP: Drop on len (%d)", size);
 			continue;
 		}
 
 		UNCHECKED_PROXY *UProxy = NULL;
 
-		IPv6Map *ip = RawToIPv6Map((struct sockaddr*)(&remote)); {
+		IPv6Map *ip = RawToIPv6Map(&remote); {
 			pthread_mutex_lock(&LockUncheckedProxies); {
 				for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 					if (MemEqual(buff, UncheckedProxies[x]->identifier, PROXY_IDENTIFIER_LEN) && IPv6MapEqual(ip, UncheckedProxies[x]->ip)) {
@@ -688,9 +691,11 @@ void ServerUDP4()
 	hSock = socket(AF_INET, SOCK_DGRAM, 0);
 	int yes = 1;
 	setsockopt(hSock, SOL_SOCKET, SO_REUSEADDR, (void *)&yes, sizeof(yes));
+#if defined __linux__ && defined SO_REUSEPORT
 	setsockopt(hSock, SOL_SOCKET, SO_REUSEPORT, (void *)&yes, sizeof(yes));
+#endif
 
-	bzero(&local, sizeof(local));
+	memset(&local, 0, sizeof(local));
 	local.sin_family = AF_INET;
 	local.sin_port = htons(ServerPortUDP);
 	bind(hSock, (struct sockaddr *)&local, sizeof(local));
@@ -712,10 +717,14 @@ void ServerUDP6()
 	hSock = socket(AF_INET6, SOCK_DGRAM, 0);
 	int yes = 1;
 	setsockopt(hSock, SOL_SOCKET, SO_REUSEADDR, (void *)&yes, sizeof(yes));
+#if defined __linux__ && defined SO_REUSEPORT
 	setsockopt(hSock, SOL_SOCKET, SO_REUSEPORT, (void *)&yes, sizeof(yes));
+#endif
+#ifdef IPV6_V6ONLY
 	setsockopt(hSock, IPPROTO_IPV6, IPV6_V6ONLY, (void *)&yes, sizeof(yes));
+#endif
 
-	bzero(&local, sizeof(local));
+	memset(&local, 0, sizeof(local));
 	local.sin6_family = AF_INET6;
 	local.sin6_port = htons(ServerPortUDP);
 	bind(hSock, (struct sockaddr *)&local, sizeof(local));

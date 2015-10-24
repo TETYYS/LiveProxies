@@ -4,6 +4,10 @@
 #include <stdbool.h>
 #include "IPv6Map.h"
 
+#if defined _WIN32 || defined _WIN64
+	#include <Winsock2.h>
+#endif
+
 uint64_t RemoveThreadInterval;
 uint64_t CheckingInterval;
 uint64_t GlobalTimeout;

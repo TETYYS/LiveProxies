@@ -27,9 +27,9 @@ SSL_CTX *RequestBaseSSLCTX;
 
 void RequestAsync(UNCHECKED_PROXY *UProxy);
 
-void CALLBACK EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_PROXY *UProxy);
-void CALLBACK EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy);
-void CALLBACK EVRead(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy);
+void EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_PROXY *UProxy);
+void EVWrite(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy);
+void EVRead(struct bufferevent *BuffEvent, UNCHECKED_PROXY *UProxy);
 
 typedef enum _PROXY_HANDLE_DATA_EV_TYPE {
 	EV_TYPE_READ,
@@ -37,5 +37,4 @@ typedef enum _PROXY_HANDLE_DATA_EV_TYPE {
 	EV_TYPE_CONNECT
 } PROXY_HANDLE_DATA_EV_TYPE;
 
-void ProxyDNSResolved(int Err, struct evutil_addrinfo *Addr, UNCHECKED_PROXY *UProxy);
 void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType);

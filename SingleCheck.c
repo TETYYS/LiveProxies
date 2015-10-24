@@ -3,16 +3,59 @@
 #include "SingleCheck.h"
 #include "ProxyLists.h"
 #include "Global.h"
-#include <netinet/in.h>
-#include <netdb.h>
-#include <resolv.h>
+#ifdef __linux__
+	#include <netinet/in.h>
+	#include <netdb.h>
+	#include <arpa/inet.h>
+#elif defined _WIN32 || defined _WIN64
+	#include <Winsock2.h>
+	#include <Ws2tcpip.h>
+	#include <windows.h>
+
+int WSAAPI getnameinfo(
+	const struct sockaddr FAR *sa,
+	socklen_t                 salen,
+	char FAR                  *host,
+	DWORD                     hostlen,
+	char FAR                  *serv,
+	DWORD                     servlen,
+	int                       flags
+	);
+
+typedef struct _addrinfo {
+	int             ai_flags;
+	int             ai_family;
+	int             ai_socktype;
+	int             ai_protocol;
+	size_t          ai_addrlen;
+	char            *ai_canonname;
+	struct sockaddr  *ai_addr;
+	struct addrinfo  *ai_next;
+} ADDRINFOA, *PADDRINFOA;
+
+int WSAAPI getaddrinfo(
+	PCSTR      pNodeName,
+	PCSTR      pServiceName,
+	const ADDRINFOA  *pHints,
+	PADDRINFOA *ppResult
+	);
+
+void WSAAPI freeaddrinfo(
+	struct addrinfo *ai
+	);
+
+#endif
+
 #include <string.h>
 #include <event2/bufferevent.h>
 #include "ProxyRequest.h"
 #include "Logger.h"
 #include "Config.h"
 
-void PageRequest(PROXY *In, void CALLBACK *FinishedCallback, char *Page, void *Ex)
+#include <assert.h>
+#include "DNS.h"
+
+void PageRequest(PROXY *In, void *FinishedCallback, char *Page, void *Ex)
 {
 	bool success = false;
 	UNCHECKED_PROXY *UProxy = UProxyFromProxy(In);
@@ -64,7 +107,7 @@ void PageRequest(PROXY *In, void CALLBACK *FinishedCallback, char *Page, void *E
 	RequestAsync(UProxy);
 }
 
-void Recheck(PROXY *In, void CALLBACK *FinishedCallback, void *Ex)
+void Recheck(PROXY *In, void *FinishedCallback, void *Ex)
 {
 	bool success = false;
 	UNCHECKED_PROXY *UProxy = UProxyFromProxy(In);
@@ -82,44 +125,37 @@ void Recheck(PROXY *In, void CALLBACK *FinishedCallback, void *Ex)
 char *ReverseDNS(IPv6Map *In)
 {
 	struct hostent *hent = NULL;
-	char *ret = NULL;
+	char *ret = zalloc(NI_MAXHOST);
 	IP_TYPE type = GetIPType(In);
 
-	if ((hent = gethostbyaddr(type == IPV4 ? &(In->Data[3]) : In->Data, type == IPV4 ? IPV4_SIZE : IPV6_SIZE, type == IPV4 ? AF_INET : AF_INET6))) {
-		ret = malloc((strlen(hent->h_name) * sizeof(char)) + 1);
-		strcpy(ret, hent->h_name);
-	}
+	struct sockaddr *raw = IPv6MapToRaw(In, 0); {
+		size_t sLen = type == IPV4 ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
 
-	return ret;
+		if (getnameinfo(type == IPV4 ? (struct sockaddr_in*)raw : (struct sockaddr_in6*)raw, sLen, ret, NI_MAXHOST, NULL, NULL, NI_NAMEREQD) == 0) {
+			free(raw);
+			ret = realloc(ret, (strlen(ret) * sizeof(char)) + 1);
+			return ret;
+		}
+
+	} free(raw);
+	free(ret);
+	return NULL;
 }
 
-typedef struct _ASYNC_DNS_LOOKUP_EX {
-	struct bufferevent *buffEvent;
-	struct gaicb *cb;
-} ASYNC_DNS_LOOKUP_EX;
-
-static void SpamhausZENAsyncStage2(sigval_t Ex)
+void SpamhausZENAsyncStage2(struct dns_cb_data *data)
 {
-	ASYNC_DNS_LOOKUP_EX *ex = Ex.sival_ptr;
+	DNS_LOOKUP_ASYNC_EX *ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
+	struct bufferevent *buffEvent = (struct bufferevent*)ex->object;
 
-	struct bufferevent *buffEvent = ex->buffEvent;
-	struct gaicb *cb = ex->cb;
-
-	free((void*)(cb->ar_name));
-
-	if (cb->ar_result == NULL) {
+	if (data->addr_len <= 0) {
 		bufferevent_write(buffEvent, "cln", 3 * sizeof(char));
-		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
-		bufferevent_free(buffEvent);
-		free(cb);
-		free(ex);
-		return;
+		if (data->error != DNS_DOES_NOT_EXIST)
+			Log(LOG_LEVEL_WARNING, "Failed to lookup spamhaus DNS");
+		goto end;
 	}
 
-	struct sockaddr_in *addr = (struct sockaddr_in*)(cb->ar_result->ai_addr);
-	uint8_t data = ((uint8_t*)(&(addr->sin_addr.s_addr)))[3];
-	freeaddrinfo(cb->ar_result);
-	switch (data) {
+	uint8_t addrData = ((uint8_t*)(data->addr))[3];
+	switch (addrData) {
 		case 2:
 			bufferevent_write(buffEvent, "sbl", 3 * sizeof(char));
 			break;
@@ -134,131 +170,31 @@ static void SpamhausZENAsyncStage2(sigval_t Ex)
 			bufferevent_write(buffEvent, "xbl", 3 * sizeof(char));
 	}
 
+end:
 	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
 	bufferevent_free(buffEvent);
-	free(cb);
-	free(ex);
+	ex->resolveDone = true;
 }
 
-void SpamhausZENAsync(IPv6Map *In, struct bufferevent *BuffEvent)
+void HTTP_BLAsyncStage2(struct dns_cb_data *data)
 {
-	struct addrinfo *servinfo;
-	IP_TYPE type = GetIPType(In);
+	DNS_LOOKUP_ASYNC_EX *ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
+	struct bufferevent *buffEvent = (struct bufferevent*)ex->object;
 
-	struct gaicb *cb = malloc(sizeof(struct gaicb));
-	memset(cb, 0, sizeof(struct gaicb));
-
-	cb->ar_name = malloc(type == IPV4 ? 33 : 82);
-	memset((void*)(cb->ar_name), 0, type == IPV4 ? 33 : 82);
-	if (type == IPV4) {
-		uint8_t a, b, c, d;
-		uint8_t *bytes = ((uint8_t*)&(In->Data[3]));
-		a = bytes[0];
-		b = bytes[1];
-		c = bytes[2];
-		d = bytes[3];
-		sprintf((char*)(cb->ar_name), "%d.%d.%d.%d.zen.spamhaus.org.", d, c, b, a);
-	} else {
-		uint8_t *data = (uint8_t*)(In->Data);
-		for (size_t x = IPV6_SIZE;x >= 0;x++) {
-			char format[2];
-			sprintf(format, "%x.", data[x]);
-			strcat((char*)(cb->ar_name), format);
-		}
-		strcat((char*)(cb->ar_name), ".zen.spamhaus.org.");
-	}
-
-	struct sigevent ev;
-	memset(&ev, 0, sizeof(struct sigevent));
-	ev.sigev_notify = SIGEV_THREAD;
-	ASYNC_DNS_LOOKUP_EX *ex = malloc(sizeof(ASYNC_DNS_LOOKUP_EX));
-	ex->buffEvent = BuffEvent;
-	ex->cb = cb;
-	ev.sigev_value.sival_ptr = ex;
-	ev.sigev_notify_function = SpamhausZENAsyncStage2;
-
-	Log(LOG_LEVEL_DEBUG, "Async getaddrinfo: %d", getaddrinfo_a(GAI_NOWAIT, &cb, 1, &ev));
-}
-
-SPAMHAUS_ZEN_ANSWER SpamhausZEN(IPv6Map *In)
-{
-	struct addrinfo *servinfo;
-	IP_TYPE type = GetIPType(In);
-
-	char *query = malloc(type == IPV4 ? 33 : 82); {
-		memset(query, 0, type == IPV4 ? 33 : 82);
-		if (type == IPV4) {
-			uint8_t a, b, c, d;
-			uint8_t *bytes = ((uint8_t*)&(In->Data[3]));
-			a = bytes[0];
-			b = bytes[1];
-			c = bytes[2];
-			d = bytes[3];
-			sprintf(query, "%d.%d.%d.%d.zen.spamhaus.org.", d, c, b, a);
-		} else {
-			uint8_t *data = (uint8_t*)In->Data;
-			for (size_t x = IPV6_SIZE;x >= 0;x++) {
-				char format[2];
-				sprintf(format, "%x.", data[x]);
-				strcat(query, format);
-			}
-			strcat(query, ".zen.spamhaus.org.");
-		}
-
-		if (getaddrinfo(query, NULL, NULL, &servinfo) != 0)
-			return SPAMHAUS_ZEN_ANSWER_CLEAN;
-	} free(query);
-
-	struct sockaddr_in *addr = (struct sockaddr_in*)(servinfo->ai_addr);
-	uint8_t data = ((uint8_t*)(&(addr->sin_addr.s_addr)))[3];
-	freeaddrinfo(servinfo);
-	switch (data) {
-		case 2:
-			return SPAMHAUS_ZEN_ANSWER_SBL;
-			break;
-		case 3:
-			return SPAMHAUS_ZEN_ANSWER_CSS;
-			break;
-		case 10:
-		case 11:
-			return SPAMHAUS_ZEN_ANSWER_PBL;
-			break;
-		default:
-			return SPAMHAUS_ZEN_ANSWER_XBL;
-	}
-}
-
-static void HTTP_BLAsyncStage2(sigval_t Ex)
-{
-	ASYNC_DNS_LOOKUP_EX *ex = Ex.sival_ptr;
-
-	struct bufferevent *buffEvent = ex->buffEvent;
-	struct gaicb *cb = ex->cb;
-
-	free((void*)(cb->ar_name));
-
-	if (cb->ar_result == NULL) {
+	if (data->addr_len <= 0) {
 		bufferevent_write(buffEvent, "1\r\nContent-Type: text/html\r\n\r\nl", 31 * sizeof(char));
-		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
-		bufferevent_free(buffEvent);
-		free(cb);
-		free(ex);
-		return;
+		if (data->error != DNS_DOES_NOT_EXIST)
+			Log(LOG_LEVEL_WARNING, "Failed to lookup HTTP_BL DNS");
+		goto end;
 	}
 
-	struct sockaddr_in *addr = (struct sockaddr_in*)(cb->ar_result->ai_addr);
-	uint8_t days = ((uint8_t*)(&(addr->sin_addr.s_addr)))[1];
-	uint8_t score = ((uint8_t*)(&(addr->sin_addr.s_addr)))[2];
-	HTTPBL_CROOK_TYPE crookType = ((uint8_t*)(&(addr->sin_addr.s_addr)))[3];
-
-	freeaddrinfo(cb->ar_result);
+	uint8_t days = ((uint8_t*)(data->addr))[1];
+	uint8_t score = ((uint8_t*)(data->addr))[2];
+	HTTPBL_CROOK_TYPE crookType = ((uint8_t*)(data->addr))[3];
 
 	if (crookType == 0) {
 		bufferevent_write(buffEvent, "1\r\nContent-Type: text/html\r\n\r\nl", 31 * sizeof(char));
-		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
-		bufferevent_free(buffEvent);
-		free(cb);
-		free(ex);
+		goto end;
 	}
 
 	char body[8];
@@ -284,10 +220,37 @@ static void HTTP_BLAsyncStage2(sigval_t Ex)
 	bufferevent_write(buffEvent, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
 	bufferevent_write(buffEvent, body, strlen(body) * sizeof(char));
 
+end:
 	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
 	bufferevent_free(buffEvent);
-	free(cb);
-	free(ex);
+	ex->resolveDone = true;
+}
+
+void SpamhausZENAsync(IPv6Map *In, struct bufferevent *BuffEvent)
+{
+	IP_TYPE type = GetIPType(In);
+
+	char *name = zalloc(type == IPV4 ? 32 : 81); {
+		if (type == IPV4) {
+			uint8_t a, b, c, d;
+			uint8_t *bytes = ((uint8_t*)&(In->Data[3]));
+			a = bytes[0];
+			b = bytes[1];
+			c = bytes[2];
+			d = bytes[3];
+			sprintf((char*)(name), "%d.%d.%d.%d.zen.spamhaus.org", d, c, b, a);
+		} else {
+			uint8_t *data = (uint8_t*)(In->Data);
+			for (size_t x = IPV6_SIZE;x >= 0;x++) {
+				char format[2];
+				sprintf(format, "%x.", data[x]);
+				strcat((char*)(name), format);
+			}
+			strcat((char*)(name), ".zen.spamhaus.org");
+		}
+
+		DNSResolveAsync(BuffEvent, name, false, SpamhausZENAsyncStage2);
+	} free(name);
 }
 
 void HTTP_BLAsync(IPv6Map *In, char *AccessKey, struct bufferevent *BuffEvent)
@@ -299,51 +262,9 @@ void HTTP_BLAsync(IPv6Map *In, char *AccessKey, struct bufferevent *BuffEvent)
 		return;
 	}
 
-	struct addrinfo *servinfo;
 	IP_TYPE type = GetIPType(In);
 
-	struct gaicb *cb = malloc(sizeof(struct gaicb));
-	memset(cb, 0, sizeof(struct gaicb));
-
-	cb->ar_name = malloc(type == IPV4 ? 34 + strlen(AccessKey) : 83 + strlen(AccessKey));
-	memset((void*)(cb->ar_name), 0, type == IPV4 ? 34 + strlen(AccessKey) : 83 + strlen(AccessKey));
-	if (type == IPV4) {
-		uint8_t a, b, c, d;
-		uint8_t *bytes = ((uint8_t*)&(In->Data[3]));
-		a = bytes[0];
-		b = bytes[1];
-		c = bytes[2];
-		d = bytes[3];
-		sprintf((char*)(cb->ar_name), "%s.%d.%d.%d.%d.dnsbl.httpbl.org.", AccessKey, d, c, b, a);
-	} else {
-		uint8_t *data = (uint8_t*)In->Data;
-		for (size_t x = IPV6_SIZE;x >= 0;x++) {
-			char format[2];
-			sprintf(format, "%x.", data[x]);
-			strcat((char*)(cb->ar_name), format);
-		}
-		strcat((char*)(cb->ar_name), ".dnsbl.httpbl.org.");
-	}
-
-	struct sigevent ev;
-	memset(&ev, 0, sizeof(struct sigevent));
-	ev.sigev_notify = SIGEV_THREAD;
-	ASYNC_DNS_LOOKUP_EX *ex = malloc(sizeof(ASYNC_DNS_LOOKUP_EX));
-	ex->buffEvent = BuffEvent;
-	ex->cb = cb;
-	ev.sigev_value.sival_ptr = ex;
-	ev.sigev_notify_function = HTTP_BLAsyncStage2;
-
-	Log(LOG_LEVEL_DEBUG, "Async getaddrinfo: %d", getaddrinfo_a(GAI_NOWAIT, &cb, 1, &ev));
-}
-
-void HTTP_BL(IPv6Map *In, char *AccessKey, HTTPBL_ANSWER OUT *Out)
-{
-	struct addrinfo *servinfo;
-	IP_TYPE type = GetIPType(In);
-
-	char *query = malloc(type == IPV4 ? 34 + strlen(AccessKey) : 83 + strlen(AccessKey)); {
-		memset(query, 0, type == IPV4 ? 34 + strlen(AccessKey) : 83 + strlen(AccessKey));
+	char *name = zalloc(type == IPV4 ? 33 + strlen(AccessKey) : 82 + strlen(AccessKey)); {
 		if (type == IPV4) {
 			uint8_t a, b, c, d;
 			uint8_t *bytes = ((uint8_t*)&(In->Data[3]));
@@ -351,7 +272,82 @@ void HTTP_BL(IPv6Map *In, char *AccessKey, HTTPBL_ANSWER OUT *Out)
 			b = bytes[1];
 			c = bytes[2];
 			d = bytes[3];
-			sprintf(query, "%s.%d.%d.%d.%d.dnsbl.httpbl.org.", AccessKey, d, c, b, a);
+			sprintf((char*)(name), "%s.%d.%d.%d.%d.dnsbl.httpbl.org", AccessKey, d, c, b, a);
+		} else {
+			uint8_t *data = (uint8_t*)In->Data;
+			for (size_t x = IPV6_SIZE;x >= 0;x++) {
+				char format[2];
+				sprintf(format, "%x.", data[x]);
+				strcat((char*)(name), format);
+			}
+			strcat((char*)(name), ".dnsbl.httpbl.org");
+		}
+
+		DNSResolveAsync(BuffEvent, name, false, HTTP_BLAsyncStage2);
+	} free(name);
+}
+
+SPAMHAUS_ZEN_ANSWER SpamhausZEN(IPv6Map *In)
+{
+	struct addrinfo *servinfo;
+	IP_TYPE type = GetIPType(In);
+
+	char *query = zalloc(type == IPV4 ? 33 : 82); {
+		if (type == IPV4) {
+			uint8_t a, b, c, d;
+			uint8_t *bytes = ((uint8_t*)&(In->Data[3]));
+			a = bytes[0];
+			b = bytes[1];
+			c = bytes[2];
+			d = bytes[3];
+			sprintf(query, "%d.%d.%d.%d.zen.spamhaus.org", d, c, b, a);
+		} else {
+			uint8_t *data = (uint8_t*)In->Data;
+			for (size_t x = IPV6_SIZE;x >= 0;x++) {
+				char format[2];
+				sprintf(format, "%x.", data[x]);
+				strcat(query, format);
+			}
+			strcat(query, ".zen.spamhaus.org");
+		}
+
+		if (getaddrinfo(query, NULL, NULL, &servinfo) != 0)
+			return SPAMHAUS_ZEN_ANSWER_CLEAN;
+	} free(query);
+
+	struct sockaddr_in *addr = (struct sockaddr_in*)(servinfo->ai_addr);
+	uint8_t data = ((uint8_t*)(&(addr->sin_addr.s_addr)))[3];
+	freeaddrinfo(servinfo);
+	switch (data) {
+		case 2:
+			return SPAMHAUS_ZEN_ANSWER_SBL;
+			break;
+		case 3:
+			return SPAMHAUS_ZEN_ANSWER_CSS;
+			break;
+		case 10:
+		case 11:
+			return SPAMHAUS_ZEN_ANSWER_PBL;
+			break;
+		default:
+			return SPAMHAUS_ZEN_ANSWER_XBL;
+	}
+}
+
+void HTTP_BL(IPv6Map *In, char *AccessKey, HTTPBL_ANSWER OUT *Out)
+{
+	struct addrinfo *servinfo;
+	IP_TYPE type = GetIPType(In);
+
+	char *query = zalloc(type == IPV4 ? 34 + strlen(AccessKey) : 83 + strlen(AccessKey)); {
+		if (type == IPV4) {
+			uint8_t a, b, c, d;
+			uint8_t *bytes = ((uint8_t*)&(In->Data[3]));
+			a = bytes[0];
+			b = bytes[1];
+			c = bytes[2];
+			d = bytes[3];
+			sprintf(query, "%s.%d.%d.%d.%d.dnsbl.httpbl.org", AccessKey, d, c, b, a);
 		} else {
 			uint8_t *data = (uint8_t*)(In->Data);
 			for (size_t x = IPV6_SIZE;x >= 0;x++) {
@@ -359,7 +355,7 @@ void HTTP_BL(IPv6Map *In, char *AccessKey, HTTPBL_ANSWER OUT *Out)
 				sprintf(format, "%x.", data[x]);
 				strcat(query, format);
 			}
-			strcat(query, ".dnsbl.httpbl.org.");
+			strcat(query, ".dnsbl.httpbl.org");
 		}
 
 		if (getaddrinfo(query, NULL, NULL, &servinfo) != 0) {

@@ -5,7 +5,9 @@
 #include "Config.h"
 #include <stdint.h>
 #include <stddef.h>
-#include <unistd.h>
+#ifdef __linux__
+	#include <unistd.h>
+#endif
 
 void RemoveThread()
 {

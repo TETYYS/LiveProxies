@@ -101,7 +101,11 @@ typedef struct _HTML_TEMPALTE_TABLE_INFO {
 	bool inTable;
 	size_t currentComponentIteration;
 	size_t tableObjectIteration;
+#ifdef __linux__
 	ssize_t tableHeadOrItemIteration;
+#elif defined _WIN32 || defined _WIN64
+	SSIZE_T tableHeadOrItemIteration;
+#endif
 	void *tableObject;
 } HTML_TEMPALTE_TABLE_INFO;
 
@@ -146,5 +150,5 @@ size_t HtmlTemplateSettingsSize;
 
 void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *SizeRef, config_setting_t *CfgRoot);
 void HtmlTemplateLoadAll();
-void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *Components, size_t Size, INTERFACE_INFO Info, HTML_TEMPALTE_TABLE_INFO TableInfo);
+void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *Components, size_t Size, WEB_INTERFACE_INFO Info, HTML_TEMPALTE_TABLE_INFO TableInfo);
 void HtmlTemplateMimeTypesInit();

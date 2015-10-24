@@ -3,8 +3,10 @@
 #include "Config.h"
 #include "ProxyLists.h"
 #include "Logger.h"
-#include <unistd.h>
-#include <pthread.h>
+#ifdef __linux__
+	#include <unistd.h>
+#endif
+#include "CPH_Threads.h"
 #include <stdlib.h>
 
 void StatsCollection()

@@ -2,9 +2,15 @@
 #include "Logger.h"
 #include "ProxyRequest.h"
 #include "IPv6Map.h"
-#include <sys/time.h>
+#ifdef __linux__
+	#include <sys/time.h>
+#elif defined _WIN32 || defined _WIN64
+	#include <windows.h>
+#endif
 #include <stddef.h>
 #include <assert.h>
+#include <event2/bufferevent.h>
+#include <event2/buffer.h>
 
 double GetUnixTimestampMilliseconds()
 {
@@ -28,8 +34,7 @@ char *GetHost(IP_TYPE Preffered, bool SSL)
 
 MEM_OUT char *FormatTime(uint64_t TimeMs)
 {
-	char *timeBuff = malloc(20 * sizeof(char) + 1);
-	memset(timeBuff, 0, 20 * sizeof(char) + 1);
+	char *timeBuff = zalloc(20 * sizeof(char) + 1);
 	struct tm *timeinfo;
 	time_t timeRaw = TimeMs / 1000;
 
@@ -39,10 +44,10 @@ MEM_OUT char *FormatTime(uint64_t TimeMs)
 	return timeBuff;
 }
 
-bool MemEqual(void *A, void *B, size_t Size)
+bool MemEqual(uint8_t *A, uint8_t *B, size_t Size)
 {
 	while (--Size) {
-		if (*((uint8_t*)A) != *((uint8_t*)B))
+		if (*A != *B)
 			return false;
 		A++;
 		B++;
@@ -110,9 +115,10 @@ bool StrReplaceOrig(char **In, char *Search, char *Replace)
 		char *rightSide = *In + searchOffset + (searchLen * sizeof(char));
 		size_t rightSideLen = ((*In + (origLen * sizeof(char))) - rightSide) / sizeof(char);
 
-		char cpyTemp[rightSideLen];
-		memcpy(cpyTemp, rightSide, rightSideLen);
-		memcpy(*In + searchOffset + (replaceLen * sizeof(char)), cpyTemp, rightSideLen);
+		char *cpyTemp = malloc(rightSideLen); {
+			memcpy(cpyTemp, rightSide, rightSideLen);
+			memcpy(*In + searchOffset + (replaceLen * sizeof(char)), cpyTemp, rightSideLen);
+		} free(cpyTemp);
 		//  -> Test test {TEST}  test
 
 		memcpy(*In + searchOffset, Replace, replaceLen * sizeof(char));
@@ -133,9 +139,10 @@ bool StrReplaceOrig(char **In, char *Search, char *Replace)
 		char *rightSide = *In + searchOffset + (searchLen * sizeof(char));
 		size_t rightSideLen = ((*In + (origLen * sizeof(char))) - rightSide) / sizeof(char);
 
-		char cpyTemp[rightSideLen];
-		memcpy(cpyTemp, rightSide, rightSideLen);
-		memcpy(*In + searchOffset + (replaceLen * sizeof(char)), cpyTemp, rightSideLen);
+		char *cpyTemp = malloc(rightSideLen); {
+			memcpy(cpyTemp, rightSide, rightSideLen);
+			memcpy(*In + searchOffset + (replaceLen * sizeof(char)), cpyTemp, rightSideLen);
+		} free(cpyTemp);
 		//  -> Test test {TEST testt
 
 		*In = realloc(*In, origToReplaceEndLen * sizeof(char) + 1); // Shorten string to make RAM happy
@@ -191,4 +198,12 @@ MEM_OUT bool HTTPFindHeader(char *In, char *Buff, char **Out, char **StartIndex,
 		*EndIndex = valEnd;
 
 	return true;
+}
+
+void BufferEventFreeOnWrite(struct bufferevent *In)
+{
+	if (evbuffer_get_length(bufferevent_get_output(In)))
+		bufferevent_setcb(In, NULL, (bufferevent_data_cb)bufferevent_free, (bufferevent_event_cb)bufferevent_free, NULL);
+	else
+		bufferevent_free(In);
 }

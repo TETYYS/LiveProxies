@@ -4,7 +4,7 @@
 #include "Interface.h"
 #include <event2/bufferevent.h>
 #include <event2/event.h>
-#include <pthread.h>
+#include "CPH_Threads.h"
 
 #define WEB_SOCKETS_MAX_PIECE_COUNT 32
 

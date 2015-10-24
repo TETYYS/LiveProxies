@@ -1,6 +1,10 @@
 #include "HtmlTemplate.h"
 #include "Logger.h"
-#include <dirent.h>
+#ifdef __linux__
+	#include <dirent.h>
+#elif defined _WIN32 || defined _WIN64
+	#include <windows.h>
+#endif
 #include <stddef.h>
 #include <string.h>
 #include <stdint.h>
@@ -44,16 +48,36 @@ void HtmlTemplateLoadAll()
 	HtmlComponentEnabled = NULL;
 	HtmlComponentDisabled = NULL;
 
-	DIR *d;
-	struct dirent *dir;
 	uint8_t itemsFound = 0;
 	bool fullPath = false;
 
-	d = opendir("./html");
+#ifdef __linux__
+	DIR *d;
+	struct dirent *dir;
+
+	d = opendir(LINUX_LOCAL_HTML_PATH);
 	if (!d) {
-		d = opendir("/etc/liveproxies/html");
+		d = opendir(LINUX_GLOBAL_HTML_PATH);
 		fullPath = true;
 	}
+#elif defined _WIN32 || defined _WIN64
+	WIN32_FIND_DATA fdFile;
+	HANDLE d = NULL;
+
+	if ((d = FindFirstFile(WINDOWS_LOCAL_HTML_PATH"*", &fdFile)) == INVALID_HANDLE_VALUE) {
+		fullPath = true;
+
+		size_t lenAppData = strlen(WinAppData);
+		char *appDataPath = malloc((lenAppData + strlen(WINDOWS_GLOBAL_HTML_PATH) + 1) * sizeof(char) + 1); {
+			strcpy(appDataPath, WinAppData);
+			strcat(appDataPath, WINDOWS_GLOBAL_HTML_PATH"*");
+			appDataPath[lenAppData + strlen(WINDOWS_GLOBAL_HTML_PATH)] = 0x00;
+
+			if ((d = FindFirstFile(appDataPath, &fdFile)) == INVALID_HANDLE_VALUE)
+				d = false;
+		} free(appDataPath);
+	}
+#endif
 
 	char *files[] = { "head.tmpl", "foot.tmpl", "home.tmpl", "iface.tmpl", "ifaceu.tmpl", "prxsrc.tmpl", "stats.tmpl", "check.tmpl", "tools.tmpl", "cpageraw.tmpl", "settings.tmpl" };
 
@@ -61,56 +85,109 @@ void HtmlTemplateLoadAll()
 		config_t cfg;
 		config_init(&cfg);
 
-		if (config_read_file(&cfg, "html/html.conf") == CONFIG_FALSE) {
-			Log(LOG_LEVEL_DEBUG, "Failed to open html/html.conf in working directory, opening in global...: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
+#ifdef __linux__
+		if (config_read_file(&cfg, LINUX_LOCAL_HTML_PATH"/html.conf") == CONFIG_FALSE) {
+#elif defined _WIN32 || defined _WIN64
+		if (config_read_file(&cfg, WINDOWS_LOCAL_HTML_PATH"/html.conf") == CONFIG_FALSE) {
+#endif
+			Log(LOG_LEVEL_DEBUG, "Failed to open html.conf in working directory, opening in global...: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
 
-			if (config_read_file(&cfg, "/etc/liveproxies/html/html.conf") == CONFIG_FALSE) {
-				Log(LOG_LEVEL_ERROR, "Failed to open /etc/liveproxies/html/html.conf: %s (line %d), using stock HTML...", config_error_text(&cfg), config_error_line(&cfg));
+#ifdef __linux__
+			if (config_read_file(&cfg, LINUX_GLOBAL_HTML_PATH"/html.conf") == CONFIG_FALSE) {
+#elif defined _WIN32 || defined _WIN64
+			char *appDataPath = malloc((strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 9) * sizeof(char) + 1); {
+				strcpy(appDataPath, WinAppData);
+				strcat(appDataPath, WINDOWS_GLOBAL_HTML_PATH"html.conf");
+				appDataPath[strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 9] = 0x00;
+			} free(appDataPath);
+
+			if (config_read_file(&cfg, appDataPath) == CONFIG_FALSE) {
+#endif
+				Log(LOG_LEVEL_ERROR, "Failed to open html.conf in global directory: %s (line %d), using stock HTML...", config_error_text(&cfg), config_error_line(&cfg));
 				HtmlTemplateUseStock = true;
 				return;
 			}
+#if defined _WIN32 || defined _WIN64
+			free(appDataPath);
+#endif
 		}
 
 		config_setting_t *cfgRoot = config_root_setting(&cfg);
 
-		while ((dir = readdir(d)) != NULL) {
-			for (size_t x = 0;x < arrlen(files);x++) {
-				if (strcmp(dir->d_name, files[x]) == 0) {
-					Log(LOG_LEVEL_DEBUG, "Found %s", files[x]);
-					char name[(strlen(dir->d_name) + (fullPath ? 21 : 6) * sizeof(char)) + 1];
-					sprintf(name, "%s/%s", fullPath ? "/etc/liveproxies/html" : "./html", files[x]);
-					FILE *hFile = fopen(name, "r");
-					if (hFile != NULL) {
-						Log(LOG_LEVEL_DEBUG, "Parsing %s...", dir->d_name);
+		char *name;
 
-						if (strcmp(dir->d_name, files[0]) == 0)
+#ifdef __linux__
+		while ((dir = readdir(d)) != NULL) {
+			name = dir->d_name;
+#elif defined _WIN32 || defined _WIN64
+		do {
+			name = fdFile.cFileName;
+#endif
+			for (size_t x = 0;x < arrlen(files);x++) {
+				if (strcmp(name, files[x]) == 0) {
+					Log(LOG_LEVEL_DEBUG, "Found %s", files[x]);
+
+#ifdef __linux__
+					char fullName[(strlen(name) + (fullPath ? strlen(LINUX_GLOBAL_HTML_PATH) : strlen(LINUX_LOCAL_HTML_PATH)) * sizeof(char)) + 1];
+					sprintf(fullName, "%s/%s", fullPath ? LINUX_GLOBAL_HTML_PATH : LINUX_LOCAL_HTML_PATH, files[x]);
+#elif defined _WIN32 || defined _WIN64
+					char *fullName;
+
+					if (fullPath) {
+						fullName = malloc((strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 1) * sizeof(char) + 1);
+
+						strcpy(fullName, WinAppData);
+						strcat(fullName, WINDOWS_GLOBAL_HTML_PATH"/");
+						strcat(fullName, files[x]);
+						fullName[strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 1] = 0x00;
+					} else {
+						fullName = malloc((strlen(WINDOWS_LOCAL_HTML_PATH) + 1) * sizeof(char) + 1);
+						strcpy(fullName, WINDOWS_LOCAL_HTML_PATH"/");
+						strcat(fullName, files[x]);
+					}
+
+					sprintf(fullName, "%s/%s", fullPath ? "/etc/liveproxies/html" : "./html", files[x]);
+#endif
+
+					FILE *hFile = fopen(fullName, "r");
+					if (hFile != NULL) {
+						Log(LOG_LEVEL_DEBUG, "Parsing %s...", name);
+
+						if (strcmp(name, files[0]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateHead, &HtmlTemplateHeadSize, cfgRoot);
-						if (strcmp(dir->d_name, files[1]) == 0)
+						if (strcmp(name, files[1]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateFoot, &HtmlTemplateFootSize, cfgRoot);
-						if (strcmp(dir->d_name, files[2]) == 0)
+						if (strcmp(name, files[2]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateHome, &HtmlTemplateHomeSize, cfgRoot);
-						if (strcmp(dir->d_name, files[3]) == 0)
+						if (strcmp(name, files[3]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateProxies, &HtmlTemplateProxiesSize, cfgRoot);
-						if (strcmp(dir->d_name, files[4]) == 0)
+						if (strcmp(name, files[4]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateUProxies, &HtmlTemplateUProxiesSize, cfgRoot);
-						if (strcmp(dir->d_name, files[5]) == 0)
+						if (strcmp(name, files[5]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateProxySources, &HtmlTemplateProxySourcesSize, cfgRoot);
-						if (strcmp(dir->d_name, files[6]) == 0)
+						if (strcmp(name, files[6]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateStats, &HtmlTemplateStatsSize, cfgRoot);
-						if (strcmp(dir->d_name, files[7]) == 0)
+						if (strcmp(name, files[7]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateCheck, &HtmlTemplateCheckSize, cfgRoot);
-						if (strcmp(dir->d_name, files[8]) == 0)
+						if (strcmp(name, files[8]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateTools, &HtmlTemplateToolsSize, cfgRoot);
-						if (strcmp(dir->d_name, files[9]) == 0)
+						if (strcmp(name, files[9]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateCPageRaw, &HtmlTemplateCPageRawSize, cfgRoot);
-						if (strcmp(dir->d_name, files[10]) == 0)
+						if (strcmp(name, files[10]) == 0)
 							HtmlTemplateParse(hFile, &HtmlTemplateSettings, &HtmlTemplateSettingsSize, cfgRoot);
 
 						itemsFound++;
 					}
+#if defined _WIN32 || defined _WIN64
+					free(fullName);
+#endif
 				}
 			}
+#ifdef __linux__
 		}
+#elif defined _WIN32 || defined _WIN64
+		} while (FindNextFile(d, &fdFile));
+#endif
 
 		//config_destroy(&cfg); // TODO: fix segfault here
 
@@ -119,7 +196,11 @@ void HtmlTemplateLoadAll()
 			HtmlTemplateUseStock = true;
 		}
 
+#ifdef __linux__
 		closedir(d);
+#elif defined _WIN32 || defined _WIN64
+		FindClose(d);
+#endif
 		Log(LOG_LEVEL_DEBUG, "Parsed all HTML tempalates");
 	} else {
 		Log(LOG_LEVEL_ERROR, "Cannot open HTML template dir, using stock HTML...");
@@ -208,7 +289,7 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 	size_t size = ftell(hFile);
 	fseek(hFile, 0, SEEK_SET);
 
-	char string[size + 1];
+	char *string = malloc(size + 1);
 	fread(string, size, 1, hFile);
 	fclose(hFile);
 	string[size] = 0;
@@ -368,9 +449,10 @@ void HtmlTemplateParse(FILE *hFile, HTML_TEMPLATE_COMPONENT **Template, size_t *
 		}
 		// Log(LOG_LEVEL_DEBUG, "Size: %d", *SizeRef);
 	}
+	free(string);
 }
 
-void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *Components, size_t Size, INTERFACE_INFO Info, HTML_TEMPALTE_TABLE_INFO TableInfo)
+void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *Components, size_t Size, WEB_INTERFACE_INFO Info, HTML_TEMPALTE_TABLE_INFO TableInfo)
 {
 	uint8_t rowStatus = 0;
 
@@ -415,7 +497,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 		Log(LOG_LEVEL_DEBUG, ".content: %s", Components[x].content);
 		Log(LOG_LEVEL_DEBUG, ".identifier: %d", Components[x].identifier);*/
 
-		if (Info.currentPage->page == INTERFACE_PAGE_CPAGE_RAW && TableInfo.tableObject == 1) {
+		if (Info.currentPage->page == INTERFACE_PAGE_CPAGE_RAW && (size_t)TableInfo.tableObject == 1) {
 			do {
 				x++;
 				Log(LOG_LEVEL_DEBUG, "CPAGE ++ -> %d (%d)", x, Components[x].identifier);
@@ -771,7 +853,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 						HTML_TEMPALTE_TABLE_INFO tableInfo;
 						tableInfo.inTable = true;
 						tableInfo.currentComponentIteration = x + 1;
-						tableInfo.tableObjectIteration = i;
+						tableInfo.tableObjectIteration = (size_t)i;
 						tableInfo.tableHeadOrItemIteration = 0;
 						tableInfo.tableObject = UncheckedProxies[i];
 						HtmlTemplateBufferInsert(Buffer, Components, Size, Info, tableInfo);
@@ -787,7 +869,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 						HTML_TEMPALTE_TABLE_INFO tableInfo;
 						tableInfo.inTable = true;
 						tableInfo.currentComponentIteration = x + 1;
-						tableInfo.tableObjectIteration = i;
+						tableInfo.tableObjectIteration = (size_t)i;
 						tableInfo.tableHeadOrItemIteration = 0;
 						tableInfo.tableObject = CheckedProxies[i];
 						HtmlTemplateBufferInsert(Buffer, Components, Size, Info, tableInfo);
@@ -803,7 +885,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 						HTML_TEMPALTE_TABLE_INFO tableInfo;
 						tableInfo.inTable = true;
 						tableInfo.currentComponentIteration = x + 1;
-						tableInfo.tableObjectIteration = i;
+						tableInfo.tableObjectIteration = (size_t)i;
 						tableInfo.tableHeadOrItemIteration = 0;
 						tableInfo.tableObject = &(HarvesterStatsPrxsrc[i]);
 						HtmlTemplateBufferInsert(Buffer, Components, Size, Info, tableInfo);
@@ -928,7 +1010,7 @@ void HtmlTemplateBufferInsert(struct evbuffer *Buffer, HTML_TEMPLATE_COMPONENT *
 			}
 			case HTML_TEMPLATE_COMPONENT_IDENTIFIER_CHECK_COUNTRY_FULL: {
 
-				char *country;
+				const char *country;
 				size_t len;
 				int status;
 				MMDB_lookup_result_s data;

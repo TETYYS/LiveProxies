@@ -6,9 +6,38 @@
 #include "IPv6Map.h"
 #include "Global.h"
 #include "Config.h"
-#include <python2.7/Python.h>
-#include <dirent.h>
+#if __linux__
+	#include <python2.7/Python.h>
+#elif defined _WIN32 || defined _WIN64
+	#include <Python.h>
+#endif
+#if __linux__
+	#include <dirent.h>
+#elif defined _WIN32 || defined _WIN64
+	#include <windows.h>
+#endif
 #include <curl/curl.h>
+
+#if defined _WIN32 || defined _WIN64
+char *strtok_r(char *str, const char *delim, char **save)
+{
+	char *res, *last;
+
+	if (!save)
+		return strtok(str, delim);
+	if (!str && !(str = *save))
+		return NULL;
+	last = str + strlen(str);
+	if ((*save = res = strtok(str, delim))) {
+		*save += strlen(res);
+		if (*save < last)
+			(*save)++;
+		else
+			*save = NULL;
+	}
+	return res;
+}
+#endif
 
 static char *last_strstr(const char *haystack, const char *needle)
 {
@@ -76,30 +105,62 @@ void HarvestLoop()
 			PyRun_SimpleString(sysPath);
 		} free(sysPath);
 
+#if __linux__
+
 		DIR *d;
 		struct dirent *ent;
 		d = opendir(HarvestersPath);
+
+#elif defined _WIN32 || defined _WIN64
+		WIN32_FIND_DATA fdFile;
+		HANDLE d = NULL;
+
+		size_t harvestersPathLen = strlen(HarvestersPath);
+		char *fullPath = malloc((harvestersPathLen + 4) * sizeof(char)); {
+			strcpy(fullPath, HarvestersPath);
+			if (HarvestersPath[harvestersPathLen - 1] == '\\') {
+				strcat(fullPath, "*.*");
+				HarvestersPath[harvestersPathLen + 3] = 0x00;
+			} else
+				strcat(fullPath, "\\*.*");
+			HarvestersPath[harvestersPathLen + 4] = 0x00;
+
+			if ((d = FindFirstFile(WINDOWS_LOCAL_HTML_PATH"*.*", &fdFile)) == INVALID_HANDLE_VALUE) {
+				d = false;
+			}
+		} free(fullPath);
+#endif
+
 		if (!d) {
 			Log(LOG_LEVEL_ERROR, "Failed to open \"%s\", no proxies added", HarvestersPath);
 			goto end;
 		}
+
+		char *name;
+
+#if __linux__
 		while ((ent = readdir(d)) != NULL) {
 			if (ent->d_type != DT_REG /* normal file */ || strlen(ent->d_name) < 4)
 				continue;
+			name = ent->d_name;
+#elif defined _WIN32 || defined _WIN64
+		do {
+			name = fdFile.cFileName;
+#endif
 
 			HARVESTER_PROXY_SOURCE_TYPE sourceType = NONE;
-			size_t fileNameLen = strlen(ent->d_name);
-			if (strcmp(ent->d_name + fileNameLen - 3, ".py") == 0)
+			size_t fileNameLen = strlen(name);
+			if (strcmp(name + fileNameLen - 3, ".py") == 0)
 				sourceType = SCRIPT;
-			if (strcmp(ent->d_name + fileNameLen - 4, ".txt") == 0 || strcmp(ent->d_name + fileNameLen - 4, ".prx") == 0)
+			if (strcmp(name + fileNameLen - 4, ".txt") == 0 || strcmp(name + fileNameLen - 4, ".prx") == 0)
 				sourceType = STATIC;
-			if (strcmp(ent->d_name + fileNameLen - 4, ".url") == 0)
+			if (strcmp(name + fileNameLen - 4, ".url") == 0)
 				sourceType = URL;
 			if (sourceType == NONE)
 				continue;
 
-			char *path = (char*)malloc(10 + strlen(ent->d_name) + 1 /* NULL */);
-			sprintf(path, "%s", ent->d_name);
+			char *path = (char*)malloc(10 + strlen(name) + 1 /* NULL */);
+			sprintf(path, "%s", name);
 			path[strlen(path) - (sourceType == SCRIPT ? 3 : 4)] = '\0';
 
 			Log(LOG_LEVEL_SUCCESS, "Executing %s... (%s)", path, ProxySourceTypeToString(sourceType));
@@ -120,82 +181,87 @@ void HarvestLoop()
 				pFunc = PyObject_GetAttrString(pModule, "run");
 				if (!pFunc) {
 					PyErr_Print();
-					goto freemodule;
+					Py_DECREF(pModule);
+					goto freepath;
 				}
 				pResult = PyObject_CallObject(pFunc, NULL);
 				if (!pResult) {
 					PyErr_Print();
-					goto freefunc;
+					Py_DECREF(pModule);
+					Py_XDECREF(pFunc);
+					goto freepath;
 				}
 
 				result = PyString_AsString(pResult);
 			}
 			if (sourceType == STATIC) {
-				char pathFull[(strlen(HarvestersPath) + 1 + fileNameLen) * sizeof(char)];
-				strcpy(pathFull, HarvestersPath);
-				strcat(pathFull, "/");
-				strcat(pathFull, ent->d_name);
+				char *pathFull = malloc((strlen(HarvestersPath) + 1 + fileNameLen) * sizeof(char)); {
+					strcpy(pathFull, HarvestersPath);
+					strcat(pathFull, "/");
+					strcat(pathFull, name);
 
-				FILE *hFile = fopen(pathFull, "r"); {
-					if (hFile == NULL)
-						goto freepath;
-					fseek(hFile, 0, SEEK_END);
-					size_t size = ftell(hFile);
-					fseek(hFile, 0, SEEK_SET);
+					FILE *hFile = fopen(pathFull, "r"); {
+						if (hFile == NULL)
+							goto freepath;
+						fseek(hFile, 0, SEEK_END);
+						size_t size = ftell(hFile);
+						fseek(hFile, 0, SEEK_SET);
 
-					result = malloc(size + 1);
-					fread(result, size, 1, hFile);
-					result[size] = 0x00;
-				} fclose(hFile);
+						result = malloc(size + 1);
+						fread(result, size, 1, hFile);
+						result[size] = 0x00;
+					} fclose(hFile);
+				} free(pathFull);
 			}
 			if (sourceType == URL) {
-				char pathFull[(strlen(HarvestersPath) + 1 + fileNameLen) * sizeof(char)];
-				strcpy(pathFull, HarvestersPath);
-				strcat(pathFull, "/");
-				strcat(pathFull, ent->d_name);
+				char pathFull = malloc((strlen(HarvestersPath) + 1 + fileNameLen) * sizeof(char)); {
+					strcpy(pathFull, HarvestersPath);
+					strcat(pathFull, "/");
+					strcat(pathFull, name);
 
-				FILE *hFile = fopen(pathFull, "r"); {
-					if (hFile == NULL)
-						goto freepath;
-					fseek(hFile, 0, SEEK_END);
-					size_t size = ftell(hFile);
-					fseek(hFile, 0, SEEK_SET);
+					FILE *hFile = fopen(pathFull, "r"); {
+						if (hFile == NULL)
+							goto freepath;
+						fseek(hFile, 0, SEEK_END);
+						size_t size = ftell(hFile);
+						fseek(hFile, 0, SEEK_SET);
 
-					char contents[size + 1];
-					fread(contents, size, 1, hFile);
-					contents[size] = 0x00;
+						char *contents = malloc(size + 1); {
+							fread(contents, size, 1, hFile);
+							contents[size] = 0x00;
 
-					char *nl = strstr(contents, "\r\n");
-					if (nl == NULL)
-						nl = strchr(contents, '\n');
+							char *nl = strstr(contents, "\r\n");
+							if (nl == NULL)
+								nl = strchr(contents, '\n');
 
-					if (nl == NULL) {
-						Log(LOG_LEVEL_WARNING, "Malformed URL type proxy source");
-						goto freepath;
-					}
-					*nl = 0x00;
-					char *url = nl + (1 * sizeof(char));
-					if (url[strlen(url) - 1] == '\n')
-						url[strlen(url) - 1] = 0x00;
+							if (nl == NULL) {
+								Log(LOG_LEVEL_WARNING, "Malformed URL type proxy source");
+								goto freepath;
+							}
+							*nl = 0x00;
+							char *url = nl + (1 * sizeof(char));
+							if (url[strlen(url) - 1] == '\n')
+								url[strlen(url) - 1] = 0x00;
 
-					result = malloc(1);
-					CURL *hCurl = curl_easy_init(); {
-						curl_easy_setopt(hCurl, CURLOPT_URL, url);
-						curl_easy_setopt(hCurl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
-						curl_easy_setopt(hCurl, CURLOPT_WRITEDATA, &result);
-						curl_easy_setopt(hCurl, CURLOPT_USERAGENT, REQUEST_UA);
+							result = malloc(1);
+							CURL *hCurl = curl_easy_init(); {
+								curl_easy_setopt(hCurl, CURLOPT_URL, url);
+								curl_easy_setopt(hCurl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+								curl_easy_setopt(hCurl, CURLOPT_WRITEDATA, &result);
+								curl_easy_setopt(hCurl, CURLOPT_USERAGENT, REQUEST_UA);
 
-						CURLcode res = curl_easy_perform(hCurl);
+								CURLcode res = curl_easy_perform(hCurl);
 
-						if (res != CURLE_OK) {
-							Log(LOG_LEVEL_WARNING, "Request to %s failed: %s", url, curl_easy_strerror(res));
-						} else {
-							if (strncmp(contents, "setType", 7) == 0)
-								curType = atoll(contents + 8);
-						}
-
-					} curl_easy_cleanup(hCurl);
-				} fclose(hFile);
+								if (res != CURLE_OK) {
+									Log(LOG_LEVEL_WARNING, "Request to %s failed: %s", url, curl_easy_strerror(res));
+								} else {
+									if (strncmp(contents, "setType", 7) == 0)
+										curType = atoll(contents + 8);
+								}
+							} curl_easy_cleanup(hCurl);
+						} free(contents);
+					} fclose(hFile);
+				} free(pathFull);
 			}
 
 			char *tokSave = NULL;
@@ -238,18 +304,20 @@ void HarvestLoop()
 			printf("Added %d (%d new) proxies from %s\n", total, added, path);
 			if (sourceType == SCRIPT) {
 				Py_DECREF(pResult);
-freefunc:
 				Py_XDECREF(pFunc);
-freemodule:
 				Py_DECREF(pModule);
-			} else {
+			} else
 				free(result);
-			}
-freepath:
+freepath:;
 			if (!statsEntryAdded)
 				free(path);
+#if __linux__
 		}
 		closedir(d);
+#elif defined _WIN32 || defined _WIN64
+		} while (FindNextFile(d, &fdFile));
+		FindClose(d);
+#endif
 		if (SizeUncheckedProxies == 0)
 			printf("Warning: no proxies to check, all threads will be inactive\n");
 end:

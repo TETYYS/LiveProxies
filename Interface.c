@@ -52,7 +52,7 @@ static void AuthWebRemove(size_t Index)
 	AuthWebList = realloc(AuthWebList, AuthWebCount * sizeof(*AuthWebList));
 }
 
-static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, INTERFACE_INFO *InterfaceInfo, bool AllowOnlyCookie)
+static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, WEB_INTERFACE_INFO *InterfaceInfo, bool AllowOnlyCookie)
 {
 	InterfaceInfo->user = NULL;
 	if (AuthLocalList == NULL)
@@ -94,7 +94,7 @@ static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, INTERFACE_I
 					if (!AllowOnlyCookie)
 						evbuffer_add(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char));
 					InterfaceInfo->user = AuthWebList[x]->username;
-					AuthWebList[x]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
+					AuthWebList[x]->expiry = (size_t)(GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
 					pthread_mutex_unlock(&AuthWebLock);
 					return true;
 				} else {
@@ -152,7 +152,7 @@ endCookie:
 					char *firstDelimiter = strchr(AuthLocalList[x]->password, '$');
 					char *secondDelimiter = strchr(firstDelimiter + (1 * sizeof(char)), '$');
 
-					size_t iterations = atoll(AuthLocalList[x]->password);
+					size_t iterations = (size_t)atoll(AuthLocalList[x]->password);
 					size_t saltb64Len = (secondDelimiter - (firstDelimiter + 1)) * (sizeof(char));
 
 					saltb64 = malloc(saltb64Len + 1 /* NUL */); {
@@ -176,8 +176,8 @@ endCookie:
 									free(ip);
 									free(authStr);
 
-									if (AuthWebList[x]->expiry >= (GetUnixTimestampMilliseconds() / 1000)) {
-										AuthWebList[x]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
+									if (AuthWebList[x]->expiry >= (size_t)(GetUnixTimestampMilliseconds() / 1000)) {
+										AuthWebList[x]->expiry = (size_t)(GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
 										InterfaceInfo->user = AuthWebList[x]->username;
 										pthread_mutex_unlock(&AuthWebLock);
 										evbuffer_add(OutBuff, "HTTP/1.1 200 OK\r\nContent-Length: ", 33 * sizeof(char));
@@ -199,7 +199,7 @@ endCookie:
 								AuthWebList = malloc(++AuthWebCount * sizeof(*AuthWebList));
 
 							AuthWebList[AuthWebCount - 1] = malloc(sizeof(AUTH_WEB));
-							AuthWebList[AuthWebCount - 1]->expiry = (GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
+							AuthWebList[AuthWebCount - 1]->expiry = (size_t)(GetUnixTimestampMilliseconds() / 1000) + AuthLoginExpiry;
 							AuthWebList[AuthWebCount - 1]->username = malloc(strlen(username) + 1 /* NUL */);
 							AuthWebList[AuthWebCount - 1]->ip = ip;
 							strcpy(AuthWebList[AuthWebCount - 1]->username, username);
@@ -245,7 +245,7 @@ void InterfaceHome(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 	for (size_t x = 0;x < InterfacePagesSize;x++) {
 		if (InterfacePages[x].page == INTERFACE_PAGE_HOME)
 			info.currentPage = &(InterfacePages[x]);
@@ -287,7 +287,7 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 	for (size_t x = 0;x < InterfacePagesSize;x++) {
 		if (InterfacePages[x].page == INTERFACE_PAGE_PROXIES)
 			info.currentPage = &(InterfacePages[x]);
@@ -326,9 +326,9 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 				else
 					evbuffer_add(body, "<td class=\"n\">N/A</td>", 23 * sizeof(char));
 
-				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(GlobalTimeout, CheckedProxies[x]->timeoutMs), CheckedProxies[x]->timeoutMs);
+				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3((size_t)GlobalTimeout, CheckedProxies[x]->timeoutMs), CheckedProxies[x]->timeoutMs);
 
-				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(GlobalTimeout, CheckedProxies[x]->httpTimeoutMs), CheckedProxies[x]->httpTimeoutMs);
+				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3((size_t)GlobalTimeout, CheckedProxies[x]->httpTimeoutMs), CheckedProxies[x]->httpTimeoutMs);
 
 				char *time = FormatTime(CheckedProxies[x]->liveSinceMs); {
 					evbuffer_add_printf(body, "<td>%s</td>", time);
@@ -337,7 +337,7 @@ void InterfaceProxies(struct bufferevent *BuffEvent, char *Buff)
 					evbuffer_add_printf(body, "<td>%s</td>", time);
 				} free(time);
 
-				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(AcceptableSequentialFails, CheckedProxies[x]->retries), CheckedProxies[x]->retries);
+				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3((size_t)AcceptableSequentialFails, CheckedProxies[x]->retries), CheckedProxies[x]->retries);
 
 				evbuffer_add_printf(body, "<td>%d</td>", CheckedProxies[x]->successfulChecks);
 				evbuffer_add_printf(body, "<td>%d</td>", CheckedProxies[x]->failedChecks);
@@ -376,7 +376,7 @@ void InterfaceUncheckedProxies(struct bufferevent *BuffEvent, char *Buff)
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
 
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 	for (size_t x = 0;x < InterfacePagesSize;x++) {
 		if (InterfacePages[x].page == INTERFACE_PAGE_UPROXIES)
 			info.currentPage = &(InterfacePages[x]);
@@ -406,7 +406,7 @@ void InterfaceUncheckedProxies(struct bufferevent *BuffEvent, char *Buff)
 				evbuffer_add_printf(body, "<td>%s</td>", ProxyGetTypeString(UncheckedProxies[x]->type));
 				evbuffer_add_printf(body, "<td><span id=\"%s\"></span></td>", UncheckedProxies[x]->checking ? "check" : "x");
 
-				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3(AcceptableSequentialFails, UncheckedProxies[x]->retries), UncheckedProxies[x]->retries);
+				evbuffer_add_printf(body, "<td class=\"%c\">%d</td>", IntBlock3((size_t)AcceptableSequentialFails, UncheckedProxies[x]->retries), UncheckedProxies[x]->retries);
 				evbuffer_add_printf(body, "<td><span id=\"%s\"></span></td>", UncheckedProxies[x]->associatedProxy != NULL ? "check" : "x");
 
 				evbuffer_add(body, "</tr>", 5 * sizeof(char));
@@ -440,7 +440,7 @@ void InterfaceProxySources(struct bufferevent *BuffEvent, char *Buff)
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
 
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 	for (size_t x = 0;x < InterfacePagesSize;x++) {
 		if (InterfacePages[x].page == INTERFACE_PAGE_PRXSRC)
 			info.currentPage = &(InterfacePages[x]);
@@ -499,7 +499,7 @@ void InterfaceStats(struct bufferevent *BuffEvent, char *Buff)
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
 
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 	for (size_t x = 0;x < InterfacePagesSize;x++) {
 		if (InterfacePages[x].page == INTERFACE_PAGE_STATS)
 			info.currentPage = &(InterfacePages[x]);
@@ -630,7 +630,7 @@ static PROXY *GetProxyFromUidBuff(char *Buff)
 void InterfaceProxyRecheck(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 
 	for (size_t x = 0;x < InterfacePagesSize;x++) {
 		if (InterfacePages[x].page == INTERFACE_PAGE_RECHECK)
@@ -718,7 +718,7 @@ fail:
 void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
@@ -752,7 +752,7 @@ void InterfaceRawSpamhausZen(struct bufferevent *BuffEvent, char *Buff)
 void InterfaceRawHttpBL(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
@@ -783,7 +783,7 @@ void InterfaceRawReverseDNS(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
@@ -877,7 +877,7 @@ static void InterfaceRawRecheckStage2(UNCHECKED_PROXY *UProxy)
 void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
@@ -917,7 +917,7 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 	IPv6Map *ip;
 	ssize_t port;
 	PROXY_TYPE type;
@@ -952,15 +952,17 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 				evbuffer_add(body, "Malformed request", 17 * sizeof(char));
 				goto error;
 			}
-			char ipRaw[(ipEnd - ipStart) / sizeof(char) + 1];
-			memcpy(ipRaw, ipStart, ipEnd - ipStart);
-			ipRaw[ipEnd - ipStart] = 0x00;
+			char *ipRaw = malloc((ipEnd - ipStart) / sizeof(char) + 1); {
+				memcpy(ipRaw, ipStart, ipEnd - ipStart);
+				ipRaw[ipEnd - ipStart] = 0x00;
 
-			ip = StringToIPv6Map(ipRaw);
-			if (ip == NULL) {
-				evbuffer_add(body, "Malformed IP", 12 * sizeof(char));
-				goto error;
-			}
+				ip = StringToIPv6Map(ipRaw);
+				if (ip == NULL) {
+					evbuffer_add(body, "Malformed IP", 12 * sizeof(char));
+					free(ipRaw);
+					goto error;
+				}
+			} free(ipRaw);
 			offset = ipEnd;
 		} /* End IP */
 		/* Port */ {
@@ -1038,9 +1040,9 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 			evbuffer_add(body, "Invalid request", 15 * sizeof(char));
 			goto error;
 		} else if (len > contentLen) {
-			bufferevent_setwatermark(BuffEvent, EV_READ, len - contentLen, 0);
-			bufferevent_setcb(BuffEvent, (bufferevent_data_cb)InterfaceRawUProxyAddProcessPost, NULL, ServerEvent, NULL);
-			evbuffer_add(bufferevent_get_input(BuffEvent), Buff, origLen);
+			bufferevent_setwatermark(BuffEvent, EV_READ, (size_t)(len - contentLen), 0);
+			bufferevent_setcb(BuffEvent, (bufferevent_data_cb)InterfaceRawUProxyAddProcessPost, NULL, NULL, NULL);
+			evbuffer_add(bufferevent_get_input(BuffEvent), Buff, (size_t)origLen);
 			return;
 		} else
 			InterfaceRawUProxyAddProcessPost(BuffEvent, Buff);
@@ -1063,8 +1065,8 @@ void InterfaceRawUProxyAddProcessPost(struct bufferevent *BuffEvent, char *Buff)
 {
 	if (Buff == NULL) {
 		uint64_t len = evbuffer_get_length(bufferevent_get_input(BuffEvent));
-		Buff = malloc(len + 1);
-		evbuffer_remove(bufferevent_get_input(BuffEvent), Buff, len);
+		Buff = malloc((size_t)len + 1);
+		evbuffer_remove(bufferevent_get_input(BuffEvent), Buff, (size_t)len);
 		Buff[len] = 0x00;
 	}
 
@@ -1080,7 +1082,6 @@ void InterfaceRawUProxyAddProcessPost(struct bufferevent *BuffEvent, char *Buff)
 
 	char *tokSave = NULL;
 	char *pch = strtok_r(content, "\n", &tokSave);
-	uint16_t curPort;
 	uint64_t added = 0, total = 0;
 	PROXY_TYPE curType = PROXY_TYPE_HTTP;
 	while (pch != NULL) {
@@ -1095,7 +1096,7 @@ void InterfaceRawUProxyAddProcessPost(struct bufferevent *BuffEvent, char *Buff)
 		pch = strtok_r(NULL, "\n", &tokSave);
 	}
 
-	printf("Added %d (%d new) proxies from the interface\n", total, added);
+	Log(LOG_LEVEL_SUCCESS, "Added %llu (%llu new) proxies from the interface\n", total, added);
 
 	evbuffer_add_printf(bufferevent_get_output(BuffEvent), "HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\n%04c%04c", added, total);
 	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
@@ -1107,7 +1108,7 @@ void InterfaceTools(struct bufferevent *BuffEvent, char *Buff)
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
 
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 	for (size_t x = 0;x < InterfacePagesSize;x++) {
 		if (InterfacePages[x].page == INTERFACE_PAGE_TOOLS)
 			info.currentPage = &(InterfacePages[x]);
@@ -1165,7 +1166,7 @@ static bool InterfaceRawGetCustomPageStage2(UNCHECKED_PROXY *UProxy, UPROXY_CUST
 			HTML_TEMPALTE_TABLE_INFO tableInfo;
 			memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
 			tableInfo.tableObject = 0;
-			INTERFACE_INFO info;
+			WEB_INTERFACE_INFO info;
 
 			for (size_t x = 0;x < InterfacePagesSize;x++) {
 				if (InterfacePages[x].page == INTERFACE_PAGE_CPAGE_RAW)
@@ -1203,8 +1204,8 @@ static bool InterfaceRawGetCustomPageStage2(UNCHECKED_PROXY *UProxy, UPROXY_CUST
 		struct evbuffer *foot = evbuffer_new(); {
 			HTML_TEMPALTE_TABLE_INFO tableInfo;
 			memset(&tableInfo, 0, sizeof(HTML_TEMPALTE_TABLE_INFO));
-			tableInfo.tableObject = 1;
-			INTERFACE_INFO info;
+			tableInfo.tableObject = (void*)1;
+			WEB_INTERFACE_INFO info;
 
 			for (size_t x = 0;x < InterfacePagesSize;x++) {
 				if (InterfacePages[x].page == INTERFACE_PAGE_CPAGE_RAW)
@@ -1222,10 +1223,7 @@ static bool InterfaceRawGetCustomPageStage2(UNCHECKED_PROXY *UProxy, UPROXY_CUST
 		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
 
-		if (evbuffer_get_length(bufferevent_get_output(buffEvent)))
-			bufferevent_setcb(buffEvent, ServerRead, (bufferevent_data_cb)bufferevent_free, ServerEvent, NULL);
-		else
-			bufferevent_free(buffEvent);
+		BufferEventFreeOnWrite(buffEvent);
 	}
 	return true;
 }
@@ -1234,6 +1232,7 @@ static bool InterfaceRawGetCustomPageStage2Render(UNCHECKED_PROXY *UProxy, UPROX
 {
 	Log(LOG_LEVEL_DEBUG, "CustomPage stage 2 (render)");
 	struct bufferevent *buffEvent = (struct bufferevent*)UProxy->singleCheckCallbackExtraData;
+	Log(LOG_LEVEL_DEBUG, "CPAGE %p", buffEvent);
 
 	if (!UProxy->checkSuccess) {
 		bufferevent_write(buffEvent, "HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 24\r\nContent-Type: text/html\r\n\r\nProxy connection failure", 101 * sizeof(char));
@@ -1250,10 +1249,7 @@ static bool InterfaceRawGetCustomPageStage2Render(UNCHECKED_PROXY *UProxy, UPROX
 		bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
 
-		if (evbuffer_get_length(bufferevent_get_output(buffEvent)))
-			bufferevent_setcb(buffEvent, ServerRead, (bufferevent_data_cb)bufferevent_free, ServerEvent, NULL);
-		else
-			bufferevent_free(buffEvent);
+		BufferEventFreeOnWrite(buffEvent);
 	}
 	return true;
 }
@@ -1262,7 +1258,7 @@ void InterfaceRawGetCustomPage(struct bufferevent *BuffEvent, char *Buff, bool R
 {
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);
@@ -1302,7 +1298,7 @@ void InterfaceRawGetCustomPage(struct bufferevent *BuffEvent, char *Buff, bool R
 
 	*pageEnd = 0x00;
 
- 	PageRequest(proxy, Render ? InterfaceRawGetCustomPageStage2Render : InterfaceRawGetCustomPageStage2, pageStart + (sizeof(char) * 5), BuffEvent);
+	PageRequest(proxy, Render ? InterfaceRawGetCustomPageStage2Render : InterfaceRawGetCustomPageStage2, pageStart + (sizeof(char) * 5), BuffEvent);
 
 	evbuffer_free(headers);
 	evbuffer_free(body);
@@ -1326,7 +1322,7 @@ void InterfaceSettings(struct bufferevent *BuffEvent, char *Buff)
 	struct evbuffer *headers = evbuffer_new();
 	struct evbuffer *body = evbuffer_new();
 
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 	for (size_t x = 0;x < InterfacePagesSize;x++) {
 		if (InterfacePages[x].page == INTERFACE_PAGE_SETTINGS)
 			info.currentPage = &(InterfacePages[x]);
@@ -1368,7 +1364,7 @@ void InterfaceHtmlTemplatesReload(struct bufferevent *BuffEvent, char *Buff)
 {
 	struct evbuffer *headers = evbuffer_new();
 
-	INTERFACE_INFO info;
+	WEB_INTERFACE_INFO info;
 
 	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
 		bufferevent_write_buffer(BuffEvent, headers);

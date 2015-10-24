@@ -1,7 +1,7 @@
 #pragma once
 
-#include <pthread.h>
 #include <stdint.h>
+#include "CPH_Threads.h"
 
 typedef struct _STATS_PROXY_COUNT {
 	uint64_t UProxy;

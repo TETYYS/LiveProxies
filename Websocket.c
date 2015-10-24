@@ -11,6 +11,7 @@
 #include "Interface.h"
 #include "ProxyLists.h"
 #include "HtmlTemplate.h"
+#include "PortableEndian.h"
 
 static void HexDump(char *desc, void *addr, int len)
 {
@@ -139,13 +140,15 @@ void WebsocketClientsNotifySingle(struct bufferevent *BuffEvent, void *Message, 
 		return;
 
 	uint32_t cmd = htonl(Command);
-	uint8_t packet[WebsocketPacketLen(false, sizeof(cmd) + MessageLen)];
-	uint8_t payload[4 + MessageLen];
-	memcpy(payload, &cmd, sizeof(cmd));
-	memcpy(payload + sizeof(cmd), Message, MessageLen);
+	uint8_t *packet = malloc(WebsocketPacketLen(false, sizeof(cmd) + MessageLen)); {
+		uint8_t *payload = malloc(4 + MessageLen); {
+			memcpy(payload, &cmd, sizeof(cmd));
+			memcpy(payload + sizeof(cmd), Message, MessageLen);
 
-	WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, 0, false, payload, sizeof(cmd) + MessageLen, packet);
-	bufferevent_write(BuffEvent, packet, sizeof(packet));
+			WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, 0, false, payload, sizeof(cmd) + MessageLen, packet);
+		} free(payload);
+		bufferevent_write(BuffEvent, packet, sizeof(packet));
+	} free(packet);
 
 	Log(LOG_LEVEL_DEBUG, "Client notify sent");
 }
@@ -171,13 +174,15 @@ void WebsocketClientsNotify(void *Message, size_t MessageLen, uint32_t Command)
 							msgInterval = &(WebSocketSubscribedClients[x]->lastMessages[i]);
 					}
 				}
-				uint8_t packet[WebsocketPacketLen(false, sizeof(cmd) + MessageLen)];
-				uint8_t payload[4 + MessageLen];
-				memcpy(payload, &cmd, sizeof(cmd));
-				memcpy(payload + sizeof(cmd), Message, MessageLen);
+				uint8_t *packet = malloc(WebsocketPacketLen(false, sizeof(cmd) + MessageLen)); {
+					uint8_t *payload = malloc(4 + MessageLen); {
+						memcpy(payload, &cmd, sizeof(cmd));
+						memcpy(payload + sizeof(cmd), Message, MessageLen);
 
-				WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, 0, false, payload, sizeof(cmd) + MessageLen, packet);
-				bufferevent_write(WebSocketSubscribedClients[x]->buffEvent, packet, sizeof(packet));
+						WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, 0, false, payload, sizeof(cmd) + MessageLen, packet);
+					} free(payload);
+					bufferevent_write(WebSocketSubscribedClients[x]->buffEvent, packet, sizeof(packet));
+				} free(packet);
 				msgInterval->lastMessageMs = GetUnixTimestampMilliseconds();
 				Log(LOG_LEVEL_DEBUG, "Client notify sent");
 			}
@@ -406,18 +411,22 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 				if (!authed) {
 					// Wrong 'password'
 					Log(LOG_LEVEL_DEBUG, "Key mismatch");
-					uint8_t packet[WebsocketPacketLen(false, 1)];
-					WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, maskingKey, false, "\x00", 1, packet);
-					bufferevent_write(BuffEvent, packet, sizeof(packet));
+					size_t packetLen = WebsocketPacketLen(false, 1);
+					uint8_t *packet = malloc(packetLen); {
+						WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, maskingKey, false, "\x00", 1, packet);
+						bufferevent_write(BuffEvent, packet, packetLen);
+					} free(packet);
 
 					bufferevent_free(BuffEvent); // this is actually ruse man, so stop him
 					goto end;
 				} else {
 					// Welcome
 					Log(LOG_LEVEL_DEBUG, "AUTHED!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
-					uint8_t packet[WebsocketPacketLen(false, 1)];
-					WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, maskingKey, false, "\x01", 1, packet);
-					bufferevent_write(BuffEvent, packet, sizeof(packet));
+					size_t packetLen = WebsocketPacketLen(false, 1);
+					uint8_t *packet = malloc(packetLen); {
+						WebsocketConstructPacket(WEBSOCKET_OPCODE_BINARY, maskingKey, false, "\x01", 1, packet);
+						bufferevent_write(BuffEvent, packet, packetLen);
+					} free(packet);
 				}
 			}
 
@@ -435,8 +444,8 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 
 			client->buffEvent = BuffEvent;
 			client->timer = event_new(bufferevent_get_base(BuffEvent), -1, EV_PERSIST, WebsocketClientPing, BuffEvent);
-			if (*(uint32_t*)payLoadDecoded > (	WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES +	WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES + WEBSOCKET_SERVER_COMMAND_PROXY_ADD + WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE +
-												WEBSOCKET_SERVER_COMMAND_UPROXY_ADD +		WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE)) {
+			if (*(uint32_t*)payLoadDecoded > (WEBSOCKET_SERVER_COMMAND_SIZE_UPROXIES + WEBSOCKET_SERVER_COMMAND_SIZE_PROXIES + WEBSOCKET_SERVER_COMMAND_PROXY_ADD + WEBSOCKET_SERVER_COMMAND_PROXY_REMOVE +
+											  WEBSOCKET_SERVER_COMMAND_UPROXY_ADD + WEBSOCKET_SERVER_COMMAND_UPROXY_REMOVE)) {
 				// Ruse man!!
 				WebsocketClientTimeout(BuffEvent, EV_TIMEOUT, client);
 				goto end;
@@ -473,21 +482,23 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 				free(payLoadDecoded);
 				return;
 			}
-			uint8_t packet[WebsocketPacketLen(false, lenExtended)];
-			WebsocketConstructPacket(WEBSOCKET_OPCODE_PONG, maskingKey, false, payLoadDecoded, lenExtended, packet);
-			Log(LOG_LEVEL_DEBUG, "Websocket PACKET PONG!");
-			bufferevent_write(BuffEvent, packet, sizeof(packet));
+			size_t packetLen = WebsocketPacketLen(false, lenExtended);
+			uint8_t *packet = malloc(packetLen); {
+				WebsocketConstructPacket(WEBSOCKET_OPCODE_PONG, maskingKey, false, payLoadDecoded, lenExtended, packet);
+				Log(LOG_LEVEL_DEBUG, "Websocket PACKET PONG!");
+				bufferevent_write(BuffEvent, packet, packetLen);
+			} free(packet);
 			break;
 		}
 		case WEBSOCKET_OPCODE_PONG: {
 			/*pthread_mutex_lock(&WebSocketSubscribedClientsLock); {
 				for (size_t x = 0;x < WebSocketSubscribedClientsSize;x++) {
 					if (WebSocketSubscribedClients[x]->buffEvent == BuffEvent) {*/
-						bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV); // reset timeouts
-						/*break;
-					}
-				}
-			} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);*/
+			bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV); // reset timeouts
+			/*break;
+		}
+	}
+} pthread_mutex_unlock(&WebSocketSubscribedClientsLock);*/
 			break;
 		}
 	}
@@ -499,10 +510,12 @@ end:
 void WebsocketClientPing(evutil_socket_t fd, short Event, void *BuffEvent)
 {
 	Log(LOG_LEVEL_DEBUG, "Websocket CLIENT PING!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! LEN %d", WebsocketPacketLen(false, 5 * sizeof(char)));
-	uint8_t packet[WebsocketPacketLen(false, 5 * sizeof(char))];
-	WebsocketConstructPacket(WEBSOCKET_OPCODE_PING, 0, false, "PING!", 5 * sizeof(char), packet);
-	Log(LOG_LEVEL_DEBUG, "Websocket PACKET PING!");
-	bufferevent_write(BuffEvent, packet, sizeof(packet));
+	size_t packetLen = WebsocketPacketLen(false, 5 * sizeof(char));
+	uint8_t *packet = malloc(packetLen); {
+		WebsocketConstructPacket(WEBSOCKET_OPCODE_PING, 0, false, "PING!", 5 * sizeof(char), packet);
+		Log(LOG_LEVEL_DEBUG, "Websocket PACKET PING!");
+		bufferevent_write(BuffEvent, packet, packetLen);
+	} free(packet);
 }
 
 void WebsocketClientTimeout(struct bufferevent *BuffEvent, short Event, void *Ctx)
@@ -562,23 +575,24 @@ void WebsocketSwitch(struct bufferevent *BuffEvent, char *Buff)
 		return;
 	}
 
-	char concated[((strlen(key) + strlen(WEB_SOCKET_MAGIC)) * sizeof(char)) + 1];
-	strcpy(concated, key);
-	strcat(concated, WEB_SOCKET_MAGIC);
-	concated[((strlen(key) + strlen(WEB_SOCKET_MAGIC)) * sizeof(char))] = 0x00;
+	char *concated = malloc(((strlen(key) + strlen(WEB_SOCKET_MAGIC)) * sizeof(char)) + 1); {
+		strcpy(concated, key);
+		strcat(concated, WEB_SOCKET_MAGIC);
+		concated[((strlen(key) + strlen(WEB_SOCKET_MAGIC)) * sizeof(char))] = 0x00;
 
-	Log(LOG_LEVEL_DEBUG, "Websocket CAT %s", concated);
+		Log(LOG_LEVEL_DEBUG, "Websocket CAT %s", concated);
 
-	unsigned char hash[SHA_DIGEST_LENGTH];
-	SHA1(concated, strlen(concated), hash); // that was easy
+		unsigned char hash[SHA_DIGEST_LENGTH];
+		SHA1(concated, strlen(concated), hash); // that was easy
 
-	char *b64;
-	Base64Encode(hash, SHA_DIGEST_LENGTH, &b64); {
-		Log(LOG_LEVEL_DEBUG, "Websocket SHA %s", b64);
-		bufferevent_write(BuffEvent, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ", 97 * sizeof(char));
-		bufferevent_write(BuffEvent, b64, strlen(b64) * sizeof(char));
-		bufferevent_write(BuffEvent, "\r\n\r\n", 4 * sizeof(char));
-	} free(b64);
+		char *b64;
+		Base64Encode(hash, SHA_DIGEST_LENGTH, &b64); {
+			Log(LOG_LEVEL_DEBUG, "Websocket SHA %s", b64);
+			bufferevent_write(BuffEvent, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ", 97 * sizeof(char));
+			bufferevent_write(BuffEvent, b64, strlen(b64) * sizeof(char));
+			bufferevent_write(BuffEvent, "\r\n\r\n", 4 * sizeof(char));
+		} free(b64);
+	} free(concated);
 	Log(LOG_LEVEL_DEBUG, "Websocket switched protocols");
 	bufferevent_setcb(BuffEvent, ServerRead, NULL, WebsocketUnfinishedPacketTimeout, NULL);
 	bufferevent_set_timeouts(BuffEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);

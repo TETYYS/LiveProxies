@@ -3,7 +3,7 @@
 #include "IPv6Map.h"
 #include "Global.h"
 #include <stdint.h>
-#include <pthread.h>
+#include "CPH_Threads.h"
 #include <stdbool.h>
 #include <openssl/ossl_typ.h>
 

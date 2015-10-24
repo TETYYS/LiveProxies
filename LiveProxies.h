@@ -1,5 +1,5 @@
 #include <sys/types.h>
-#include <pthread.h>
+#include "CPH_Threads.h"
 
 pthread_t		checkThread;
 pthread_t		harvestThread;

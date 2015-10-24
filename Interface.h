@@ -1,6 +1,6 @@
 #pragma once
 
-#include <pthread.h>
+#include "CPH_Threads.h"
 #include <event2/bufferevent.h>
 #include "IPv6Map.h"
 
@@ -28,10 +28,10 @@ typedef struct _INTERFACE_PAGE {
 INTERFACE_PAGE *InterfacePages;
 size_t InterfacePagesSize;
 
-typedef struct _INTERFACE_INFO {
+typedef struct _WEB_INTERFACE_INFO {
 	char *user;
 	INTERFACE_PAGE *currentPage;
-} INTERFACE_INFO;
+} WEB_INTERFACE_INFO;
 
 typedef struct _AUTH_WEB {
 	char *username;

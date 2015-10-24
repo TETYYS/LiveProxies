@@ -9,27 +9,26 @@
 #include <stdbool.h>
 #include <string.h>
 
-size_t MEM_OUT Base64Encode(const unsigned char* buffer, size_t length, char** b64text)
+size_t MEM_OUT Base64Encode(const unsigned char *In, size_t Len, OUT char **Out)
 {
-	// outputs with NUL
-	BIO *bio, *b64;
 	BUF_MEM *bufferPtr;
 
-	b64 = BIO_new(BIO_f_base64());
-	bio = BIO_new(BIO_s_mem());
-	bio = BIO_push(b64, bio);
+	BIO *bio = BIO_push(BIO_new(BIO_f_base64()), BIO_new(BIO_s_mem()));
 
 	BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
-	BIO_write(bio, buffer, length);
+	BIO_write(bio, In, Len);
 	BIO_flush(bio);
 	BIO_get_mem_ptr(bio, &bufferPtr);
-	BIO_set_close(bio, BIO_NOCLOSE);
+
+	size_t len = bufferPtr->length;
+
+	*Out = malloc(len + 1);
+	memcpy(*Out, bufferPtr->data, len);
+	(*Out)[len] = 0x00;
+
 	BIO_free_all(bio);
 
-
-	*b64text = realloc(bufferPtr->data, bufferPtr->length + 1); // HACK HACK oops
-	(*b64text)[bufferPtr->length] = 0x00;
-	return bufferPtr->length;
+	return len;
 }
 
 static size_t CalcDecodeLength(const char* b64input)
@@ -47,15 +46,12 @@ static size_t CalcDecodeLength(const char* b64input)
 
 bool MEM_OUT Base64Decode(char* b64message, unsigned char** buffer, size_t* length)
 {
-	BIO *bio, *b64;
 
 	int decodeLen = CalcDecodeLength(b64message);
 	*buffer = (unsigned char*)malloc(decodeLen + 1);
 	(*buffer)[decodeLen] = '\0';
 
-	bio = BIO_new_mem_buf(b64message, -1);
-	b64 = BIO_new(BIO_f_base64());
-	bio = BIO_push(b64, bio);
+	BIO *bio = BIO_push(BIO_new(BIO_f_base64()), BIO_new_mem_buf(b64message, -1));
 
 	BIO_set_flags(bio, BIO_FLAGS_BASE64_NO_NL);
 	*length = BIO_read(bio, *buffer, strlen(b64message));
