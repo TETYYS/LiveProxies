@@ -3,10 +3,16 @@ compiler:
   - gcc
 
 script:
+  - cd libevent
+  - cmake .
+  - make
+  - make install
+  - cd ..
   - cmake .
   - make
 
 before_install:
+  - git clone https://github.com/libevent/libevent.git
   - sudo add-apt-repository -y ppa:maxmind/ppa
   - sudo apt-get -y update
-  - sudo apt-get install -y libevent-dev python2.7-dev libssl-dev libgeoip-dev libpcre3-dev libconfig-dev libmaxminddb0 libmaxminddb-dev mmdb-bin
+  - sudo apt-get install -y python2.7-dev libssl-dev libgeoip-dev libpcre3-dev libconfig-dev libmaxminddb0 libmaxminddb-dev mmdb-bin

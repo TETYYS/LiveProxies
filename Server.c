@@ -411,7 +411,7 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 	char *buff = malloc(len + 1);
 	evbuffer_copyout(evBuff, buff, len);
 
-#if defined DEBUG && defined __linux__
+#if defined DEBUG && defined HAVE_VALGRIND
 	VALGRIND_MAKE_MEM_DEFINED(buff, len + 1);
 #endif
 
