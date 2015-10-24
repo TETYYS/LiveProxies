@@ -10,7 +10,7 @@ script:
   - mv lib/* ..
   - echo "Main"
   - cd ..
-  - cmake .
+  - cmake -DBUILD_WITH_LOCAL_LIBEVENT=ON .
   - make
 
 before_install:
