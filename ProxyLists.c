@@ -9,9 +9,7 @@
 #include <math.h>
 #include <string.h>
 #include "CPH_Threads.h"
-#include <openssl/sha.h>
 #include <event2/event.h>
-#include <assert.h>
 #include "Base64.h"
 #include "Websocket.h"
 #include "Config.h"

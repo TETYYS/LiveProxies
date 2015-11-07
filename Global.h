@@ -10,7 +10,7 @@
 	#define LINUX_GLOBAL_HTML_PATH "/etc/liveproxies/html"
 	#define LINUX_LOCAL_HTML_PATH "./html"
 #elif defined _WIN32 || defined _WIN64
-	#define WINDOWS_GLOBAL_HTML_PATH "\\liveproxies\\html\\"
+	#define WINDOWS_GLOBAL_HTML_PATH "\\liveproxies\\html"
 	#define WINDOWS_LOCAL_HTML_PATH ".\\html"
 #endif
 

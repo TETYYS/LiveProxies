@@ -587,6 +587,9 @@ enum dns_query_type qtype, dns_callback_t callback)
 	assert(p < pkt + sizeof(pkt));
 	n = p - pkt;			/* Total packet length */
 
+	// TETYYS MOD:
+
+	/*
 	if (sendto(dns->sock, pkt, n, 0,
 			   (struct sockaddr *) &dns->sa, sizeof(dns->sa)) != n) {
 		(void)memset(&cbd, 0, sizeof(cbd));
@@ -596,6 +599,15 @@ enum dns_query_type qtype, dns_callback_t callback)
 	}
 
 	LL_TAIL(&dns->active, &query->link);
+	*/
+	if (sendto(dns->sock, pkt, n, 0,
+			   (struct sockaddr *) &dns->sa, sizeof(dns->sa)) != n) {
+		(void)memset(&cbd, 0, sizeof(cbd));
+		cbd.error = DNS_ERROR;
+		callback(&cbd);
+		free(query);
+	} else
+		LL_TAIL(&dns->active, &query->link);
 }
 
 #ifdef ADIG

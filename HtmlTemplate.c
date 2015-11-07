@@ -17,7 +17,6 @@
 #include "IPv6Map.h"
 #include <libconfig.h>
 #include <event2/buffer.h>
-#include <assert.h>
 #include "Harvester.h"
 #include <maxminddb.h>
 #include "Websocket.h"
@@ -64,18 +63,25 @@ void HtmlTemplateLoadAll()
 	WIN32_FIND_DATA fdFile;
 	HANDLE d = NULL;
 
-	if ((d = FindFirstFile(WINDOWS_LOCAL_HTML_PATH"*", &fdFile)) == INVALID_HANDLE_VALUE) {
+	if ((d = FindFirstFile(WINDOWS_LOCAL_HTML_PATH"\\*", &fdFile)) == INVALID_HANDLE_VALUE) {
 		fullPath = true;
 
-		size_t lenAppData = strlen(WinAppData);
-		char *appDataPath = malloc((lenAppData + strlen(WINDOWS_GLOBAL_HTML_PATH) + 1) * sizeof(char) + 1); {
-			strcpy(appDataPath, WinAppData);
-			strcat(appDataPath, WINDOWS_GLOBAL_HTML_PATH"*");
-			appDataPath[lenAppData + strlen(WINDOWS_GLOBAL_HTML_PATH)] = 0x00;
+		Log(LOG_LEVEL_DEBUG, "WIN32: Failed to search files: %d (%s)", GetLastError(), WINDOWS_LOCAL_HTML_PATH"\\*");
 
-			if ((d = FindFirstFile(appDataPath, &fdFile)) == INVALID_HANDLE_VALUE)
+		size_t lenAppData = strlen(WinAppData);
+		char *appDataPath = malloc((lenAppData + strlen(WINDOWS_GLOBAL_HTML_PATH) + 2) * sizeof(char) + 1); {
+			strcpy(appDataPath, WinAppData);
+			strcat(appDataPath, WINDOWS_GLOBAL_HTML_PATH"\\*");
+
+			if ((d = FindFirstFile(appDataPath, &fdFile)) == INVALID_HANDLE_VALUE) {
+				Log(LOG_LEVEL_ERROR, "WIN32: Failed to search files: %d (%s)", GetLastError(), appDataPath);
 				d = false;
+			} else {
+				Log(LOG_LEVEL_DEBUG, "Opened HTML (%s) in global", appDataPath);
+			}
 		} free(appDataPath);
+	} else {
+		Log(LOG_LEVEL_DEBUG, "Opened HTML in local");
 	}
 #endif
 
@@ -87,23 +93,23 @@ void HtmlTemplateLoadAll()
 
 #ifdef __linux__
 		if (config_read_file(&cfg, LINUX_LOCAL_HTML_PATH"/html.conf") == CONFIG_FALSE) {
-#elif defined _WIN32 || defined _WIN64
-		if (config_read_file(&cfg, WINDOWS_LOCAL_HTML_PATH"/html.conf") == CONFIG_FALSE) {
-#endif
 			Log(LOG_LEVEL_DEBUG, "Failed to open html.conf in working directory, opening in global...: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
 
-#ifdef __linux__
 			if (config_read_file(&cfg, LINUX_GLOBAL_HTML_PATH"/html.conf") == CONFIG_FALSE) {
+				Log(LOG_LEVEL_ERROR, "Failed to open %s: %s (line %d), using stock HTML...", LINUX_GLOBAL_HTML_PATH"/html.conf", config_error_text(&cfg), config_error_line(&cfg));
+
 #elif defined _WIN32 || defined _WIN64
-			char *appDataPath = malloc((strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 9) * sizeof(char) + 1); {
-				strcpy(appDataPath, WinAppData);
-				strcat(appDataPath, WINDOWS_GLOBAL_HTML_PATH"html.conf");
-				appDataPath[strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 9] = 0x00;
-			} free(appDataPath);
+		if (config_read_file(&cfg, WINDOWS_LOCAL_HTML_PATH"/html.conf") == CONFIG_FALSE) {
+			Log(LOG_LEVEL_DEBUG, "WIN: Failed to open %s: %s (line %d)", WINDOWS_LOCAL_HTML_PATH"\\html.conf", config_error_text(&cfg), config_error_line(&cfg));
+
+			char *appDataPath;
+			appDataPath = malloc((strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 10) * sizeof(char) + 1);
+			strcpy(appDataPath, WinAppData);
+			strcat(appDataPath, WINDOWS_GLOBAL_HTML_PATH"\\html.conf");
 
 			if (config_read_file(&cfg, appDataPath) == CONFIG_FALSE) {
+				Log(LOG_LEVEL_ERROR, "Failed to open %s: %s (line %d), using stock HTML...", appDataPath, config_error_text(&cfg), config_error_line(&cfg));
 #endif
-				Log(LOG_LEVEL_ERROR, "Failed to open html.conf in global directory: %s (line %d), using stock HTML...", config_error_text(&cfg), config_error_line(&cfg));
 				HtmlTemplateUseStock = true;
 				return;
 			}
@@ -125,29 +131,28 @@ void HtmlTemplateLoadAll()
 #endif
 			for (size_t x = 0;x < arrlen(files);x++) {
 				if (strcmp(name, files[x]) == 0) {
-					Log(LOG_LEVEL_DEBUG, "Found %s", files[x]);
-
 #ifdef __linux__
 					char fullName[(strlen(name) + (fullPath ? strlen(LINUX_GLOBAL_HTML_PATH) : strlen(LINUX_LOCAL_HTML_PATH)) * sizeof(char)) + 1];
 					sprintf(fullName, "%s/%s", fullPath ? LINUX_GLOBAL_HTML_PATH : LINUX_LOCAL_HTML_PATH, files[x]);
 #elif defined _WIN32 || defined _WIN64
+
 					char *fullName;
 
 					if (fullPath) {
-						fullName = malloc((strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 1) * sizeof(char) + 1);
+						fullName = malloc((strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 1 + strlen(files[x])) * sizeof(char) + 1);
 
 						strcpy(fullName, WinAppData);
-						strcat(fullName, WINDOWS_GLOBAL_HTML_PATH"/");
+						strcat(fullName, WINDOWS_GLOBAL_HTML_PATH"\\");
 						strcat(fullName, files[x]);
-						fullName[strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 1] = 0x00;
+						fullName[strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 1 + strlen(files[x])] = 0x00;
 					} else {
-						fullName = malloc((strlen(WINDOWS_LOCAL_HTML_PATH) + 1) * sizeof(char) + 1);
-						strcpy(fullName, WINDOWS_LOCAL_HTML_PATH"/");
+						fullName = malloc((strlen(WINDOWS_LOCAL_HTML_PATH) + 1 + strlen(files[x])) * sizeof(char) + 1);
+						strcpy(fullName, WINDOWS_LOCAL_HTML_PATH"\\");
 						strcat(fullName, files[x]);
+						fullName[strlen(WINDOWS_LOCAL_HTML_PATH) + 1 + strlen(files[x])] = 0x00;
 					}
-
-					sprintf(fullName, "%s/%s", fullPath ? "/etc/liveproxies/html" : "./html", files[x]);
 #endif
+					Log(LOG_LEVEL_DEBUG, "Opening %s...", fullName);
 
 					FILE *hFile = fopen(fullName, "r");
 					if (hFile != NULL) {
@@ -177,6 +182,10 @@ void HtmlTemplateLoadAll()
 							HtmlTemplateParse(hFile, &HtmlTemplateSettings, &HtmlTemplateSettingsSize, cfgRoot);
 
 						itemsFound++;
+					} else {
+#if defined _WIN32 || defined _WIN64
+						Log(LOG_LEVEL_DEBUG, "WIN: fopen %s (r) failed (%d)", fullName, GetLastError());
+#endif
 					}
 #if defined _WIN32 || defined _WIN64
 					free(fullName);
@@ -192,7 +201,7 @@ void HtmlTemplateLoadAll()
 		//config_destroy(&cfg); // TODO: fix segfault here
 
 		if (itemsFound != 11) {
-			Log(LOG_LEVEL_ERROR, "Not all HTML templates found, using stock HTML...");
+			Log(LOG_LEVEL_ERROR, "Not all HTML templates found, using stock HTML... (%d of 11)", itemsFound);
 			HtmlTemplateUseStock = true;
 		}
 
@@ -219,14 +228,31 @@ void HtmlTemplateMimeTypesInit()
 	HtmlTemplateMimeTypes = NULL;
 	HtmlTemplateMimeTypesSize = 0;
 
-	if (config_read_file(&cfg, "html/html.conf") == CONFIG_FALSE) {
-		Log(LOG_LEVEL_DEBUG, "Failed to open html/html.conf in working directory, opening in global...: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
+#ifdef __linux__
+	if (config_read_file(&cfg, LINUX_LOCAL_HTML_PATH"/html.conf") == CONFIG_FALSE) {
+		Log(LOG_LEVEL_DEBUG, "Failed to open html.conf in working directory, opening in global...: %s (line %d)", config_error_text(&cfg), config_error_line(&cfg));
 
-		if (config_read_file(&cfg, "/etc/liveproxies/html/html.conf") == CONFIG_FALSE) {
-			Log(LOG_LEVEL_ERROR, "Failed to open /etc/liveproxies/html/html.conf: %s (line %d), using stock HTML...", config_error_text(&cfg), config_error_line(&cfg));
+		if (config_read_file(&cfg, LINUX_GLOBAL_HTML_PATH"/html.conf") == CONFIG_FALSE) {
+			Log(LOG_LEVEL_ERROR, "Failed to open %s: %s (line %d), using stock HTML...", LINUX_GLOBAL_HTML_PATH"/html.conf", config_error_text(&cfg), config_error_line(&cfg));
+
+#elif defined _WIN32 || defined _WIN64
+	if (config_read_file(&cfg, WINDOWS_LOCAL_HTML_PATH"/html.conf") == CONFIG_FALSE) {
+		Log(LOG_LEVEL_DEBUG, "WIN: Failed to open %s: %s (line %d)", WINDOWS_LOCAL_HTML_PATH"\\html.conf", config_error_text(&cfg), config_error_line(&cfg));
+
+		char *appDataPath;
+		appDataPath = malloc((strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 10) * sizeof(char) + 1);
+		strcpy(appDataPath, WinAppData);
+		strcat(appDataPath, WINDOWS_GLOBAL_HTML_PATH"\\html.conf");
+
+		if (config_read_file(&cfg, appDataPath) == CONFIG_FALSE) {
+			Log(LOG_LEVEL_ERROR, "Failed to open %s: %s (line %d), using stock HTML...", appDataPath, config_error_text(&cfg), config_error_line(&cfg));
+#endif
 			HtmlTemplateUseStock = true;
 			return;
 		}
+#if defined _WIN32 || defined _WIN64
+		free(appDataPath);
+#endif
 	}
 
 	config_setting_t *cfgRoot = config_root_setting(&cfg);

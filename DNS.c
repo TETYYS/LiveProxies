@@ -6,7 +6,6 @@
 	#include <unistd.h>
 #endif
 #include <stdbool.h>
-#include <assert.h>
 #include "ProxyRequest.h"
 #include "Config.h"
 
@@ -55,6 +54,7 @@ void DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_callback_t fxDone)
 	ex->evDNS = NULL;
 	ex->resolveDone = false;
 	ex->fxDone = fxDone;
+	Log(LOG_LEVEL_DEBUG, "DNSResolveAsync EX: obj %p fx %p", Ex, fxDone);
 
 	struct dns *dnsCtx = dns_init();
 	if (!dnsCtx) {
@@ -64,6 +64,7 @@ void DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_callback_t fxDone)
 		return;
 	}
 	ex->dnsCtx = dnsCtx;
+	Log(LOG_LEVEL_DEBUG, "DNSResolveAsync EX: ctx %p", dnsCtx);
 
 	dns_queue(dnsCtx, ex, Domain, IPv6 ? DNS_RR_TYPE_AAAA : DNS_RR_TYPE_A, fxDone);
 
@@ -71,5 +72,6 @@ void DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_callback_t fxDone)
 
 	struct event *fdEvent = event_new(levRequestBase, dns_get_fd(dnsCtx), EV_READ | EV_PERSIST, DNSResolveLevEventToDNSProcess, ex);
 	ex->evDNS = fdEvent;
+	Log(LOG_LEVEL_DEBUG, "DNSResolveAsync EX: ev %p", fdEvent);
 	event_add(fdEvent, &GlobalTimeoutTV);
 }

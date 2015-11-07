@@ -6,7 +6,6 @@
 #include "Logger.h"
 #include <event2/bufferevent.h>
 #include <openssl/sha.h>
-#include <assert.h>
 #include "Config.h"
 #include "Interface.h"
 #include "ProxyLists.h"
@@ -79,8 +78,6 @@ static size_t WebsocketPacketLen(bool Mask, uint32_t PayloadLen)
 		len16 = 0;
 		len32 = PayloadLen;
 		maskingKeyOffset = 6;
-	} else {
-		assert(false);
 	}
 	payloadOffset = Mask ? maskingKeyOffset + 4 : maskingKeyOffset;
 	return payloadOffset + PayloadLen;
@@ -110,8 +107,6 @@ static void WebsocketConstructPacket(uint8_t Opcode, uint8_t *MaskingKey, bool M
 		len16 = 0;
 		len32 = PayloadLen;
 		maskingKeyOffset = 6;
-	} else {
-		assert(false);
 	}
 	payloadOffset = Mask ? maskingKeyOffset + 4 : maskingKeyOffset;
 
@@ -310,7 +305,9 @@ void WebsocketLanding(struct bufferevent *BuffEvent, uint8_t *Buff, uint64_t Buf
 		} else {
 #ifdef DEBUG
 			if (WebSocketUnfinishedPackets == NULL)
-				assert(WebSocketUnfinishedPacketsSize == 0);
+				if (WebSocketUnfinishedPacketsSize != 0) {
+					Log(LOG_LEVEL_ERROR, "WebSocketUnfinishedPacketsSize != 0");
+				}
 #endif
 			pthread_mutex_lock(&WebSocketUnfinishedPacketsLock); {
 				WebSocketUnfinishedPacketsSize++;

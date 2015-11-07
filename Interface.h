@@ -70,3 +70,4 @@ void InterfaceRawUProxyAddProcessPost	(struct bufferevent *BuffEvent, char *Buff
 void InterfaceRawGetCustomPage			(struct bufferevent *BuffEvent, char *Buff, bool Render);
 void InterfaceSettings					(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceHtmlTemplatesReload		(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceRawGetAllProxies			(struct bufferevent *BuffEvent, char *Buff);

@@ -52,7 +52,6 @@ void WSAAPI freeaddrinfo(
 #include "Logger.h"
 #include "Config.h"
 
-#include <assert.h>
 #include "DNS.h"
 
 void PageRequest(PROXY *In, void *FinishedCallback, char *Page, void *Ex)
@@ -144,15 +143,18 @@ char *ReverseDNS(IPv6Map *In)
 
 void SpamhausZENAsyncStage2(struct dns_cb_data *data)
 {
+	if (data->addr_len <= 0) {
+		if (data->context != NULL) {
+			bufferevent_write((struct bufferevent*)(((DNS_LOOKUP_ASYNC_EX*)data->context)->object), "cln", 3 * sizeof(char));
+			((DNS_LOOKUP_ASYNC_EX*)data->context)->resolveDone = true;
+		}
+		if (data->error != DNS_DOES_NOT_EXIST)
+			Log(LOG_LEVEL_WARNING, "Failed to lookup spamhaus DNS (%d)", data->error);
+		return;
+	}
+
 	DNS_LOOKUP_ASYNC_EX *ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
 	struct bufferevent *buffEvent = (struct bufferevent*)ex->object;
-
-	if (data->addr_len <= 0) {
-		bufferevent_write(buffEvent, "cln", 3 * sizeof(char));
-		if (data->error != DNS_DOES_NOT_EXIST)
-			Log(LOG_LEVEL_WARNING, "Failed to lookup spamhaus DNS");
-		goto end;
-	}
 
 	uint8_t addrData = ((uint8_t*)(data->addr))[3];
 	switch (addrData) {
@@ -172,21 +174,24 @@ void SpamhausZENAsyncStage2(struct dns_cb_data *data)
 
 end:
 	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
-	bufferevent_free(buffEvent);
+	BufferEventFreeOnWrite(buffEvent);
 	ex->resolveDone = true;
 }
 
 void HTTP_BLAsyncStage2(struct dns_cb_data *data)
 {
+	if (data->addr_len <= 0) {
+		if (data->context != NULL) {
+			bufferevent_write((struct bufferevent*)(((DNS_LOOKUP_ASYNC_EX*)data->context)->object), "1\r\nContent-Type: text/html\r\n\r\nl", 31 * sizeof(char));
+			((DNS_LOOKUP_ASYNC_EX*)data->context)->resolveDone = true;
+		}
+		if (data->error != DNS_DOES_NOT_EXIST)
+			Log(LOG_LEVEL_WARNING, "Failed to lookup HTTP_BL DNS (%d)", data->error);
+		return;
+	}
+
 	DNS_LOOKUP_ASYNC_EX *ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
 	struct bufferevent *buffEvent = (struct bufferevent*)ex->object;
-
-	if (data->addr_len <= 0) {
-		bufferevent_write(buffEvent, "1\r\nContent-Type: text/html\r\n\r\nl", 31 * sizeof(char));
-		if (data->error != DNS_DOES_NOT_EXIST)
-			Log(LOG_LEVEL_WARNING, "Failed to lookup HTTP_BL DNS");
-		goto end;
-	}
 
 	uint8_t days = ((uint8_t*)(data->addr))[1];
 	uint8_t score = ((uint8_t*)(data->addr))[2];

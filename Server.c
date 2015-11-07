@@ -13,11 +13,9 @@
 #include "CPH_Threads.h"
 #include <openssl/ssl.h>
 #include <pcre.h>
-#include <assert.h>
 #include <event2/bufferevent_ssl.h>
 #include <event2/listener.h>
 #include <event2/util.h>
-#include <assert.h>
 #include "Server.h"
 #include <event2/buffer.h>
 #ifdef __linux__
@@ -82,7 +80,7 @@ void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...)
 
 	va_list args;
 	va_start(args, Format); {
-		assert(0); // TODO: MINGW
+		exit(1); // TODO: MINGW
 		//vasprintf(&body, Format, args);
 	} va_end(args);
 	size_t bodyLen = strlen(body);
@@ -165,7 +163,10 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 			char *host = GetHost(GetIPType(UProxy->ip), ProxyIsSSL(UProxy->type));
 			if (!StrReplaceOrig(Buff, host, "{HOST}") || !StrReplaceOrig(Buff, "/prxchk", "{PAGE_PATH}"))
 				anonMax = false;
-			assert(StrReplaceOrig(Buff, keyRaw, "{KEY_VAL}"));
+			if (!StrReplaceOrig(Buff, keyRaw, "{KEY_VAL}")) {
+				Log(LOG_LEVEL_ERROR, "StrReplaceOrig {KEY_VAL} failed");
+				goto freeProxy;
+			}
 
 			buffLen = strlen(*Buff);
 
@@ -299,6 +300,8 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 			} else if (pathLen > 12 && strncmp(path, "/cpagerender", 12) == 0) {
 				freeBufferEvent = false; // Free'd in second stage of custom page request
 				InterfaceRawGetCustomPage(BuffEvent, *Buff, true);
+			} else if (pathLen == 14 && strncmp(path, "/getallproxies", 14) == 0) {
+				InterfaceRawGetAllProxies(BuffEvent, *Buff);
 			} else if (pathLen > 6 && strncmp(path, "/cpage", 6) == 0) {
 				freeBufferEvent = false; // Free'd in second stage of custom page request
 				InterfaceRawGetCustomPage(BuffEvent, *Buff, false);
@@ -336,50 +339,66 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 						goto free;
 					}
 				} /* End ruse filter */
+				
+#if defined _WIN32 || defined _WIN64
+				StrReplaceOrig(&path, "/", "\\");
+#endif
 
-				// TODO: Open static files in AppData on WIN32
-
-				char *filePath = malloc(pathLen + (13 * sizeof(char)) + 1); {
-					strcpy(filePath, "./html/files/");
+#ifdef __linux__
+				char *filePath = malloc((pathLen + (strlen(LINUX_LOCAL_HTML_PATH) + 13)) * sizeof(char) + 1); {
+					strcpy(filePath, LINUX_LOCAL_HTML_PATH"/files");
 					strcat(filePath, path);
+#elif defined _WIN32 || defined _WIN64
+				char *filePath = malloc((pathLen + (strlen(WINDOWS_LOCAL_HTML_PATH) + 13)) * sizeof(char) + 1); {
+					strcpy(filePath, WINDOWS_LOCAL_HTML_PATH"\\files");
+					strcat(filePath, path);
+#endif
 
 					FILE *hFile;
 					if ((hFile = fopen(filePath, "r")) == NULL) {
-						char *filePathGlobal = malloc(pathLen + (28 * sizeof(char)) + 1); {
-							strcpy(filePathGlobal, "/etc/liveproxies/html/files/");
-							strcat(filePathGlobal, path);
-							hFile = fopen(filePathGlobal, "r"); // uwaga
-						} free(filePathGlobal);
-
-						// TODO: evbuffer_add_file() or evbuffer_add_file_segment
+						Log(LOG_LEVEL_DEBUG, "Can't open file %s", filePath);
+						free(filePath);
+#ifdef __linux__
+						filePath = malloc((pathLen + (strlen(LINUX_GLOBAL_HTML_PATH) + 13)) * sizeof(char) + 1);
+						strcpy(filePath, LINUX_GLOBAL_HTML_PATH"/files");
+						strcat(filePath, path);
+#elif defined _WIN32 || defined _WIN64
+						filePath = malloc((pathLen + strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 13) * sizeof(char) + 1);
+						strcpy(filePath, WinAppData);
+						strcat(filePath, WINDOWS_GLOBAL_HTML_PATH"\\files");
+						strcat(filePath, path);
+#endif
+						hFile = fopen(filePath, "r"); // uwaga
 					}
 					if (hFile != NULL) {
+						Log(LOG_LEVEL_DEBUG, "Pushing file %s...", filePath);
 						fseek(hFile, 0, SEEK_END);
 						size_t size = ftell(hFile);
 						fseek(hFile, 0, SEEK_SET);
 
-						char *fileContents = malloc(size); {
-							fread(fileContents, size, 1, hFile);
-							fclose(hFile);
+						char *mime = "text/plain";
 
-							char *mime = "text/plain";
-
-							for (size_t x = 0;x < HtmlTemplateMimeTypesSize;x++) {
-								if (strcmp(&(path[pathLen - strlen(HtmlTemplateMimeTypes[x].extension)]), HtmlTemplateMimeTypes[x].extension) == 0) {
-									mime = HtmlTemplateMimeTypes[x].type;
-									break;
-								}
+						for (size_t x = 0;x < HtmlTemplateMimeTypesSize;x++) {
+							if (strcmp(&(path[pathLen - strlen(HtmlTemplateMimeTypes[x].extension)]), HtmlTemplateMimeTypes[x].extension) == 0) {
+								mime = HtmlTemplateMimeTypes[x].type;
+								break;
 							}
+						}
 
-							size_t intSize = INTEGER_VISIBLE_SIZE(size);
+						size_t intSize = INTEGER_VISIBLE_SIZE(size);
 
-							char *header = malloc(((53 + intSize + strlen(mime)) * sizeof(char)) + 1); {
-								sprintf(header, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: %s\r\n\r\n", size, mime);
-								bufferevent_write(BuffEvent, header, (53 + intSize + strlen(mime)) * sizeof(char));
-							} free(header);
-							bufferevent_write(BuffEvent, fileContents, size);
-						} free(fileContents);
+						char *header = malloc(((53 + intSize + strlen(mime)) * sizeof(char)) + 1); {
+							sprintf(header, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: %s\r\n\r\n", size, mime);
+							bufferevent_write(BuffEvent, header, (53 + intSize + strlen(mime)) * sizeof(char));
+						} free(header);
+
+						evbuffer_add_file(bufferevent_get_output(BuffEvent), fileno(hFile), 0, size);
 						bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+					} else {
+						Log(LOG_LEVEL_DEBUG, "Can't open file %s", filePath);
+#if defined _WIN32 || defined _WIN64
+						Log(LOG_LEVEL_DEBUG, "WIN: %d", GetLastError());
+#endif
 					}
 				} free(filePath);
 			}
@@ -497,9 +516,6 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
 			break;
 		}
-		default:
-			assert(0);
-			break;
 	}
 }
 
@@ -555,6 +571,9 @@ err:
 
 void ServerBaseSSL()
 {
+	if (!SSLEnabled)
+		return;
+
 	levServerBaseSSL = event_base_new();
 
 	IPv6Map map;

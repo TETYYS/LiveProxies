@@ -36,7 +36,6 @@
 #include <math.h>
 #include <fcntl.h>
 #include "CPH_Threads.h"
-#include <assert.h>
 
 #include <curl/curl.h>
 #include <maxminddb.h>
@@ -188,20 +187,6 @@ int main(int argc, char** argv)
 
 	char *globalPath, *localPath;
 
-#ifdef __linux__
-	if (access("/etc/liveproxies/passwd.conf", F_OK) == -1 && access("./passwd.conf", F_OK) == -1)
-#elif defined _WIN32 || defined _WIN64
-	globalPath = malloc((strlen(WinAppData) + 29) * sizeof(char) + 1);
-	strcpy(globalPath, WinAppData);
-	strcat(globalPath, "\\liveproxies\\passwd.conf");
-	if (!PathFileExists(globalPath) && !PathFileExists(".\\passwd.conf"))
-#endif
-		Log(LOG_LEVEL_WARNING, "No credentials present for interface pages. Access blocked by default.");
-
-#if defined _WIN32 || defined _WIN64
-	free(globalPath);
-#endif
-
 	curl_global_init(CURL_GLOBAL_ALL);
 
 #if __linux__
@@ -323,69 +308,69 @@ int main(int argc, char** argv)
 		config_setting_t *sslGroup = config_setting_get_member(cfgRoot, "SSL");
 
 		CONFIG_BOOL(sslGroup, "Enable", SSLEnabled, false)
-			CONFIG_STRING(sslGroup, "Private", SSLPrivateKey, "/etc/liveproxies/private.key")
-			CONFIG_STRING(sslGroup, "Public", SSLPublicKey, "/etc/liveproxies/public.cer")
-			CONFIG_STRING(sslGroup, "CipherList", SSLCipherList, "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH")
-			CONFIG_INT(sslGroup, "ServerPort", SSLServerPort, 8085)
+		CONFIG_STRING(sslGroup, "Private", SSLPrivateKey, "/etc/liveproxies/private.key")
+		CONFIG_STRING(sslGroup, "Public", SSLPublicKey, "/etc/liveproxies/public.cer")
+		CONFIG_STRING(sslGroup, "CipherList", SSLCipherList, "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH")
+		CONFIG_INT(sslGroup, "ServerPort", SSLServerPort, 8085)
 
-			if (SSLEnabled) {
-				SSL_load_error_strings();
-				SSL_library_init();
-				if (!RAND_poll()) {
-					Log(LOG_LEVEL_ERROR, "RAND_poll, exiting...");
+		if (SSLEnabled) {
+			SSL_load_error_strings();
+			SSL_library_init();
+			if (!RAND_poll()) {
+				Log(LOG_LEVEL_ERROR, "RAND_poll, exiting...");
+				exit(EXIT_FAILURE);
+			}
+
+			levServerSSL = SSL_CTX_new(SSLv23_server_method());
+			SSL_CTX_set_session_cache_mode(levServerSSL, SSL_SESS_CACHE_OFF);
+
+			SSL_CTX *CTX;
+			X509 *cert = NULL;
+			RSA *rsa = NULL;
+			BIO *bio;
+			uint8_t *certBuff;
+			size_t size;
+
+			FILE *hFile = fopen(SSLPublicKey, "r"); {
+				if (hFile == NULL) {
+					Log(LOG_LEVEL_ERROR, "Failed to read public key (1), exiting...");
+					exit(EXIT_FAILURE);
+				}
+				fseek(hFile, 0, SEEK_END);
+				size = ftell(hFile);
+				fseek(hFile, 0, SEEK_SET);
+
+				certBuff = malloc(size);
+				fread(certBuff, size, 1, hFile);
+			} fclose(hFile);
+
+			bio = BIO_new_mem_buf(certBuff, size); {
+				cert = PEM_read_bio_X509(bio, NULL, 0, NULL);
+				if (cert == NULL) {
+					Log(LOG_LEVEL_ERROR, "Failed to read public key (2), exiting...");
 					exit(EXIT_FAILURE);
 				}
 
-				levServerSSL = SSL_CTX_new(SSLv23_server_method());
-				SSL_CTX_set_session_cache_mode(levServerSSL, SSL_SESS_CACHE_OFF);
+				if (!SSL_CTX_use_certificate(levServerSSL, cert) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
+					Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
+					exit(EXIT_FAILURE);
+				}
+				SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+				SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
 
-				SSL_CTX *CTX;
-				X509 *cert = NULL;
-				RSA *rsa = NULL;
-				BIO *bio;
-				uint8_t *certBuff;
-				size_t size;
+				uint8_t *buff;
+				size_t len;
+				SSLFingerPrint = malloc(EVP_MAX_MD_SIZE);
+				unsigned int trash;
+				X509_digest(cert, EVP_sha512(), SSLFingerPrint, &trash);
+				Log(LOG_LEVEL_DEBUG, "SSL fingerprint: %128x", SSLFingerPrint);
+			} BIO_free(bio);
 
-				FILE *hFile = fopen(SSLPublicKey, "r"); {
-					if (hFile == NULL) {
-						Log(LOG_LEVEL_ERROR, "Failed to read public key (1), exiting...");
-						exit(EXIT_FAILURE);
-					}
-					fseek(hFile, 0, SEEK_END);
-					size = ftell(hFile);
-					fseek(hFile, 0, SEEK_SET);
-
-					certBuff = malloc(size);
-					fread(certBuff, size, 1, hFile);
-				} fclose(hFile);
-
-				bio = BIO_new_mem_buf(certBuff, size); {
-					cert = PEM_read_bio_X509(bio, NULL, 0, NULL);
-					if (cert == NULL) {
-						Log(LOG_LEVEL_ERROR, "Failed to read public key (2), exiting...");
-						exit(EXIT_FAILURE);
-					}
-
-					if (!SSL_CTX_use_certificate(levServerSSL, cert) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
-						Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
-						exit(EXIT_FAILURE);
-					}
-					SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-					SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
-
-					uint8_t *buff;
-					size_t len;
-					SSLFingerPrint = malloc(EVP_MAX_MD_SIZE);
-					unsigned int trash;
-					X509_digest(cert, EVP_sha512(), SSLFingerPrint, &trash);
-					Log(LOG_LEVEL_DEBUG, "SSL fingerprint: %128x", SSLFingerPrint);
-				} BIO_free(bio);
-
-				CONFIG_STRING(sslGroup, "RequestHeaders", RequestStringSSL, "CONNECT {HOST} HTTP/1.1\r\nHost: {HOST}\r\nUser-Agent: {UA}\r\n\r\n")
-					StrReplaceOrig(&RequestStringSSL, "{VERSION}", VERSION);
-				StrReplaceOrig(&RequestStringSSL, "{UA}", RequestUA);
-				StrReplaceOrig(&RequestStringSSL, "{KEY_NAME}", RequestHeaderKey);
-			}
+			CONFIG_STRING(sslGroup, "RequestHeaders", RequestStringSSL, "CONNECT {HOST} HTTP/1.1\r\nHost: {HOST}\r\nUser-Agent: {UA}\r\n\r\n")
+				StrReplaceOrig(&RequestStringSSL, "{VERSION}", VERSION);
+			StrReplaceOrig(&RequestStringSSL, "{UA}", RequestUA);
+			StrReplaceOrig(&RequestStringSSL, "{KEY_NAME}", RequestHeaderKey);
+		}
 	} /* End SSL */
 
 	/* Stats */ {
@@ -485,7 +470,7 @@ int main(int argc, char** argv)
 			if (config_read_file(&cfg, globalPath) == CONFIG_FALSE)
 				Log(LOG_LEVEL_DEBUG, "Failed to open %s: %s (line %d)", globalPath, config_error_text(&cfg), config_error_line(&cfg));
 			else
-				authExists = false;
+				authExists = true;
 		}
 
 #if defined _WIN32 || defined _WIN64
@@ -519,8 +504,12 @@ int main(int argc, char** argv)
 					}
 					x++;
 				}
+			} else {
+				Log(LOG_LEVEL_ERROR, "No credentials present for interface pages. Access blocked by default. (2)");
 			}
 			config_destroy(&cfg);
+		} else {
+			Log(LOG_LEVEL_ERROR, "No credentials present for interface pages. Access blocked by default.");
 		}
 	} /* End auth init */
 
@@ -553,22 +542,22 @@ int main(int argc, char** argv)
 #define THREAD_START(var, fx, name) pthread_t var; status = pthread_create(&var, NULL, (void*)fx, NULL); if (status != 0) { Log(LOG_LEVEL_ERROR, name" creation error, code %d", status); return status; } pthread_setname_np(var, name); pthread_detach(var);
 
 	THREAD_START(serverBase, ServerBase, "Server base")
-		THREAD_START(serverBaseSSL, ServerBaseSSL, "Server base SSL")
+	THREAD_START(serverBaseSSL, ServerBaseSSL, "Server base SSL")
 
-		if (EnableUDP) {
-			if (GlobalIp4 != NULL)
-				ServerUDP4();
-			if (GlobalIp6 != NULL)
-				ServerUDP6();
-		}
+	if (EnableUDP) {
+		if (GlobalIp4 != NULL)
+			ServerUDP4();
+		if (GlobalIp6 != NULL)
+			ServerUDP6();
+	}
 
 	THREAD_START(harvestThread, HarvestLoop, "Harvest thread")
-		THREAD_START(removeThread, RemoveThread, "Removal thread")
-		THREAD_START(checkThread, CheckLoop, "Check thread")
-		THREAD_START(requestBase, RequestBase, "Request base")
-		THREAD_START(statsThread, StatsCollection, "Stats thread")
+	THREAD_START(removeThread, RemoveThread, "Removal thread")
+	THREAD_START(checkThread, CheckLoop, "Check thread")
+	THREAD_START(requestBase, RequestBase, "Request base")
+	THREAD_START(statsThread, StatsCollection, "Stats thread")
 
-		Log(LOG_LEVEL_SUCCESS, "Non-interactive mode active");
+	Log(LOG_LEVEL_SUCCESS, "Non-interactive mode active");
 
 	for (;;) {
 #ifdef __linux__

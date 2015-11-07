@@ -8,14 +8,14 @@
 	#include <windows.h>
 #endif
 #include <stddef.h>
-#include <assert.h>
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
+#include <assert.h>
 
 double GetUnixTimestampMilliseconds()
 {
 	struct timeval tv;
-	assert(gettimeofday(&tv, NULL) != -1);
+	gettimeofday(&tv, NULL);
 	return (tv.tv_sec + (tv.tv_usec / 1000000.0)) * 1000.0;
 }
 
@@ -35,11 +35,12 @@ char *GetHost(IP_TYPE Preffered, bool SSL)
 MEM_OUT char *FormatTime(uint64_t TimeMs)
 {
 	char *timeBuff = zalloc(20 * sizeof(char) + 1);
+
 	struct tm *timeinfo;
 	time_t timeRaw = TimeMs / 1000;
 
 	timeinfo = localtime(&timeRaw);
-	strftime(timeBuff, 20, "%F %H:%M:%S", timeinfo);
+	strftime(timeBuff, 20, "%Y-%m-%d %H:%M:%S", timeinfo);
 
 	return timeBuff;
 }
@@ -153,7 +154,11 @@ bool StrReplaceOrig(char **In, char *Search, char *Replace)
 		//  -> Test test TEST! test
 	} else {
 		// what
+#if defined _WIN32 || defined _WIN64
+		DebugBreak();
+#else
 		assert(false);
+#endif
 	}
 
 	if (strstr(*In, Search) != NULL)

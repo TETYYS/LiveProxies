@@ -11,7 +11,6 @@
 #include <event2/buffer.h>
 #include <event2/util.h>
 #include <event2/bufferevent_ssl.h>
-#include <assert.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -33,8 +32,10 @@ static void RequestFree(evutil_socket_t fd, short what, UNCHECKED_PROXY *UProxy)
 		event_del(UProxy->timeout);
 		event_free(UProxy->timeout);
 		UProxy->timeout = NULL;
-	} else
-		assert(false);
+	} else {
+		Log(LOG_LEVEL_ERROR, "Timeout-less proxy");
+		Log(LOG_LEVEL_ERROR, "Please report this bug");
+	}
 
 	if (UProxy->udpRead != NULL) {
 		event_del(UProxy->udpRead);
@@ -260,8 +261,6 @@ void ProxyDNSResolved(struct dns_cb_data *data)
 		return;
 	} else {
 		if (data->query_type == DNS_RR_TYPE_A && UProxy->targetIPv4 == NULL) {
-			assert(data->addr_len == IPV4_SIZE);
-
 			UProxy->targetIPv4 = zalloc(sizeof(IPv6Map));
 			memcpy(&(UProxy->targetIPv4->Data[3]), data->addr, IPV4_SIZE);
 			UProxy->targetIPv4->Data[2] = 0xFFFF0000;
@@ -273,8 +272,6 @@ void ProxyDNSResolved(struct dns_cb_data *data)
 #endif
 		}
 		if (data->query_type == DNS_RR_TYPE_AAAA && UProxy->targetIPv6 == NULL) {
-			assert(data->addr_len == IPV6_SIZE);
-
 			UProxy->targetIPv6 = malloc(sizeof(IPv6Map));
 			memcpy(UProxy->targetIPv6->Data, data->addr, IPV6_SIZE);
 
@@ -515,7 +512,10 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 									goto fail;
 								}
 
-								assert(UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL);
+								if (UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL) {
+									Log(LOG_LEVEL_DEBUG, "SOCKS5 couldn't resolve domain");
+									goto fail;
+								}
 								UProxy->stage = UPROXY_STAGE_SOCKS5_DNS_RESOLVE;
 								ProxyDNSResolve(UProxy, domain);
 								Log(LOG_LEVEL_DEBUG, "SOCKS5 stage 2 pending resolve");
@@ -539,7 +539,10 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 					if (UProxy->pageTarget == NULL)
 						goto fail;
 
-					assert(UProxy->targetIPv4 != NULL || UProxy->targetIPv6 != NULL);
+					if (UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL) {
+						Log(LOG_LEVEL_DEBUG, "SOCKS5 couldn't resolve domain");
+						goto fail;
+					}
 
 					// Execute stage 2 ending after DNS resolve
 					SOCKS5(socksType, &port, UProxy);
@@ -838,6 +841,6 @@ void RequestAsync(UNCHECKED_PROXY *UProxy)
 	event_add(UProxy->timeout, &GlobalTimeoutTV);
 
 	UProxy->checking = true;
-	assert(bufferevent_socket_connect(UProxy->assocBufferEvent, sa, sizeof(struct sockaddr_in6)) == 0); // socket creation should never fail, because IP is always valid (!= dead)
+	bufferevent_socket_connect(UProxy->assocBufferEvent, sa, sizeof(struct sockaddr_in6)); // socket creation should never fail, because IP is always valid (but != dead)
 	free(sa);
 }

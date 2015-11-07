@@ -121,12 +121,9 @@ void HarvestLoop()
 			strcat(fullPath, "\\*");
 			fullPath[harvestersPathLen + 2] = 0x00;
 
-			if ((d = FindFirstFile(WINDOWS_LOCAL_HTML_PATH"\\*.*", &fdFile)) == INVALID_HANDLE_VALUE) {
-				Log(LOG_LEVEL_DEBUG, "WIN32: Failed to search files: %d (%s)", GetLastError(), WINDOWS_LOCAL_HTML_PATH"*.*");
-				if ((d = FindFirstFile(fullPath, &fdFile)) == INVALID_HANDLE_VALUE) {
-					Log(LOG_LEVEL_ERROR, "WIN32: Failed to search files: %d (%s)", GetLastError(), fullPath);
-					d = false;
-				}
+			if ((d = FindFirstFile(fullPath, &fdFile)) == INVALID_HANDLE_VALUE) {
+				Log(LOG_LEVEL_ERROR, "WIN32: Failed to search files: %d (%s)", GetLastError(), fullPath);
+				d = false;
 			}
 		} free(fullPath);
 #endif

@@ -55,8 +55,10 @@ static void AuthWebRemove(size_t Index)
 static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, WEB_INTERFACE_INFO *InterfaceInfo, bool AllowOnlyCookie)
 {
 	InterfaceInfo->user = NULL;
-	if (AuthLocalList == NULL)
+	if (AuthLocalList == NULL) {
+		Log(LOG_LEVEL_DEBUG, "AUTH list NULL");
 		goto end;
+	}
 
 	/* Authorize by cookie */ {
 		if (AuthWebList == NULL)
@@ -107,24 +109,30 @@ static bool AuthVerify(char *Buff, struct evbuffer *OutBuff, int Fd, WEB_INTERFA
 		} pthread_mutex_unlock(&AuthWebLock);
 	} /* End authorize by cookie */
 endCookie:
-	
+
 	if (!AllowOnlyCookie) { /* Authorize by login */
 		char *username, *password;
 		char *authStr;
+
+		Log(LOG_LEVEL_DEBUG, "LOGIN AUTH");
 
 		char *authorization;
 		if (HTTPFindHeader("Authorization: ", Buff, &authorization, NULL, NULL)) {
 			/* Resolve username:password from authorization header */ {
 				char *authStrb64 = strstr(authorization, "Basic ") + (sizeof(char) * 6);
 
+				Log(LOG_LEVEL_DEBUG, "LOGIN AUTH B64 %s", authStrb64);
+
 				if ((size_t)authStrb64 == (sizeof(char) * 6)) {
 					free(authorization);
+					Log(LOG_LEVEL_DEBUG, "LOGIN AUTH B64 DROP");
 					goto end;
 				}
 
 				size_t trash;
 				if (!Base64Decode(authStrb64, (unsigned char**)(&authStr), &trash)) {
 					free(authorization);
+					Log(LOG_LEVEL_DEBUG, "LOGIN AUTH B64 DROP");
 					goto end;
 				}
 				free(authorization);
@@ -133,6 +141,7 @@ endCookie:
 
 				if (delimiterIndex == NULL) {
 					free(authStr);
+					Log(LOG_LEVEL_DEBUG, "LOGIN AUTH STR DROP");
 					goto end;
 				}
 
@@ -143,8 +152,10 @@ endCookie:
 
 			pthread_mutex_lock(&AuthLocalLock); {
 				for (size_t x = 0; x < AuthLocalCount; x++) {
-					if (strcmp(AuthLocalList[x]->username, username) != 0)
+					if (strcmp(AuthLocalList[x]->username, username) != 0) {
+						Log(LOG_LEVEL_DEBUG, "LOGIN AUTH UNAME %s vs %s", AuthLocalList[x]->username, username);
 						continue;
+					}
 
 					char *saltb64;
 					uint8_t *salt;
@@ -859,7 +870,7 @@ static void InterfaceRawRecheckStage2(UNCHECKED_PROXY *UProxy)
 	Base64Encode(proxy->identifier, PROXY_IDENTIFIER_LEN, &identifierb64); {
 		char *liveSinceTime = FormatTime(proxy->liveSinceMs); {
 			char *lastCheckedTime = FormatTime(proxy->lastCheckedMs); {
-				evbuffer_add_printf(body, "{ \"success\": true, \"anonymity\": \"%c\", \"httpTimeoutMs\": %d, \"timeoutMs\": %d, \"liveSince\": \"%s\", \"lastChecked\": \"%s\", \"retries\": %d, \"successfulChecks\": %d, \"failedChecks\": %d, \"uid\": \"%s\" }", anon, proxy->httpTimeoutMs, proxy->timeoutMs, liveSinceTime, lastCheckedTime, proxy->retries, proxy->successfulChecks, proxy->failedChecks, identifierb64);
+				evbuffer_add_printf(body, "{ \"success\": true, \"anonymity\": \"%c\", \"httpTimeoutMs\": %llu, \"timeoutMs\": %llu, \"liveSince\": \"%s\", \"lastChecked\": \"%s\", \"retries\": %d, \"successfulChecks\": %d, \"failedChecks\": %d, \"uid\": \"%s\" }", anon, proxy->httpTimeoutMs, proxy->timeoutMs, liveSinceTime, lastCheckedTime, proxy->retries, proxy->successfulChecks, proxy->failedChecks, identifierb64);
 			} free(lastCheckedTime);
 		} free(liveSinceTime);
 	} free(identifierb64);
@@ -930,7 +941,7 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 		evbuffer_free(headers);
-		bufferevent_free(BuffEvent);
+		BufferEventFreeOnWrite(BuffEvent);
 		return;
 	}
 
@@ -1036,23 +1047,28 @@ void InterfaceRawUProxyAdd(struct bufferevent *BuffEvent, char *Buff)
 				goto error;
 			}
 		}
-		uint64_t contentLen = origLen - ((content - Buff) / sizeof(char));
 
-		if (len < contentLen) {
+		uint64_t packetContentLen = (origLen * sizeof(char)) - (content - Buff);
+		if (len < packetContentLen) {
 			evbuffer_add(body, "Invalid request", 15 * sizeof(char));
 			goto error;
-		} else if (len > contentLen) {
-			bufferevent_setwatermark(BuffEvent, EV_READ, (size_t)(len - contentLen), 0);
+		} else if (len > packetContentLen) {
+			bufferevent_setwatermark(BuffEvent, EV_READ, (size_t)(len - packetContentLen), 0);
 			bufferevent_setcb(BuffEvent, (bufferevent_data_cb)InterfaceRawUProxyAddProcessPost, NULL, NULL, NULL);
-			evbuffer_add(bufferevent_get_input(BuffEvent), Buff, (size_t)origLen);
+
+			evbuffer_unfreeze(bufferevent_get_input(BuffEvent), false); {
+				evbuffer_add(bufferevent_get_input(BuffEvent), Buff, (size_t)origLen);
+			} evbuffer_freeze(bufferevent_get_input(BuffEvent), false);
 			return;
-		} else
+		} else {
 			InterfaceRawUProxyAddProcessPost(BuffEvent, Buff);
+		}
 	}
 	goto ok;
 error:
 	evbuffer_drain(headers, evbuffer_get_length(headers));
 	evbuffer_add(headers, "HTTP/1.1 403 Forbidden\r\nContent-Length: ", 40 * sizeof(char));
+	BufferEventFreeOnWrite(BuffEvent);
 ok:
 	evbuffer_add_printf(headers, "%d", evbuffer_get_length(body) * sizeof(char)); // To Content-Length
 	evbuffer_add(headers, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
@@ -1076,7 +1092,7 @@ void InterfaceRawUProxyAddProcessPost(struct bufferevent *BuffEvent, char *Buff)
 	if ((size_t)content == 4 * sizeof(char)) {
 		content = strstr(Buff, "\n\n") + (2 * sizeof(char));
 		if ((size_t)content == 2 * sizeof(char)) {
-			bufferevent_free(BuffEvent);
+			BufferEventFreeOnWrite(BuffEvent);
 			return;
 		}
 	}
@@ -1102,7 +1118,7 @@ void InterfaceRawUProxyAddProcessPost(struct bufferevent *BuffEvent, char *Buff)
 
 	evbuffer_add_printf(bufferevent_get_output(BuffEvent), "HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\n%04c%04c", added, total);
 	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
-	bufferevent_free(BuffEvent);
+	BufferEventFreeOnWrite(BuffEvent);
 }
 
 void InterfaceTools(struct bufferevent *BuffEvent, char *Buff)
@@ -1385,7 +1401,40 @@ void InterfaceHtmlTemplatesReload(struct bufferevent *BuffEvent, char *Buff)
 	evbuffer_add(headers, "8\r\nContent-Type: text/plain\r\n\r\nReloaded", 39 * sizeof(char));
 
 	bufferevent_write_buffer(BuffEvent, headers);
-	bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 
 	evbuffer_free(headers);
+}
+
+void InterfaceRawGetAllProxies(struct bufferevent *BuffEvent, char *Buff)
+{
+	struct evbuffer *headers = evbuffer_new();
+	struct evbuffer *body = evbuffer_new();
+	WEB_INTERFACE_INFO info;
+
+	if (!AuthVerify(Buff, headers, bufferevent_getfd(BuffEvent), &info, false)) {
+		bufferevent_write_buffer(BuffEvent, headers);
+		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+
+		evbuffer_free(headers);
+		bufferevent_free(BuffEvent);
+		return;
+	}
+
+	pthread_mutex_lock(&LockCheckedProxies); {
+		for (size_t x = 0;x < SizeCheckedProxies;x++) {
+			char *identifierb64;
+			Base64Encode(CheckedProxies[x]->identifier, PROXY_IDENTIFIER_LEN, &identifierb64); {
+				evbuffer_add(body, identifierb64, strlen(identifierb64) * sizeof(char));
+				evbuffer_add(body, "\n", 1 * sizeof(char));
+			} free(identifierb64);
+		}
+	} pthread_mutex_unlock(&LockCheckedProxies);
+
+	evbuffer_add_printf(headers, "%x\r\nContent-Type: text/plain\r\n\r\n", evbuffer_get_length(body));
+
+	bufferevent_write_buffer(BuffEvent, headers);
+	bufferevent_write_buffer(BuffEvent, body);
+
+	evbuffer_free(headers);
+	evbuffer_free(body);
 }
