@@ -4,8 +4,8 @@ Latest Version: **1.0.0** (release) [![Travis-CI](https://api.travis-ci.org/TETY
 LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 
 ## Download:
- - Windows: [x86](bin/win32_mingw/LiveProxies.1.0.0.x86.7z)
- - Linux: [Compile from source](LiveProxies.git)
+ - Windows: [x86](https://github.com/TETYYS/LiveProxies/tree/devel/bin/win32_mingw/LiveProxies.1.0.0.x86.7z)
+ - Linux: [Compile from source](https://github.com/TETYYS/LiveProxies.git)
 
 ## Features
  - Utilizes Python scripts, manual addition, urls and static text files to get proxy lists
