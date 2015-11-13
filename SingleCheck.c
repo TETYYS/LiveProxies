@@ -235,7 +235,7 @@ void SpamhausZENAsync(IPv6Map *In, struct bufferevent *BuffEvent)
 {
 	IP_TYPE type = GetIPType(In);
 
-	char *name = zalloc(type == IPV4 ? 32 : 81); {
+	char *name = zalloc(type == IPV4 ? 33 : 81); {
 		if (type == IPV4) {
 			uint8_t a, b, c, d;
 			uint8_t *bytes = ((uint8_t*)&(In->Data[3]));
@@ -243,15 +243,15 @@ void SpamhausZENAsync(IPv6Map *In, struct bufferevent *BuffEvent)
 			b = bytes[1];
 			c = bytes[2];
 			d = bytes[3];
-			sprintf((char*)(name), "%d.%d.%d.%d.zen.spamhaus.org", d, c, b, a);
+			sprintf(name, "%d.%d.%d.%d.zen.spamhaus.org", d, c, b, a);
 		} else {
 			uint8_t *data = (uint8_t*)(In->Data);
 			for (size_t x = IPV6_SIZE;x >= 0;x++) {
 				char format[2];
-				sprintf(format, "%x.", data[x]);
+				sprintf(format, "%x.%x.", data[x] >> 0x04, data[x] & 0x0f);
 				strcat((char*)(name), format);
 			}
-			strcat((char*)(name), ".zen.spamhaus.org");
+			strcat((char*)(name), "zen.spamhaus.org");
 		}
 
 		DNSResolveAsync(BuffEvent, name, false, SpamhausZENAsyncStage2);
@@ -269,7 +269,7 @@ void HTTP_BLAsync(IPv6Map *In, char *AccessKey, struct bufferevent *BuffEvent)
 
 	IP_TYPE type = GetIPType(In);
 
-	char *name = zalloc(type == IPV4 ? 33 + strlen(AccessKey) : 82 + strlen(AccessKey)); {
+	char *name = zalloc(type == IPV4 ? 34 + strlen(AccessKey) : 82 + strlen(AccessKey)); {
 		if (type == IPV4) {
 			uint8_t a, b, c, d;
 			uint8_t *bytes = ((uint8_t*)&(In->Data[3]));

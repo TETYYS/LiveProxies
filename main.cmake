@@ -42,6 +42,7 @@ if (WIN32)
 			C:/LIB/curl-7.45.0/lib/.libs/libcurl.dll.a
 			Ws2_32
 			Shlwapi
+			iphlpapi
 		)
 	ELSE()
 		# MSVC
@@ -57,6 +58,7 @@ if (WIN32)
 			C:/LIB/curl-7.45.0/builds/libcurl-vc-x86-release-dll-ssl-dll-zlib-dll-ipv6-sspi/lib/libcurl.lib
 			Ws2_32
 			Shlwapi
+			iphlpapi
 		)
 	ENDIF()
 	

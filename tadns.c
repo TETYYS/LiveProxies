@@ -19,7 +19,9 @@
 #ifdef _WIN32
 #pragma comment(lib,"ws2_32")
 #pragma comment(lib,"advapi32")
+#pragma comment(lib,"iphlpapi")
 #include <winsock.h>
+#include <iphlpapi.h>
 typedef	int		socklen_t;
 typedef	unsigned char	uint8_t;
 typedef	unsigned short	uint16_t;
@@ -36,6 +38,9 @@ typedef	unsigned int	uint32_t;
 #include "tadns.h"
 #include "llist.h"
 
+#ifdef DEBUG
+	#define TADNS_DEBUG 1
+#endif
 #define	DNS_MAX			1025	/* Maximum host name		*/
 #define	DNS_PACKET_LEN		2048	/* Buffer size for DNS packet	*/
 #define	MAX_CACHE_ENTRIES	10000	/* Dont cache more than that	*/
@@ -82,6 +87,20 @@ struct header {
 	unsigned char	data[1];	/* Data, variable length	*/
 };
 
+#ifdef TADNS_DEBUG
+#define DEBUG_HEADER(header) \
+        fprintf(stderr, "==== Header Debug ====\n"); \
+        fprintf(stderr, "Transaction id (tid): %u\n", header->tid); \
+        fprintf(stderr, "Flags: %u\n", header->flags); \
+        fprintf(stderr, "nqueries: %u\n", header->nqueries); \
+        fprintf(stderr, "nanswers: %u\n", header->nanswers); \
+        fprintf(stderr, "nauth: %u\n", header->nauth); \
+        fprintf(stderr, "nother> %u\n", header->nother); \
+        fprintf(stderr, "data: data[0] = %c and data[1] = %c\n", header->data[0], header->data[1]); \
+        fprintf(stderr, "========================\n");
+#else
+#define DEBUG_HEADER(header)
+#endif
 /*
 * Return UDP socket used by a resolver
 */
@@ -160,7 +179,7 @@ getdnsip(struct dns *dns)
 	int	ret = 0;
 
 #ifdef _WIN32
-	int	i;
+	/*int	i;
 	LONG	err;
 	HKEY	hKey, hSub;
 	char	subkey[512], dhcpns[512], ns[512], value[128], *key =
@@ -180,13 +199,42 @@ getdnsip(struct dns *dns)
 				 RegQueryValueEx(hSub, "DhcpNameServer", 0,
 								 &type, value, &len) == ERROR_SUCCESS)) {
 				dns->sa.sin_addr.s_addr = inet_addr(value);
+
 				ret++;
 				RegCloseKey(hSub);
 				break;
 			}
 		}
 		RegCloseKey(hKey);
+	}*/
+	FIXED_INFO *pFixedInfo = NULL;
+	ULONG ulOutBufLen;
+	DWORD dwRetVal;
+
+	pFixedInfo = malloc(sizeof(FIXED_INFO));
+	if (pFixedInfo == NULL)
+		return 1;
+
+	ulOutBufLen = sizeof(FIXED_INFO);
+
+	// Make an initial call to GetAdaptersInfo to get
+	// the necessary size into the ulOutBufLen variable
+	if (GetNetworkParams(pFixedInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
+		free(pFixedInfo);
+		pFixedInfo = malloc(ulOutBufLen);
+		if (pFixedInfo == NULL)
+			return 1;
 	}
+
+	if (dwRetVal = GetNetworkParams(pFixedInfo, &ulOutBufLen) == NO_ERROR)
+		inet_pton(AF_INET, pFixedInfo->DnsServerList.IpAddress.String, &(dns->sa.sin_addr.s_addr));
+	else {
+		printf("GetNetworkParams: %d\n", dwRetVal);
+		return 1;
+	}
+
+	if (pFixedInfo)
+		free(pFixedInfo);
 #else
 	FILE	*fp;
 	char	line[512];
@@ -222,16 +270,24 @@ struct dns *
 	{ WSADATA data; WSAStartup(MAKEWORD(2, 2), &data); }
 #endif /* _WIN32 */
 
-	/* FIXME resource leak here */
 	if ((dns = (struct dns *) calloc(1, sizeof(*dns))) == NULL)
 		return (NULL);
-	else if ((dns->sock = socket(PF_INET, SOCK_DGRAM, 17)) == -1)
+	if ((dns->sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+		free(dns);
 		return (NULL);
-	else if (nonblock(dns->sock) != 0)
+	}
+	if (nonblock(dns->sock) != 0) {
+		free(dns);
 		return (NULL);
-	else if (getdnsip(dns) != 0)
+	}
+	if (getdnsip(dns) != 0) {
+		free(dns);
 		return (NULL);
+	}
 
+#ifdef TADNS_DEBUG
+	fprintf(stderr, "dns allocated, pointer address is: %p\n", dns);
+#endif
 	dns->sa.sin_family = AF_INET;
 	dns->sa.sin_port = htons(53);
 
@@ -249,6 +305,9 @@ static void
 destroy_query(struct query *query)
 {
 	LL_DEL(&query->link);
+#ifdef TADNS_DEBUG
+	fprintf(stderr, "freeing query with address: %p\n", query);
+#endif
 	free(query);
 }
 
@@ -325,16 +384,6 @@ call_user(struct dns *dns, struct query *query, enum dns_error error)
 	cbd.addr_len = query->addrlen;
 
 	query->callback(&cbd);
-
-	/* Move query to cache */
-	LL_DEL(&query->link);
-	LL_ADD(&dns->cached, &query->link);
-	dns->num_cached++;
-	if (dns->num_cached >= MAX_CACHE_ENTRIES) {
-		query = LL_ENTRY(dns->cached.prev, struct query, link);
-		destroy_query(query);
-		dns->num_cached--;
-	}
 }
 
 static void
@@ -347,9 +396,13 @@ parse_udp(struct dns *dns, const unsigned char *pkt, int len)
 	uint16_t		type;
 	char			name[1025];
 	int			found, stop, dlen, nlen;
+	uint16_t rcode;
 
 	/* We sent 1 query. We want to see more that 1 answer. */
 	header = (struct header *) pkt;
+	DEBUG_HEADER(header);
+	/* 1000000010000001 == 0 == OK*/
+	rcode = (header->flags >> 8) & 0x0f;
 	if (ntohs(header->nqueries) != 1)
 		return;
 
@@ -360,7 +413,16 @@ parse_udp(struct dns *dns, const unsigned char *pkt, int len)
 	/* Received 0 answers */
 	if (header->nanswers == 0) {
 		q->addrlen = 0;
-		call_user(dns, q, DNS_DOES_NOT_EXIST);
+		if (rcode == RCODE_NO_SUCH_ADDRESS)
+			call_user(dns, q, DNS_DOES_NOT_EXIST);
+		else if (rcode == RCODE_SERVER_FAILURE)
+			call_user(dns, q, DNS_SERVER_FAILURE);
+		else {
+			printf("0A\n");
+			call_user(dns, q, DNS_ERROR);
+		}
+
+		destroy_query(q);
 		return;
 	}
 
@@ -422,6 +484,16 @@ parse_udp(struct dns *dns, const unsigned char *pkt, int len)
 				q->addrlen = sizeof(q->addr);
 			(void)memcpy(q->addr, p, q->addrlen);
 			call_user(dns, q, DNS_OK);
+
+			/* Move query to cache */
+			LL_DEL(&q->link);
+			LL_ADD(&dns->cached, &q->link);
+			dns->num_cached++;
+			if (dns->num_cached >= MAX_CACHE_ENTRIES) {
+				q = LL_ENTRY(dns->cached.prev, struct query, link);
+				destroy_query(q);
+				dns->num_cached--;
+			}
 		}
 	}
 }
@@ -496,7 +568,9 @@ dns_fini(struct dns *dns)
 		destroy_query(query);
 		dns->num_cached--;
 	}
-
+#ifdef TADNS_DEBUG
+	fprintf(stderr, "freeing dns with address: %p\n", dns);
+#endif
 	free(dns);
 }
 
@@ -515,6 +589,15 @@ enum dns_query_type qtype, dns_callback_t callback)
 	time_t		now = time(NULL);
 	struct dns_cb_data cbd;
 
+	if (getdnsip(dns) != 0) {
+		memset(&cbd, 0, sizeof(cbd));
+		cbd.error = DNS_ERROR;
+		printf("GETDNSIP\n");
+		cbd.context = ctx;
+		callback(&cbd);
+		return;
+	}
+
 	/* XXX Search the cache first */
 	if ((query = find_cached_query(dns, qtype, name)) != NULL) {
 		query->ctx = ctx;
@@ -530,11 +613,18 @@ enum dns_query_type qtype, dns_callback_t callback)
 	if ((query = (struct query *) calloc(1, sizeof(*query))) == NULL) {
 		(void)memset(&cbd, 0, sizeof(cbd));
 		cbd.error = DNS_ERROR;
+		printf("MALLOC\n");
+		cbd.context = ctx;
 		callback(&cbd);
 		return;
 	}
 
+#ifdef TADNS_DEBUG
+	fprintf(stderr, "query allocated, pointer address is: %p\n", query);
+#endif
+
 	/* Init query structure */
+	LL_INIT(&query->link);
 	query->ctx = ctx;
 	query->qtype = (uint16_t)qtype;
 	query->tid = ++dns->tid;
@@ -587,25 +677,16 @@ enum dns_query_type qtype, dns_callback_t callback)
 	assert(p < pkt + sizeof(pkt));
 	n = p - pkt;			/* Total packet length */
 
-	// TETYYS MOD:
+	int ex;
 
-	/*
-	if (sendto(dns->sock, pkt, n, 0,
-			   (struct sockaddr *) &dns->sa, sizeof(dns->sa)) != n) {
+	if ((ex = sendto(dns->sock, pkt, n, 0,
+			   (struct sockaddr *) &dns->sa, sizeof(dns->sa))) != n) {
 		(void)memset(&cbd, 0, sizeof(cbd));
 		cbd.error = DNS_ERROR;
+		printf("SENDTOERR EX %d GOT %d ERRNO %d\n", n, ex, errno);
+		cbd.context = ctx;
 		callback(&cbd);
 		destroy_query(query);
-	}
-
-	LL_TAIL(&dns->active, &query->link);
-	*/
-	if (sendto(dns->sock, pkt, n, 0,
-			   (struct sockaddr *) &dns->sa, sizeof(dns->sa)) != n) {
-		(void)memset(&cbd, 0, sizeof(cbd));
-		cbd.error = DNS_ERROR;
-		callback(&cbd);
-		free(query);
 	} else
 		LL_TAIL(&dns->active, &query->link);
 }
@@ -637,7 +718,7 @@ callback(struct dns_cb_data *cbd)
 				default:
 					(void)fprintf(stderr, "Unexpected query type: %u\n",
 								  cbd->query_type);
-					exit(EXIT_FAILURE);
+					/*exit(EXIT_FAILURE);*/
 					/* NOTREACHED */
 					break;
 			}
@@ -648,12 +729,15 @@ callback(struct dns_cb_data *cbd)
 		case DNS_DOES_NOT_EXIST:
 			(void)fprintf(stderr, "No such address: [%s]\n", cbd->name);
 			break;
+		case DNS_SERVER_FAILURE:
+			fprintf(stderr, "Server failure ... try again: [%s]\n", cbd->name);
+			break;
 		case DNS_ERROR:
 			(void)fprintf(stderr, "System error occured\n");
 			break;
 	}
 
-	exit(EXIT_SUCCESS);
+	/*	exit(EXIT_SUCCESS); */
 }
 
 int
@@ -664,6 +748,7 @@ main(int argc, char *argv[])
 	struct dns		*dns;
 	fd_set			set;
 	struct timeval		tv = { 5, 0 };
+	int n;
 
 	if (argc == 1 || (argc == 2 && argv[1][0] == '@'))
 		usage(prog);
@@ -691,9 +776,24 @@ main(int argc, char *argv[])
 	FD_ZERO(&set);
 	FD_SET(dns_get_fd(dns), &set);
 
-	if (select(dns_get_fd(dns) + 1, &set, NULL, NULL, &tv) == 1)
-		dns_poll(dns);
-
+	switch (n = select(dns_get_fd(dns) + 1, &set, NULL, NULL, &tv)) {
+		case -1:
+			perror("select");
+			break;
+		case 0:
+			fprintf(stderr, "select timed out...\n");
+			break;
+		default:
+#ifdef TADNS_DEBUG
+			printf("%d descriptors ready\n", n);
+			if (FD_ISSET(dns_get_fd(dns), &set))
+				printf("descriptor has data pending...\n");
+#endif
+			dns_poll(dns);
+	}
+#ifdef TADNS_DEBUG
+	printf("calling dns_fini...\n");
+#endif
 	dns_fini(dns);
 
 	return (EXIT_SUCCESS);

@@ -175,7 +175,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 
 			if (!anonMax) {
 				int subStrVec[256];
-				for (size_t i = 0;i < 2;i++) {
+				for (size_t i = (GlobalIp4 == NULL ? 1 : 0);i < (GlobalIp6 == NULL ? 1 : 2);i++) {
 					int regexRet = pcre_exec(i == 0 ? ipv4Regex : ipv6Regex, i == 0 ? ipv4RegexEx : ipv6RegexEx, *Buff, buffLen, 0, 0, subStrVec, 256);
 
 					if (regexRet != PCRE_ERROR_NOMATCH) {
@@ -339,7 +339,7 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 						goto free;
 					}
 				} /* End ruse filter */
-				
+
 #if defined _WIN32 || defined _WIN64
 				StrReplaceOrig(&path, "/", "\\");
 #endif

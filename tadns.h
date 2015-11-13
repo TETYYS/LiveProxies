@@ -41,7 +41,14 @@ enum dns_error {
 	DNS_OK,				/* No error			*/
 	DNS_DOES_NOT_EXIST,		/* Error: adress does not exist	*/
 	DNS_TIMEOUT,			/* Lookup time expired		*/
-	DNS_ERROR			/* No memory or other error	*/
+	DNS_ERROR,			/* No memory or other error	*/
+	DNS_SERVER_FAILURE              /* Server failure               */
+};
+
+enum dns_rcode {
+	RCODE_OK = 0x01,
+	RCODE_SERVER_FAILURE = 0x02,
+	RCODE_NO_SUCH_ADDRESS = 0x03
 };
 
 struct dns_cb_data {
