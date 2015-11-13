@@ -1,26 +1,24 @@
 # LiveProxies
-Latest Version: **0.10.0** (beta) ![Travis-CI](https://api.travis-ci.org/TETYYS/LiveProxies.svg)
+Latest Version: **1.0.0** (release) [![Travis-CI](https://api.travis-ci.org/TETYYS/LiveProxies.svg)](https://travis-ci.org/TETYYS/LiveProxies/)
 
 LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 
+## Download:
+ - Windows: [x86](tree/devel/bin/win32_mingw/LiveProxies.1.0.0.x86.7z)
+ - Linux: [Compile from source](LiveProxies.git)
+
 ## Features
- - Utilizes Python scripts to harvest (or scrape) proxy lists
+ - Utilizes Python scripts, manual addition, urls and static text files to get proxy lists
  - Analyzes proxy output headers and determines proxy anonymity being:
  - - When proxy reveals correct IP behind the proxy - **transparent**
  - - When proxy modifies or adds any kind of headers - **anonymous**
  - - When proxy headers match request headers - **max**
  - Doesn't require any external web servers for its interface and internal proxy checking page
- - Supports:
- - - HTTP
- - - HTTPS
- - - SOCKS4
- - - SOCKS4A
- - - SOCKS5
- - - SOCKS4 -> SSL
- - - SOCKS4A -> SSL
- - - SOCKS5 -> SSL
- - - SOCKS5 UDP association
- - ...
+ - Supports: HTTP, HTTPS, SOCKS4, SOCKS4A, SOCKS5, SOCKS4 -> SSL, SOCKS4A -> SSL, SOCKS5 -> SSL, SOCKS5 UDP association
+ - Spamhaus, Project Honey Pot and StopForumSpam blacklist checks
+ - Invalid or modified SSL certificate detection
+ - <sub><sup>Custom requests to pages from interface</sup></sub>
+ - Multi custom requests from all checked proxies
 
 ## Get it running
 If you still haven't installed [depencencies](#dependencies):
@@ -60,16 +58,17 @@ See [Auth](docs/auth.md) for preparing users for interface. **Access to interfac
  - pcre
  - openssl
  - curl (this is not used as primary library for checking proxies)
+ - Modified [madns] (included in files)
 
 ## Development
 Push requests welcome. See TODO list.
 
 ## TODO
- - **Windows support**
- - Custom SOCKS5 UDP requests
  - Daemon mode
+ - Custom SOCKS5 UDP requests
  - Check and fix unicode
  - vasprintf for windows on stock HTML mode
  - Suggesstions?
 
 [libmaxminddb]:https://github.com/maxmind/libmaxminddb
+[madns]:https://github.com/tiago4orion/madns

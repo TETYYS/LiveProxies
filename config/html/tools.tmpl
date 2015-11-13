@@ -80,6 +80,31 @@
                         }
                         $('#bulk').val(out);
                     }
+
+                    var multiRequestLeft = 0;
+
+                    function multiRequest() {
+                        $.ajax({
+                            type: "GET",
+                            url: "/getallproxies",
+                            success: function(data) {
+                                var proxies = data.split("\n");
+                                var url = $('#mrInput').val();
+                                
+                                for (var x = 0;x < proxies.length;x++) {
+                                    $.ajax({
+                                        type: "GET",
+                                        url: "/cpage?uid=" + proxies[x] + "&page=" + url
+                                    }).done(function() {
+                                        multiRequestLeft--;
+                                        console.log("-- -> " + multiRequestLeft);
+                                    });
+                                    multiRequestLeft++;
+                                    console.log("++ -> " + multiRequestLeft);
+                                }
+                            }
+                        });
+                    }
                 </script>
                 <div class="row">
                 <div class="col-lg-12">
@@ -156,6 +181,37 @@
                         <!-- /.panel-body -->
                     </div>
                     <!-- /.panel -->
+                    <div class="panel panel-default">
+                        <!-- /.panel-heading -->
+                        <div class="panel-heading clearfix">
+                            <h3 class="panel-title" style="padding-top: 6.5px">
+                                <i class="fa fa-cube"></i> System
+                            </h3>
+                        </div>
+                        <div class="panel-body">
+                            <button type="button" onclick="$.ajax( { url: '/tools?action=tmplreload' } ).done(function() { alert('Reloaded'); } );" class="btn btn-default">Reload HTML template files</button>
+                        </div>
+                        <!-- /.panel-body -->
+                    </div>
+                    <div class="panel panel-default">
+                        <div class="panel-heading clearfix">
+                            <h3 class="panel-title" style="padding-top: 6.5px">
+                                <i class="fa fa-clone"></i> Multi-request
+                            </h3>
+                        </div>
+                        <div class="panel-body">
+                            <div class="row">
+                                 <div class="col-lg-12">
+                                     <div class="form-group">
+                                         <input type="text" id="mrInput" class="form-control"></input>
+                                     </div>
+                                 </div>
+                                 <div class="col-lg-12">
+                                     <button type="button" onclick="multiRequest();" class="btn btn-default">Multi-request</button>
+                                 </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <!-- /.col-lg-12 -->
             </div>
