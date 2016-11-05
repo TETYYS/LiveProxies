@@ -9,15 +9,14 @@
 #include "ProxyRequest.h"
 #include "Config.h"
 
-static void DNSResolveCallError(DNS_LOOKUP_ASYNC_EX *Ex)
+static void DNSResolveCallError(DNS_LOOKUP_ASYNC_EX *Ex, enum dns_error Error)
 {
-	// void *context, DNS_RR_TYPE qtype, const char *name, const unsigned char *addr, size_t addrlen
 	struct dns_cb_data data;
 	data.name = NULL;
 	data.addr = NULL;
 	data.addr_len = 0;
 	data.context = Ex;
-	data.error = DNS_ERROR;
+	data.error = Error;
 	data.query_type = 0;
 	Ex->fxDone(&data);
 }
@@ -27,7 +26,7 @@ static void DNSResolveLevEventToDNSProcess(evutil_socket_t fd, short what, void 
 	DNS_LOOKUP_ASYNC_EX *ex = (DNS_LOOKUP_ASYNC_EX*)arg;
 	Log(LOG_LEVEL_DEBUG, "DNS process WHAT %d", what);
 	if (what == EV_TIMEOUT) {
-		DNSResolveCallError(ex);
+		DNSResolveCallError(ex, DNS_TIMEOUT);
 		goto free;
 	}
 
@@ -41,12 +40,14 @@ static void DNSResolveLevEventToDNSProcess(evutil_socket_t fd, short what, void 
 	return;
 free:
 	dns_fini(ex->dnsCtx);
-	if (ex->evDNS != NULL)
-		event_del(ex->evDNS);
+	event_del(ex->evDNS);
+	event_free(ex->evDNS);
+	if (ex->fxFreed != NULL)
+		((FxDnsFreed)ex->fxFreed)(ex);
 	free(ex);
 }
 
-void DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_callback_t fxDone)
+DNS_LOOKUP_ASYNC_EX *DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_callback_t fxDone, FxDnsFreed fxFree)
 {
 	DNS_LOOKUP_ASYNC_EX *ex = malloc(sizeof(DNS_LOOKUP_ASYNC_EX));
 	ex->object = Ex;
@@ -54,14 +55,16 @@ void DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_callback_t fxDone)
 	ex->evDNS = NULL;
 	ex->resolveDone = false;
 	ex->fxDone = fxDone;
+	ex->fxFreed = fxFree;
+	ex->ipv6 = IPv6;
 	Log(LOG_LEVEL_DEBUG, "DNSResolveAsync EX: obj %p fx %p", Ex, fxDone);
 
 	struct dns *dnsCtx = dns_init();
 	if (!dnsCtx) {
 		Log(LOG_LEVEL_ERROR, "Failed to initialize tadns context");
-		DNSResolveCallError(ex);
+		DNSResolveCallError(ex, DNS_ERROR);
 		free(ex);
-		return;
+		return NULL;
 	}
 	ex->dnsCtx = dnsCtx;
 	Log(LOG_LEVEL_DEBUG, "DNSResolveAsync EX: ctx %p", dnsCtx);
@@ -71,7 +74,15 @@ void DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_callback_t fxDone)
 	Log(LOG_LEVEL_DEBUG, "DNS FD %d", dns_get_fd(dnsCtx));
 
 	struct event *fdEvent = event_new(levRequestBase, dns_get_fd(dnsCtx), EV_READ | EV_PERSIST, DNSResolveLevEventToDNSProcess, ex);
+	if (!fdEvent) {
+		Log(LOG_LEVEL_ERROR, "Failed to initialize fdEvent");
+		DNSResolveCallError(ex, DNS_ERROR);
+		free(ex);
+		return NULL;
+	}
 	ex->evDNS = fdEvent;
 	Log(LOG_LEVEL_DEBUG, "DNSResolveAsync EX: ev %p", fdEvent);
 	event_add(fdEvent, &GlobalTimeoutTV);
+	
+	return ex;
 }

@@ -27,6 +27,9 @@ void RemoveThread()
 		} pthread_mutex_unlock(&LockCheckedProxies);
 		if (proxy != NULL) {
 			UNCHECKED_PROXY *UProxy = UProxyFromProxy(proxy);
+			UProxy->targetIPv4 = GlobalIp4;
+			UProxy->targetIPv6 = GlobalIp6;
+			UProxy->targetPort = UProxy->type == PROXY_TYPE_SOCKS5_WITH_UDP ? ServerPortUDP : (ProxyIsSSL(UProxy->type) ? SSLServerPort : ServerPort);
 			UProxyAdd(UProxy);
 			proxy->rechecking = true;
 			RequestAsync(UProxy);

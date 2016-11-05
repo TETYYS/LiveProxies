@@ -26,27 +26,16 @@
 			$(document).ready(function() {
 				var cup = $('#countUProxies');
 				var cp = $('#countProxies');
-				var lastChange = Date.now();
-				
-				var update = function() {
-					if (lastChange + 5000 < Date.now()) {
-						console.log("Change PULL");
-						WSPull({T_SUB_SIZE_UPROXIES}, IntToBin(parseInt(cup.text()), 8));
-						WSPull({T_SUB_SIZE_PROXIES}, IntToBin(parseInt(cp.text()), 8));
-					}
-				}
-				var updateLoop = function() { update(); setTimeout(updateLoop, 5000); };
-				updateLoop();
 				
 				WSInitialize({T_SUB_SIZE_UPROXIES} | {T_SUB_SIZE_PROXIES}, "{T_SUB_AUTH_COOKIE}", function(sub, data) {
 					var bs = new DataView(data);
 					lastChange = Date.now();
 					switch (sub) {
 						case {T_SUB_SIZE_UPROXIES}:
-							WSTextChange(cup, bs.getUint32(4), {T_SUB_MSG_INTERVAL});
+							WSTextChange(cup, getUint64(bs, 0), {T_SUB_MSG_INTERVAL});
 						break;
 						case {T_SUB_SIZE_PROXIES}:
-							WSTextChange(cp, bs.getUint32(4), {T_SUB_MSG_INTERVAL});
+							WSTextChange(cp, getUint64(bs, 0), {T_SUB_MSG_INTERVAL});
 						break;
 					}
 				});

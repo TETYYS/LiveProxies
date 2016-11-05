@@ -4,8 +4,8 @@
 #include <stdbool.h>
 
 typedef enum _IPV6_TYPE {
-	IPV4 = 0,
-	IPV6 = 1
+	IPV4 = 1,
+	IPV6 = 2
 } IP_TYPE;
 
 typedef struct _IPv6Map {

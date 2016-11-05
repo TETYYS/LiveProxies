@@ -6,8 +6,6 @@
 #include "Interface.h"
 #include <libconfig.h>
 
-bool HtmlTemplateUseStock;
-
 typedef struct _HTML_TEMPLATE_MIME_TYPE {
 	char *extension;
 	char *type;

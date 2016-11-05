@@ -12,6 +12,8 @@
 char *RequestUA;
 char *RequestHeaderKey;
 char *RequestString;
+char *POSTRequestString;
+size_t POSTRequestStringLen;
 size_t RequestStringLen;
 char *RequestStringSSL;
 
@@ -20,6 +22,8 @@ char *Host6;
 
 char *Host4SSL;
 char *Host6SSL;
+
+char *HostHostnameSSL;
 
 struct event_base *levRequestBase;
 struct evdns_base *levRequestDNSBase;

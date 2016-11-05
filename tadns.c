@@ -38,7 +38,7 @@ typedef	unsigned int	uint32_t;
 #include "tadns.h"
 #include "llist.h"
 
-#ifdef DEBUG
+#ifdef EXTENDED_DEBUG
 	#define TADNS_DEBUG 1
 #endif
 #define	DNS_MAX			1025	/* Maximum host name		*/
@@ -390,7 +390,7 @@ static void
 parse_udp(struct dns *dns, const unsigned char *pkt, int len)
 {
 	struct header		*header;
-	const unsigned char	*p, *e, *s;
+	const unsigned char	*p, *e;
 	struct query		*q;
 	uint32_t		ttl;
 	uint16_t		type;
@@ -427,7 +427,7 @@ parse_udp(struct dns *dns, const unsigned char *pkt, int len)
 	}
 
 	/* Skip host name */
-	for (e = pkt + len, nlen = 0, s = p = &header->data[0];
+	for (e = pkt + len, nlen = 0, p = &header->data[0];
 	p < e && *p != '\0'; p++)
 		nlen++;
 

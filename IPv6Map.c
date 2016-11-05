@@ -10,6 +10,7 @@
 	#include <winsock2.h>
 	#include <ws2tcpip.h>
 #endif
+#include <assert.h>
 
 #ifdef __MINGW32__
 #define NS_INADDRSZ  4
@@ -201,20 +202,21 @@ MEM_OUT IPv6Map *StringToIPv6Map(char *In)
 
 MEM_OUT char *IPv6MapToString(IPv6Map *In)
 {
-	char *ret;
+	char *ret = NULL;
 	if (GetIPType(In) == IPV4) {
 		ret = malloc(sizeof(char)* INET_ADDRSTRLEN + 1);
 		inet_ntop(AF_INET, &(In->Data[3]), ret, INET_ADDRSTRLEN);
 	} else if (GetIPType(In) == IPV6) {
 		ret = malloc(sizeof(char)* INET6_ADDRSTRLEN + 1);
 		inet_ntop(AF_INET6, In->Data, ret, INET6_ADDRSTRLEN);
-	}
+	} else
+		assert(false);
 	return ret;
 }
 
 MEM_OUT char *IPv6MapToString2(IPv6Map *In)
 {
-	char *ret;
+	char *ret = NULL;
 	if (GetIPType(In) == IPV4) {
 		ret = malloc(sizeof(char)* INET_ADDRSTRLEN + 1);
 		inet_ntop(AF_INET, &(In->Data[3]), ret, INET_ADDRSTRLEN);
@@ -223,7 +225,8 @@ MEM_OUT char *IPv6MapToString2(IPv6Map *In)
 		inet_ntop(AF_INET6, In->Data, ret + 1, INET6_ADDRSTRLEN);
 		ret[0] = '[';
 		ret[strlen(ret)] = ']';
-	}
+	} else
+		assert(false);
 	return ret;
 }
 
@@ -260,10 +263,8 @@ MEM_OUT IPv6Map *RawToIPv6Map(struct sockaddr *In)
 		memset(ret->Data, 0, IPV6_SIZE / 2);
 		ret->Data[3] = sin->sin_addr.s_addr;
 		ret->Data[2] = 0xFFFF0000; // THAT WAY!
-	} else {
-		struct sockaddr_in6 *sin = (struct sockaddr_in6*)In;
+	} else
 		memcpy(ret->Data, In->sa_data, IPV6_SIZE);
-	}
 	return ret;
 }
 

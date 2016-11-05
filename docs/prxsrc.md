@@ -15,14 +15,16 @@ setType 3
 [2000:2222:3333::4444]:8888
 ```
 Currently program supports following formats of proxy list sources:
- - Script `.py`
+ - Script `.cmd`
  - Static file `.txt` or `.prx`
  - URL `.url`
 
 ## Script
-In order to add proxies from html websites, or to clean proxy lists before pushing them to the program, you should use Python scripts. Script entry point is always `run()` See [BlogspotGeneric.py](../BlogspotGeneric.py) for example script. **NOTE:** All Blogspot websites are different, so script doesn't always match with blog HTML.
+In order to add proxies from html websites, or to clean proxy lists before pushing them to the program, you should use scripts. You can use any kind of scripting engine as long as it's installed in the server and it's outputting proxy list in format described above to STDOUT. See [BlogspotGeneric.py](../BlogspotGeneric.py) for example python script. **NOTE:** All Blogspot websites are different, so script doesn't always match with blog HTML.
+
+Script file extension is .cmd and it must contain one line of command, for example `python /etc/liveproxies/scripts/test.py`, `mono /etc/liveproxies/scripts/test.exe`.
 ## Static file
-If you want to add static lists of proxies, you should use `.txt` or `.prx` extension files. Just leave proxy list in format specified in the beggining.
+If you want to add static lists of proxies, you should use `.txt` or `.prx` extension files. Just leave proxy list in format described above.
 ## URL
 If remote website is just plain list of proxies in format `IP:PORT`, you should use URL proxy source format. All `.url` files should be in following format:
 ```

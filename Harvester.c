@@ -7,16 +7,14 @@
 #include "Global.h"
 #include "Config.h"
 #if __linux__
-	#include <python2.7/Python.h>
-#elif defined _WIN32 || defined _WIN64
-	#include <Python.h>
-#endif
-#if __linux__
 	#include <dirent.h>
 #elif defined _WIN32 || defined _WIN64
 	#include <windows.h>
 #endif
 #include <curl/curl.h>
+#include <string.h>
+#include <assert.h>
+#include <stdlib.h>
 
 #if defined _WIN32 || defined _WIN64
 char *strtok_r(char *str, const char *delim, char **save)
@@ -60,7 +58,7 @@ static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, cha
 {
 	size_t realsize = size * nmemb;
 
-	*result = realloc(*result, (strlen(*result) * sizeof(char)) + realsize + 1);
+	*result = realloc(*result, strlen(*result) + realsize + 1);
 	memcpy(&((*result)[strlen(*result)]), contents, realsize);
 
 	return realsize;
@@ -73,15 +71,16 @@ char *ProxySourceTypeToString(HARVESTER_PROXY_SOURCE_TYPE In)
 	switch (In) {
 		case SCRIPT: {
 			return SourceTypes[0];
-			break;
 		}
 		case STATIC: {
 			return SourceTypes[1];
-			break;
 		}
 		case URL: {
 			return SourceTypes[2];
-			break;
+		}
+		default: {
+			assert(false);
+			return NULL;
 		}
 	}
 }
@@ -89,22 +88,11 @@ char *ProxySourceTypeToString(HARVESTER_PROXY_SOURCE_TYPE In)
 void HarvestLoop()
 {
 	// holy memory
-
-	Py_Initialize();
+	
 	HarvesterStatsPrxsrc = NULL;
 	SizeStatsHarvesterPrxsrc = 0;
 
 	for (;;) {
-		PyObject *pName, *pModule, *pFunc = NULL, *pResult;
-		bool statsEntryAdded = false;
-
-		PyRun_SimpleString("import sys");
-
-		char *sysPath = malloc(19 + strlen(HarvestersPath) + 1); {
-			sprintf(sysPath, "sys.path.append(\"%s\")", HarvestersPath);
-			PyRun_SimpleString(sysPath);
-		} free(sysPath);
-
 #if __linux__
 
 		DIR *d;
@@ -116,7 +104,7 @@ void HarvestLoop()
 		HANDLE d = NULL;
 
 		size_t harvestersPathLen = strlen(HarvestersPath);
-		char *fullPath = malloc((harvestersPathLen + 3) * sizeof(char)); {
+		char *fullPath = malloc(harvestersPathLen + 3); {
 			strcpy(fullPath, HarvestersPath);
 			strcat(fullPath, "\\*");
 			fullPath[harvestersPathLen + 2] = 0x00;
@@ -147,7 +135,7 @@ void HarvestLoop()
 
 			HARVESTER_PROXY_SOURCE_TYPE sourceType = NONE;
 			size_t fileNameLen = strlen(name);
-			if (strcmp(name + fileNameLen - 3, ".py") == 0)
+			if (strcmp(name + fileNameLen - 4, ".cmd") == 0)
 				sourceType = SCRIPT;
 			if (strcmp(name + fileNameLen - 4, ".txt") == 0 || strcmp(name + fileNameLen - 4, ".prx") == 0)
 				sourceType = STATIC;
@@ -155,113 +143,139 @@ void HarvestLoop()
 				sourceType = URL;
 			if (sourceType == NONE)
 				continue;
-			char *path = (char*)malloc(10 + strlen(name) + 1 /* NULL */);
-			sprintf(path, "%s", name);
-			path[strlen(path) - (sourceType == SCRIPT ? 3 : 4)] = '\0';
-			Log(LOG_LEVEL_SUCCESS, "Executing %s... (%s)", path, ProxySourceTypeToString(sourceType));
+			Log(LOG_LEVEL_SUCCESS, "Executing %s... (%s)", name, ProxySourceTypeToString(sourceType));
 			char *result;
-			uint32_t added = 0, addedPrev = 0, total = 0;
+			uint32_t added = 0, total = 0;
 			PROXY_TYPE curType = PROXY_TYPE_HTTP;
+			
+			char pathFull[strlen(HarvestersPath) + 1 + fileNameLen];
+			strcpy(pathFull, HarvestersPath);
+#ifdef __linux__
+			strcat(pathFull, "/");
+#elif defined _WIN32 || defined _WIN64
+			strcat(pathFull, "\\");
+#endif
+			strcat(pathFull, name);
+			
 			if (sourceType == SCRIPT) {
-				pName = PyString_FromString(path);
-				pModule = PyImport_Import(pName);
-				Py_DECREF(pName);
+				FILE *file = fopen(pathFull, "r");
+				
+				fseek(file, 0, SEEK_END);
+				size_t size = ftell(file);
+				fseek(file, 0, SEEK_SET);
+				
+				char *cmd = malloc(size); {
+					fread(cmd, 1, size, file);
+					
+					size_t cmdLen = strlen(cmd);
+					if (cmd[cmdLen - 1] == '\n')
+						cmd[cmdLen - 1] = '\0';
+					
+					FILE *scriptStdout = popen(cmd, "r"); 
+					
+					
+					if (scriptStdout == NULL) {
+						Log(LOG_LEVEL_ERROR, "Failed to execute %s", cmd);
+						continue;
+					}
 
-				if (pModule == NULL) {
-					PyErr_Print();
-					goto freepath;
-				}
-				pFunc = PyObject_GetAttrString(pModule, "run");
-				if (!pFunc) {
-					PyErr_Print();
-					Py_DECREF(pModule);
-					goto freepath;
-				}
-				pResult = PyObject_CallObject(pFunc, NULL);
-				if (!pResult) {
-					PyErr_Print();
-					Py_DECREF(pModule);
-					Py_XDECREF(pFunc);
-					goto freepath;
-				}
-
-				result = PyString_AsString(pResult);
+					result = NULL;
+					char buff[32];
+					size_t curLen = 0;
+					while (fgets(buff, sizeof(buff), scriptStdout) != 0)
+					{
+						size_t buffLen = strlen(buff);
+						result = realloc(result, buffLen + curLen + 1);
+						strcpy(result + curLen, buff);
+						curLen += buffLen;
+					}
+					
+					if (result == NULL) {
+						pclose(scriptStdout);
+						continue;
+					}
+					pclose(scriptStdout);
+				} free(cmd);
 			}
 			if (sourceType == STATIC) {
-				char *pathFull = malloc((strlen(HarvestersPath) + 1 + fileNameLen) * sizeof(char)); {
-					strcpy(pathFull, HarvestersPath);
-					strcat(pathFull, "/");
-					strcat(pathFull, name);
+				char pathFull[strlen(HarvestersPath) + 1 + fileNameLen];
+				strcpy(pathFull, HarvestersPath);
+#ifdef __linux__
+				strcat(pathFull, "/");
+#elif defined _WIN32 || defined _WIN64
+				strcat(pathFull, "\\");
+#endif
+				strcat(pathFull, name);
 
-					FILE *hFile = fopen(pathFull, "r"); {
-						if (hFile == NULL)
-							goto freepath;
-						fseek(hFile, 0, SEEK_END);
-						size_t size = ftell(hFile);
-						fseek(hFile, 0, SEEK_SET);
+				FILE *hFile = fopen(pathFull, "r"); {
+					if (hFile == NULL) {
+						Log(LOG_LEVEL_ERROR, "Failed to open %s", pathFull);
+						continue;
+					}
+					fseek(hFile, 0, SEEK_END);
+					size_t size = ftell(hFile);
+					fseek(hFile, 0, SEEK_SET);
 
-						result = malloc(size + 1);
-						fread(result, size, 1, hFile);
-						result[size] = 0x00;
-					} fclose(hFile);
-				} free(pathFull);
+					result = malloc(size + 1);
+					fread(result, size, 1, hFile);
+					result[size] = 0x00;
+				} fclose(hFile);
 			}
 			if (sourceType == URL) {
-				char *pathFull = malloc((strlen(HarvestersPath) + 1 + fileNameLen) * sizeof(char) + 1); {
-					strcpy(pathFull, HarvestersPath);
+				char pathFull[strlen(HarvestersPath) + 1 + fileNameLen + 1];
+				strcpy(pathFull, HarvestersPath);
 #ifdef __linux__
-					strcat(pathFull, "/");
+				strcat(pathFull, "/");
 #elif defined _WIN32 || defined _WIN64
-					strcat(pathFull, "\\");
+				strcat(pathFull, "\\");
 #endif
-					strcat(pathFull, name);
+				strcat(pathFull, name);
 
-					FILE *hFile = fopen(pathFull, "r"); {
-						if (hFile == NULL)
-							goto freepath;
-						fseek(hFile, 0, SEEK_END);
-						size_t size = ftell(hFile);
-						fseek(hFile, 0, SEEK_SET);
+				FILE *hFile = fopen(pathFull, "r"); {
+					if (hFile == NULL)
+						continue;
+					fseek(hFile, 0, SEEK_END);
+					size_t size = ftell(hFile);
+					fseek(hFile, 0, SEEK_SET);
 
-						char *contents = malloc(size + 1); {
-							fread(contents, size, 1, hFile);
-							contents[size] = 0x00;
+					char *contents = malloc(size + 1); {
+						fread(contents, size, 1, hFile);
+						contents[size] = 0x00;
 
-							char *nl = strstr(contents, "\r\n");
-							if (nl == NULL)
-								nl = strchr(contents, '\n');
+						char *nl = strstr(contents, "\r\n");
+						if (nl == NULL)
+							nl = strchr(contents, '\n');
 
-							if (nl == NULL) {
-								Log(LOG_LEVEL_WARNING, "Malformed URL type proxy source");
-								goto freepath;
+						if (nl == NULL) {
+							Log(LOG_LEVEL_WARNING, "Malformed URL type proxy source");
+							free(contents);
+							continue;
+						}
+						*nl = 0x00;
+						char *url = nl + 1;
+						if (url[strlen(url) - 1] == '\n')
+							url[strlen(url) - 1] = 0x00;
+
+						result = malloc(0);
+						CURL *hCurl = curl_easy_init(); {
+							curl_easy_setopt(hCurl, CURLOPT_URL, url);
+							curl_easy_setopt(hCurl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+							curl_easy_setopt(hCurl, CURLOPT_WRITEDATA, &result);
+							curl_easy_setopt(hCurl, CURLOPT_USERAGENT, REQUEST_UA);
+							CURLcode res = curl_easy_perform(hCurl);
+							if (res != CURLE_OK) {
+								Log(LOG_LEVEL_WARNING, "Request to %s failed: %s", url, curl_easy_strerror(res));
+							} else {
+								if (strncmp(contents, "setType", 7) == 0)
+									curType = atoll(contents + 8);
 							}
-							*nl = 0x00;
-							char *url = nl + (1 * sizeof(char));
-							if (url[strlen(url) - 1] == '\n')
-								url[strlen(url) - 1] = 0x00;
-
-							result = malloc(0);
-							CURL *hCurl = curl_easy_init(); {
-								curl_easy_setopt(hCurl, CURLOPT_URL, url);
-								curl_easy_setopt(hCurl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
-								curl_easy_setopt(hCurl, CURLOPT_WRITEDATA, &result);
-								curl_easy_setopt(hCurl, CURLOPT_USERAGENT, REQUEST_UA);
-								CURLcode res = curl_easy_perform(hCurl);
-								if (res != CURLE_OK) {
-									Log(LOG_LEVEL_WARNING, "Request to %s failed: %s", url, curl_easy_strerror(res));
-								} else {
-									if (strncmp(contents, "setType", 7) == 0)
-										curType = atoll(contents + 8);
-								}
-							} curl_easy_cleanup(hCurl);
-						} free(contents);
-					} fclose(hFile);
-				} free(pathFull);
+						} curl_easy_cleanup(hCurl);
+					} free(contents);
+				} fclose(hFile);
 			}
 
 			char *tokSave = NULL;
 			char *pch = strtok_r(result, "\n", &tokSave);
-			uint16_t curPort;
 			while (pch != NULL) {
 				if (pch[0] == '\0') {
 					pch = strtok_r(NULL, "\n", &tokSave);
@@ -274,8 +288,10 @@ void HarvestLoop()
 				pch = strtok_r(NULL, "\n", &tokSave);
 			}
 
+			free(result);
+			
 			HARVESTER_PRXSRC_STATS_ENTRY entry;
-			entry.name = path;
+			entry.name = name;
 			entry.added = total;
 			entry.addedNew = added;
 			entry.type = sourceType;
@@ -294,18 +310,7 @@ void HarvestLoop()
 				}
 			} pthread_mutex_unlock(&LockStatsHarvesterPrxsrc);
 
-			statsEntryAdded = true;
-
-			printf("Added %d (%d new) proxies from %s\n", total, added, path);
-			if (sourceType == SCRIPT) {
-				Py_DECREF(pResult);
-				Py_XDECREF(pFunc);
-				Py_DECREF(pModule);
-			} else
-				free(result);
-freepath:;
-			if (!statsEntryAdded)
-				free(path);
+			printf("Added %d (%d new) proxies from %s\n", total, added, name);
 #if __linux__
 		}
 		closedir(d);

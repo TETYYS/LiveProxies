@@ -31,7 +31,8 @@
 #ifdef __linux__
 #include <unistd.h>
 #elif defined _WIN32 || defined _WIN64
-#include <Shlwapi.h>
+#include <shlwapi.h>
+#include <windows.h>
 #endif
 #include <math.h>
 #include <fcntl.h>
@@ -73,10 +74,12 @@ static char *HostFormat(IPv6Map *Ip, uint16_t Port)
 	return ret;
 }
 
+#ifdef LIBEV_DEBUG
 static void EvLog(int Level, char *Format, va_list VA)
 {
 	Log(Level, Format, VA);
 }
+#endif
 
 int main(int argc, char** argv)
 {
@@ -84,7 +87,7 @@ int main(int argc, char** argv)
 	WinAppData = getenv("AppData");
 #endif
 
-	if (argc == 2) {
+	if (argc == 2 && strcmp(argv[1], "passwd") == 0) {
 		printf("Enter username to use for interface:\n");
 		char *uname = StdinDynamic();
 
@@ -92,13 +95,12 @@ int main(int argc, char** argv)
 		char *pbkdf2;
 		char *passwd = StdinDynamic(); {
 			pbkdf2 = PBKDF2_HMAC_SHA_512(passwd, strlen(passwd));
-//#ifdef __linux__
-#pragma optimize("-no-dead-code-removal")
+#ifdef __linux__
 			memset(passwd, 0, strlen(passwd)); // safety!
-#pragma optimize("-dead-code-removal")
-/*#elif defined _WIN32 || defined _WIN64
+			*(volatile char *)passwd = *(volatile char *)passwd;
+#elif defined _WIN32 || defined _WIN64
 			SecureZeroMemory(passwd, strlen(passwd));
-#endif*/
+#endif
 		} free(passwd);
 
 		char confirmation;
@@ -120,7 +122,7 @@ int main(int argc, char** argv)
 #ifdef __linux__
 			path = "/etc/liveproxies/passwd.conf";
 #elif defined _WIN32 || defined _WIN64
-			path = malloc((strlen(WinAppData) + 29) * sizeof(char) + 1);
+			path = malloc(strlen(WinAppData) + 29 + 1);
 			strcpy(path, WinAppData);
 			strcat(path, "\\liveproxies\\passwd.conf");
 #endif
@@ -165,14 +167,19 @@ int main(int argc, char** argv)
 
 		return 0;
 	}
+
+	//
+
 	printf("LiveProxes "VERSION" started\n");
 #if DEBUG
-#define MMDB_DEBUG 1
+#define MMDB_DEBUG 0
 	printf("========================DEBUG========================\n");
-	//evthread_enable_lock_debugging();
-	//event_enable_debug_mode();
-	//event_set_log_callback((event_log_cb)EvLog);
-	//event_enable_debug_logging(EVENT_DBG_ALL);
+#ifdef EXTENDED_DEBUG
+	evthread_enable_lock_debugging();
+	event_enable_debug_mode();
+	event_set_log_callback((event_log_cb)EvLog);
+	event_enable_debug_logging(EVENT_DBG_ALL);
+#endif
 #endif
 
 #if defined _WIN32 || defined _WIN64
@@ -182,7 +189,7 @@ int main(int argc, char** argv)
 	if ((res = WSAStartup(MAKEWORD(2, 2), &wsaData)) != 0) {
 		Log(LOG_LEVEL_ERROR, "WSAStartup failed: %d\n", res);
 		return res;
-	}
+}
 #endif
 
 	char *globalPath, *localPath;
@@ -222,7 +229,7 @@ int main(int argc, char** argv)
 	globalPath = "/usr/local/share/GeoIP/GeoLite2-Country.mmdb";
 	localPath = "./GeoLite2-Country.mmdb";
 #elif defined _WIN32 || defined _WIN64
-	globalPath = malloc((strlen(WinAppData) + 34) * sizeof(char) + 1);
+	globalPath = malloc(strlen(WinAppData) + 34 + 1);
 	strcpy(globalPath, WinAppData);
 	strcat(globalPath, "\\liveproxies\\GeoLite2-Country.mmdb");
 	localPath = ".\\GeoLite2-Country.mmdb";
@@ -250,7 +257,7 @@ int main(int argc, char** argv)
 #ifdef __linux__
 	globalPath = "/etc/liveproxies/liveproxies.conf";
 #elif defined _WIN32 || defined _WIN64
-	globalPath = malloc((strlen(WinAppData) + 29) * sizeof(char) + 1);
+	globalPath = malloc(strlen(WinAppData) + 29 + 1);
 	strcpy(globalPath, WinAppData);
 	strcat(globalPath, "\\liveproxies\\liveproxies.conf");
 #endif
@@ -277,7 +284,7 @@ int main(int argc, char** argv)
 
 #define CONFIG_INT64(cfg, svar, var, default) if (config_setting_lookup_int64(cfg, svar, (long long*)(&var)) == CONFIG_FALSE) { var = default; Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %d...", svar, default); }
 #define CONFIG_INT(cfg, svar, var, default) if (config_setting_lookup_int(cfg, svar, (int*)(&var)) == CONFIG_FALSE) { var = default; Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %d...", svar, default); }
-#define CONFIG_STRING(cfg, svar, var, default) const char *val_##var; if (config_setting_lookup_string(cfg, svar, &(val_##var)) == CONFIG_FALSE) { var = default; Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %s...", svar, default); } else { var = malloc((strlen(val_##var) * sizeof(char)) + 1); strcpy(var, (val_##var)); }
+#define CONFIG_STRING(cfg, svar, var, default) const char *val_##var; if (config_setting_lookup_string(cfg, svar, &(val_##var)) == CONFIG_FALSE) { var = malloc(strlen(default) + 1); strcpy(var, default); Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %s...", svar, default); } else { var = malloc(strlen(val_##var) + 1); strcpy(var, (val_##var)); }
 #define CONFIG_BOOL(cfg, svar, var, default) if (config_setting_lookup_bool(cfg, svar, (int*)(&var)) == CONFIG_FALSE) { var = default; Log(LOG_LEVEL_ERROR, "Failed to lookup %s, setting to %d...", svar, default); }
 
 	CONFIG_INT64(cfgRoot, "SimultaneousChecks", SimultaneousChecks, 3000)
@@ -290,8 +297,14 @@ int main(int argc, char** argv)
 	CONFIG_INT(cfgRoot, "ServerPort", ServerPort, 8084)
 	CONFIG_INT(cfgRoot, "ServerPortUDP", ServerPortUDP, 8084)
 	CONFIG_BOOL(cfgRoot, "EnableUDP", EnableUDP, true)
+	CONFIG_BOOL(cfgRoot, "SOCKS5ResolveDomainsRemotely", SOCKS5ResolveDomainsRemotely, false)
 	CONFIG_STRING(cfgRoot, "HarvestersPath", HarvestersPath, "/etc/liveproxies/scripts/")
 	CONFIG_STRING(cfgRoot, "HttpBLAccessKey", HttpBLAccessKey, "")
+	CONFIG_STRING(cfgRoot, "Hostname", GlobalHostname, "")
+	if (*GlobalHostname == '\0') {
+		free(GlobalHostname);
+		GlobalHostname = NULL;
+	}
 
 	CONFIG_STRING(cfgRoot, "RequestHeaderKey", RequestHeaderKey, "LPKey")
 	CONFIG_STRING(cfgRoot, "RequestUA", RequestUA, "LiveProxies proxy checker {VERSION} (tetyys.com/liveproxies)")
@@ -310,23 +323,23 @@ int main(int argc, char** argv)
 		CONFIG_BOOL(sslGroup, "Enable", SSLEnabled, false)
 		CONFIG_STRING(sslGroup, "Private", SSLPrivateKey, "/etc/liveproxies/private.key")
 		CONFIG_STRING(sslGroup, "Public", SSLPublicKey, "/etc/liveproxies/public.cer")
-		CONFIG_STRING(sslGroup, "CipherList", SSLCipherList, "EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH")
+		CONFIG_STRING(sslGroup, "CipherList", SSLCipherList, "EECDH+AESGCM:EDH+AESGCM:ECDHE-RSA-AES128-GCM-SHA256:AES256+EECDH:DHE-RSA-AES128-GCM-SHA256:AES256+EDH:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA:ECDHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-AES128-SHA256:DHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA:ECDHE-RSA-DES-CBC3-SHA:EDH-RSA-DES-CBC3-SHA:AES256-GCM-SHA384:AES128-GCM-SHA256:AES256-SHA256:AES128-SHA256:AES256-SHA:AES128-SHA:DES-CBC3-SHA:HIGH:!aNULL:!eNULL:!EXPORT:!DES:!MD5:!PSK:!RC4")
 		CONFIG_INT(sslGroup, "ServerPort", SSLServerPort, 8085)
 
 		if (SSLEnabled) {
-			SSL_load_error_strings();
 			SSL_library_init();
+			OpenSSL_add_ssl_algorithms();
+			OpenSSL_add_all_algorithms();
+			SSL_load_error_strings();
+			ERR_load_crypto_strings();
 			if (!RAND_poll()) {
 				Log(LOG_LEVEL_ERROR, "RAND_poll, exiting...");
 				exit(EXIT_FAILURE);
 			}
 
-			levServerSSL = SSL_CTX_new(SSLv23_server_method());
-			SSL_CTX_set_session_cache_mode(levServerSSL, SSL_SESS_CACHE_OFF);
+			levServerSSL = SSL_CTX_new(TLSv1_2_server_method());
+			SSL_CTX_set_verify(levServerSSL, SSL_VERIFY_PEER, SSLVerifyCallback);
 
-			SSL_CTX *CTX;
-			X509 *cert = NULL;
-			RSA *rsa = NULL;
 			BIO *bio;
 			uint8_t *certBuff;
 			size_t size;
@@ -345,29 +358,31 @@ int main(int argc, char** argv)
 			} fclose(hFile);
 
 			bio = BIO_new_mem_buf(certBuff, size); {
-				cert = PEM_read_bio_X509(bio, NULL, 0, NULL);
+				X509 *cert = PEM_read_bio_X509(bio, NULL, 0, NULL);
 				if (cert == NULL) {
 					Log(LOG_LEVEL_ERROR, "Failed to read public key (2), exiting...");
 					exit(EXIT_FAILURE);
 				}
-
-				if (!SSL_CTX_use_certificate(levServerSSL, cert) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
-					Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
-					exit(EXIT_FAILURE);
-				}
-				SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-				SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
-
-				uint8_t *buff;
-				size_t len;
+				
 				SSLFingerPrint = malloc(EVP_MAX_MD_SIZE);
 				unsigned int trash;
 				X509_digest(cert, EVP_sha512(), SSLFingerPrint, &trash);
+				
+				X509_free(cert);
+				
 				Log(LOG_LEVEL_DEBUG, "SSL fingerprint: %128x", SSLFingerPrint);
 			} BIO_free(bio);
+			free(certBuff);
+			
+			if (!SSL_CTX_use_certificate_chain_file(levServerSSL, SSLPublicKey) || !SSL_CTX_use_PrivateKey_file(levServerSSL, SSLPrivateKey, SSL_FILETYPE_PEM)) {
+				Log(LOG_LEVEL_ERROR, "Failed to load public / private key, exiting...");
+				exit(EXIT_FAILURE);
+			}
+			SSL_CTX_set_options(levServerSSL, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+			SSL_CTX_set_cipher_list(levServerSSL, SSLCipherList);
 
 			CONFIG_STRING(sslGroup, "RequestHeaders", RequestStringSSL, "CONNECT {HOST} HTTP/1.1\r\nHost: {HOST}\r\nUser-Agent: {UA}\r\n\r\n")
-				StrReplaceOrig(&RequestStringSSL, "{VERSION}", VERSION);
+			StrReplaceOrig(&RequestStringSSL, "{VERSION}", VERSION);
 			StrReplaceOrig(&RequestStringSSL, "{UA}", RequestUA);
 			StrReplaceOrig(&RequestStringSSL, "{KEY_NAME}", RequestHeaderKey);
 		}
@@ -376,9 +391,16 @@ int main(int argc, char** argv)
 	/* Stats */ {
 		config_setting_t *statsGroup = config_setting_get_member(cfgRoot, "Stats");
 		CONFIG_INT(statsGroup, "CollectionInterval", StatsCollectionInterval, 10000)
-			CONFIG_INT(statsGroup, "MaxItems", StatsMaxItems, 1000)
+		CONFIG_INT(statsGroup, "MaxItems", StatsMaxItems, 1000)
 	} /* End stats */
 
+	/* Websockets */ {
+		config_setting_t *websocketsGroup = config_setting_get_member(cfgRoot, "Websockets");
+		CONFIG_INT(websocketsGroup, "PingInterval", WSPingInterval, 5000)
+		CONFIG_INT(websocketsGroup, "MessageInterval", WSMessageInterval, 700)
+		
+	} /* End websockets*/
+	
 	/* GlobalIP */ {
 		const char *globalIp4 = NULL;
 		const char *globalIp6 = NULL;
@@ -415,7 +437,34 @@ int main(int argc, char** argv)
 			if (SSLEnabled)
 				Host6SSL = HostFormat(GlobalIp6, SSLServerPort);
 		}
+		
+		HostHostnameSSL = NULL;
+		if (GlobalHostname != NULL) {
+			size_t hostnameLen = strlen(GlobalHostname);
+			HostHostnameSSL = malloc((sizeof(char)* (hostnameLen + INTEGER_VISIBLE_SIZE(SSLServerPort) + 1 /* : between ip and port */)) + 1 /* NUL */);
+			sprintf(HostHostnameSSL, "%s:%d", GlobalHostname, SSLServerPort);
+		}
 	} /* End GlobalIP */
+
+	CONFIG_STRING(cfgRoot, "POSTRequest", POSTRequestString,
+		"POST {PAGE_PATH} HTTP/1.1\r\n"
+		"Host: {HOST}\r\n"
+		"Connection: Close\r\n"
+		"Cache-Control: max-age=0\r\n"
+		"Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n"
+		"User-Agent: {UA}\r\n"
+		"DNT: 1\r\n"
+		"Accept-Encoding: gzip, deflate, sdch\r\n"
+		"Accept-Language: en-US,en;q=0.8\r\n"
+		"Content-Type: application/x-www-form-urlencoded\r\n"
+		"Content-Length: {DATA_LEN}\r\n"
+		"{KEY_NAME}: {KEY_VAL}\r\n\r\n"
+		"{POST_DATA}")
+	// Host, LPKey, DataLen and PostData is injected upon request
+	StrReplaceOrig(&POSTRequestString, "{VERSION}", VERSION);
+	StrReplaceOrig(&POSTRequestString, "{UA}", RequestUA);
+	StrReplaceOrig(&POSTRequestString, "{KEY_NAME}", RequestHeaderKey);
+	POSTRequestStringLen = strlen(POSTRequestString);
 
 	CONFIG_STRING(cfgRoot, "RequestHeaders", RequestString,
 		"GET {PAGE_PATH} HTTP/1.1\r\n"
@@ -451,7 +500,7 @@ int main(int argc, char** argv)
 #ifdef __linux__
 		globalPath = "/etc/liveproxies/passwd.conf";
 #elif defined _WIN32 || defined _WIN64
-		globalPath = malloc((strlen(WinAppData) + 29) * sizeof(char) + 1);
+		globalPath = malloc(strlen(WinAppData) + 29 + 1);
 		strcpy(globalPath, WinAppData);
 		strcat(globalPath, "\\liveproxies\\passwd.conf");
 #endif
@@ -495,11 +544,11 @@ int main(int argc, char** argv)
 
 						AuthLocalList[AuthLocalCount - 1] = malloc(sizeof(AUTH_LOCAL));
 
-						AuthLocalList[AuthLocalCount - 1]->username = malloc((strlen(val) * sizeof(char)) + 1);
+						AuthLocalList[AuthLocalCount - 1]->username = malloc(strlen(val) + 1);
 						strcpy((char*)AuthLocalList[AuthLocalCount - 1]->username, val);
 						Log(LOG_LEVEL_DEBUG, "Added user %s", AuthLocalList[AuthLocalCount - 1]->username);
 					} else {
-						AuthLocalList[AuthLocalCount - 1]->password = malloc((strlen(val) * sizeof(char)) + 1);
+						AuthLocalList[AuthLocalCount - 1]->password = malloc(strlen(val) + 1);
 						strcpy((char*)AuthLocalList[AuthLocalCount - 1]->password, val);
 					}
 					x++;
@@ -582,7 +631,7 @@ int main(int argc, char** argv)
 void RequestBase()
 {
 	if (SSLEnabled) {
-		RequestBaseSSLCTX = SSL_CTX_new(SSLv23_client_method());
+		RequestBaseSSLCTX = SSL_CTX_new(TLSv1_2_client_method());
 		SSL_CTX_set_session_cache_mode(RequestBaseSSLCTX, SSL_SESS_CACHE_OFF);
 	}
 

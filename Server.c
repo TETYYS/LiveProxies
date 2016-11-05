@@ -86,11 +86,11 @@ void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...)
 	size_t bodyLen = strlen(body);
 
 	char hex[8];
-	sprintf(hex, "%x", bodyLen);
+	sprintf(hex, "%zx", bodyLen);
 
-	all = malloc((strlen(hex) + 2 + bodyLen + 2) * sizeof(char) + 1); {
+	all = malloc((strlen(hex) + 2 + bodyLen + 2) + 1); {
 		sprintf(all, "%s\r\n%s\r\n", hex, body);
-		bufferevent_write(BuffEvent, all, (strlen(hex) + 2 + bodyLen + 2) * sizeof(char));
+		bufferevent_write(BuffEvent, all, strlen(hex) + 2 + bodyLen + 2);
 	} free(all);
 	free(body);
 }
@@ -227,8 +227,7 @@ static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 	pthread_mutex_unlock(&(UProxy->processing));
 
 	/* Output */ {
-		bufferevent_write(BuffEvent, "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n", 46 * sizeof(char));
-		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
+		bufferevent_write(BuffEvent, "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n", 46);
 	}
 
 	return;
@@ -240,6 +239,11 @@ freeProxy:
 	}
 }
 
+int SSLVerifyCallback(int preverify_ok, X509_STORE_CTX *ctx)
+{
+	return 1;
+}
+
 void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx)
 {
 	if ((Event & BEV_EVENT_CONNECTED) != BEV_EVENT_CONNECTED)
@@ -248,12 +252,10 @@ void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx)
 
 static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL)
 {
-	UNCHECKED_PROXY *UProxy = NULL;
 	bool freeBufferEvent = true;
 
 	bufferevent_set_timeouts(BuffEvent, NULL, NULL);
 
-	Log(LOG_LEVEL_DEBUG, "Server landing");
 	/* Page dispatch */ {
 		char *firstIndex = strchr(*Buff, ' ');
 
@@ -267,11 +269,9 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 
 		size_t pathLen = secondIndex - (firstIndex + 1);
 
-		char *path = malloc(pathLen * sizeof(char) + 1); {
-			memcpy(path, firstIndex + 1, pathLen * sizeof(char) + 1);
+		char *path = malloc(pathLen + 1); {
+			memcpy(path, firstIndex + 1, pathLen + 1);
 			path[pathLen] = 0x00;
-
-			Log(LOG_LEVEL_DEBUG, "Server -> %s", path);
 
 			bufferevent_setcb(BuffEvent, NULL, NULL, NULL, NULL);
 
@@ -305,6 +305,8 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 			} else if (pathLen > 6 && strncmp(path, "/cpage", 6) == 0) {
 				freeBufferEvent = false; // Free'd in second stage of custom page request
 				InterfaceRawGetCustomPage(BuffEvent, *Buff, false);
+			} else if (pathLen > 6 && strncmp(path, "/multi", 6) == 0) {
+				InterfaceRawMultiRequest(BuffEvent, *Buff);
 			} else if (pathLen == 6 && strncmp(path, "/tools", 6) == 0)
 				InterfaceTools(BuffEvent, *Buff);
 			else if (pathLen >= 9 && strncmp(path, "/settings", 9) == 0)
@@ -314,22 +316,17 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 				InterfaceHtmlTemplatesReload(BuffEvent, *Buff);
 #endif
 			else if (pathLen > 6 && strncmp(path, "/check", 6) == 0) {
-				Log(LOG_LEVEL_DEBUG, "/check on %p", BuffEvent);
 				freeBufferEvent = false; // Free'd in second stage of raw recheck
 				InterfaceRawRecheck(BuffEvent, *Buff);
 			} else if (pathLen == 1 && strncmp(path, "/", 1) == 0)
 				InterfaceHome(BuffEvent, *Buff);
 			else if (pathLen > 8 && strncmp(path, "/recheck", 8) == 0) {
-				if (HtmlTemplateUseStock)
-					freeBufferEvent = false; // Free'd in second stage of stock html recheck
 				InterfaceProxyRecheck(BuffEvent, *Buff);
 			} else if (pathLen == 4 && strncmp(path, "/wsn", 4) == 0) {
 				// Websocket notifications
-				WebsocketSwitch(BuffEvent, *Buff);
 				freeBufferEvent = false; // Handled by websocket file
+				WebsocketSwitch(BuffEvent, *Buff);
 			} else {
-				if (HtmlTemplateUseStock)
-					goto free;
 				/* Ruse filter */ {
 					// We don't resolve unicode or http %hex so we don't care
 					// Absolute path traversal doesn't apply
@@ -345,25 +342,24 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 #endif
 
 #ifdef __linux__
-				char *filePath = malloc((pathLen + (strlen(LINUX_LOCAL_HTML_PATH) + 13)) * sizeof(char) + 1); {
+				char *filePath = malloc((pathLen + (strlen(LINUX_LOCAL_HTML_PATH) + 13)) + 1); {
 					strcpy(filePath, LINUX_LOCAL_HTML_PATH"/files");
 					strcat(filePath, path);
 #elif defined _WIN32 || defined _WIN64
-				char *filePath = malloc((pathLen + (strlen(WINDOWS_LOCAL_HTML_PATH) + 13)) * sizeof(char) + 1); {
+				char *filePath = malloc((pathLen + (strlen(WINDOWS_LOCAL_HTML_PATH) + 13)) + 1); {
 					strcpy(filePath, WINDOWS_LOCAL_HTML_PATH"\\files");
 					strcat(filePath, path);
 #endif
 
 					FILE *hFile;
 					if ((hFile = fopen(filePath, "r")) == NULL) {
-						Log(LOG_LEVEL_DEBUG, "Can't open file %s", filePath);
 						free(filePath);
 #ifdef __linux__
-						filePath = malloc((pathLen + (strlen(LINUX_GLOBAL_HTML_PATH) + 13)) * sizeof(char) + 1);
+						filePath = malloc((pathLen + (strlen(LINUX_GLOBAL_HTML_PATH) + 13)) + 1);
 						strcpy(filePath, LINUX_GLOBAL_HTML_PATH"/files");
 						strcat(filePath, path);
 #elif defined _WIN32 || defined _WIN64
-						filePath = malloc((pathLen + strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 13) * sizeof(char) + 1);
+						filePath = malloc((pathLen + strlen(WinAppData) + strlen(WINDOWS_GLOBAL_HTML_PATH) + 13) + 1);
 						strcpy(filePath, WinAppData);
 						strcat(filePath, WINDOWS_GLOBAL_HTML_PATH"\\files");
 						strcat(filePath, path);
@@ -371,7 +367,6 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 						hFile = fopen(filePath, "r"); // uwaga
 					}
 					if (hFile != NULL) {
-						Log(LOG_LEVEL_DEBUG, "Pushing file %s...", filePath);
 						fseek(hFile, 0, SEEK_END);
 						size_t size = ftell(hFile);
 						fseek(hFile, 0, SEEK_SET);
@@ -387,13 +382,12 @@ static void ServerLanding(struct bufferevent *BuffEvent, char **Buff, bool IsSSL
 
 						size_t intSize = INTEGER_VISIBLE_SIZE(size);
 
-						char *header = malloc(((53 + intSize + strlen(mime)) * sizeof(char)) + 1); {
-							sprintf(header, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nContent-Type: %s\r\n\r\n", size, mime);
-							bufferevent_write(BuffEvent, header, (53 + intSize + strlen(mime)) * sizeof(char));
+						char *header = malloc(((53 + intSize + strlen(mime))) + 1); {
+							sprintf(header, "HTTP/1.1 200 OK\r\nContent-Length: %zu\r\nContent-Type: %s\r\n\r\n", size, mime);
+							bufferevent_write(BuffEvent, header, (53 + intSize + strlen(mime)));
 						} free(header);
 
 						evbuffer_add_file(bufferevent_get_output(BuffEvent), fileno(hFile), 0, size);
-						bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
 					} else {
 						Log(LOG_LEVEL_DEBUG, "Can't open file %s", filePath);
 #if defined _WIN32 || defined _WIN64
@@ -435,17 +429,16 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 #endif
 
 	// Websockets
-	if (!HtmlTemplateUseStock) {
-		uint8_t opcode = (*buff & 0xF); // get rid of 4 bits on left
-		if ((opcode == WEBSOCKET_OPCODE_CONTINUATION || opcode == WEBSOCKET_OPCODE_CLOSE || opcode == WEBSOCKET_OPCODE_PING || opcode == WEBSOCKET_OPCODE_PONG || opcode == WEBSOCKET_OPCODE_UNICODE) &&
-			!GET_BIT(*buff, 6) && !GET_BIT(*buff, 5) && !GET_BIT(*buff, 4)) {
-			// Websocket message (probably)
-			evbuffer_drain(evBuff, len); // No clear data function?
-			buff = realloc(buff, len);
-			WebsocketLanding(BuffEvent, buff, len);
-			free(buff);
-			return;
-		}
+	uint8_t opcode = (*buff & 0xF); // get rid of 4 bits on left
+	if ((opcode == WEBSOCKET_OPCODE_CONTINUATION || opcode == WEBSOCKET_OPCODE_CLOSE || opcode == WEBSOCKET_OPCODE_PING || opcode == WEBSOCKET_OPCODE_PONG || opcode == WEBSOCKET_OPCODE_UNICODE) &&
+		!GET_BIT(*buff, 6) && !GET_BIT(*buff, 5) && !GET_BIT(*buff, 4)) {
+		// Websocket message (probably)
+		evbuffer_drain(evBuff, len); // No clear data function?
+		buff = realloc(buff, len);
+		WebsocketLanding(BuffEvent, (uint8_t*)buff, len);
+		Log(LOG_LEVEL_DEBUG, "WEBSOCK OUT");
+		free(buff);
+		return;
 	}
 
 	for (size_t x = 0;x < len;x++) {
@@ -453,6 +446,7 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 		if (buff[x] == 0x00) {
 			free(buff);
 			bufferevent_free(BuffEvent);
+			Log(LOG_LEVEL_DEBUG, "READ ERR 4");
 			return;
 		}
 	}
@@ -460,6 +454,7 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 	if (buff[0] != 'G' && buff[0] != 'P' && buff[1] != 'O') {
 		free(buff);
 		bufferevent_free(BuffEvent);
+		Log(LOG_LEVEL_DEBUG, "READ ERR 3");
 		return;
 	}
 
@@ -471,12 +466,14 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 			if (buff[len - 1] != '\n' || buff[len - 2] != '\n') {
 				// Not a full header
 				// We got data in evbuffer, just return and wait for remaining data
+				Log(LOG_LEVEL_DEBUG, "READ ERR 2");
 				free(buff);
 				return;
 			}
 		}
 	} else {
 		if (strstr(buff, "\r\n\r\n") == NULL && strstr(buff, "\n\n") == NULL) {
+			Log(LOG_LEVEL_DEBUG, "READ ERR 1");
 			free(buff);
 			return;
 		}
@@ -496,7 +493,6 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 {
 	SERVER_TYPE type = (SERVER_TYPE)Ctx;
 	struct event_base *base = evconnlistener_get_base(List);
-
 	switch (type) {
 		case HTTP4:
 		case HTTP6:
@@ -510,7 +506,11 @@ static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct
 		case SSL4:
 		case SSL6:
 		{
-			struct bufferevent *bev = bufferevent_openssl_socket_new(base, Fd, SSL_new(levServerSSL), BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
+			static size_t sslBullshitCounter = 0;
+			SSL *ssl = SSL_new(levServerSSL);
+			SSL_set_session_id_context(ssl, (const unsigned char*)&sslBullshitCounter, sizeof(sslBullshitCounter));
+			sslBullshitCounter++;
+			struct bufferevent *bev = bufferevent_openssl_socket_new(base, Fd, ssl, BUFFEREVENT_SSL_ACCEPTING, BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);
 			bufferevent_set_timeouts(bev, &GlobalTimeoutTV, &GlobalTimeoutTV);
 			bufferevent_setcb(bev, ServerRead, NULL, (bufferevent_event_cb)ServerEvent, (void*)true);
 			bufferevent_enable(bev, EV_READ | EV_WRITE);
@@ -632,7 +632,7 @@ void ServerBase()
 
 static void ServerUDP(int hSock)
 {
-	char *buff = malloc(PROXY_IDENTIFIER_LEN);
+	char buff[PROXY_IDENTIFIER_LEN];
 	struct sockaddr_in6 remote;
 	socklen_t len;
 	size_t size;
@@ -649,7 +649,7 @@ static void ServerUDP(int hSock)
 
 		UNCHECKED_PROXY *UProxy = NULL;
 
-		IPv6Map *ip = RawToIPv6Map(&remote); {
+		IPv6Map *ip = RawToIPv6Map((struct sockaddr*)&remote); {
 			pthread_mutex_lock(&LockUncheckedProxies); {
 				for (uint64_t x = 0; x < SizeUncheckedProxies; x++) {
 					if (MemEqual(buff, UncheckedProxies[x]->identifier, PROXY_IDENTIFIER_LEN) && IPv6MapEqual(ip, UncheckedProxies[x]->ip)) {

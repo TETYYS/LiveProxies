@@ -53,15 +53,16 @@ void WSAAPI freeaddrinfo(
 #include "Config.h"
 
 #include "DNS.h"
+#include <stdbool.h>
+#include <assert.h>
 
-void PageRequest(PROXY *In, void *FinishedCallback, char *Page, void *Ex)
+void PageRequest(PROXY *In, void *FinishedCallback, char *Page, char *PostData, bool GetResponse, void *Ex)
 {
-	bool success = false;
 	UNCHECKED_PROXY *UProxy = UProxyFromProxy(In);
 	UProxy->singleCheckCallback = FinishedCallback;
 	UProxy->singleCheckCallbackExtraData = Ex;
 	UProxy->pageTarget = strdup(Page);
-	if (strncmp(UProxy->pageTarget, "https://", 8) == NULL && !ProxyIsSSL(UProxy->type)) {
+	if (strncmp(UProxy->pageTarget, "https://", 8) == 0 && !ProxyIsSSL(UProxy->type)) {
 		switch (UProxy->type) {
 			case PROXY_TYPE_HTTP: {
 				UProxy->type = PROXY_TYPE_HTTPS;
@@ -79,9 +80,12 @@ void PageRequest(PROXY *In, void *FinishedCallback, char *Page, void *Ex)
 				UProxy->type = PROXY_TYPE_SOCKS5_TO_SSL;
 				break;
 			}
+			default: {
+				break;	
+			}
 		}
 	}
-	if (strncmp(UProxy->pageTarget, "http://", 7) == NULL && ProxyIsSSL(UProxy->type)) {
+	if (strncmp(UProxy->pageTarget, "http://", 7) == 0 && ProxyIsSSL(UProxy->type)) {
 		switch (UProxy->type) {
 			case PROXY_TYPE_HTTPS: {
 				UProxy->type = PROXY_TYPE_HTTP;
@@ -99,8 +103,14 @@ void PageRequest(PROXY *In, void *FinishedCallback, char *Page, void *Ex)
 				UProxy->type = PROXY_TYPE_SOCKS5;
 				break;
 			}
+			default: {
+				break;	
+			}
 		}
 	}
+
+	UProxy->pageTargetPostData = PostData;
+	UProxy->getResponse = GetResponse;
 
 	UProxyAdd(UProxy);
 	RequestAsync(UProxy);
@@ -108,7 +118,6 @@ void PageRequest(PROXY *In, void *FinishedCallback, char *Page, void *Ex)
 
 void Recheck(PROXY *In, void *FinishedCallback, void *Ex)
 {
-	bool success = false;
 	UNCHECKED_PROXY *UProxy = UProxyFromProxy(In);
 	UProxy->singleCheckCallback = FinishedCallback;
 	UProxy->singleCheckCallbackExtraData = Ex;
@@ -123,16 +132,15 @@ void Recheck(PROXY *In, void *FinishedCallback, void *Ex)
 
 char *ReverseDNS(IPv6Map *In)
 {
-	struct hostent *hent = NULL;
 	char *ret = zalloc(NI_MAXHOST);
 	IP_TYPE type = GetIPType(In);
 
 	struct sockaddr *raw = IPv6MapToRaw(In, 0); {
 		size_t sLen = type == IPV4 ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
 
-		if (getnameinfo(type == IPV4 ? (struct sockaddr_in*)raw : (struct sockaddr_in6*)raw, sLen, ret, NI_MAXHOST, NULL, NULL, NI_NAMEREQD) == 0) {
+		if (getnameinfo(type == IPV4 ? (struct sockaddr*)raw : (struct sockaddr*)raw, sLen, ret, NI_MAXHOST, NULL, 0, NI_NAMEREQD) == 0) {
 			free(raw);
-			ret = realloc(ret, (strlen(ret) * sizeof(char)) + 1);
+			ret = realloc(ret, strlen(ret) + 1);
 			return ret;
 		}
 
@@ -143,67 +151,83 @@ char *ReverseDNS(IPv6Map *In)
 
 void SpamhausZENAsyncStage2(struct dns_cb_data *data)
 {
+	DNS_LOOKUP_ASYNC_EX *ex;
+	struct bufferevent *buffEvent;
+	
 	if (data->addr_len <= 0) {
 		if (data->context != NULL) {
-			bufferevent_write((struct bufferevent*)(((DNS_LOOKUP_ASYNC_EX*)data->context)->object), "cln", 3 * sizeof(char));
-			((DNS_LOOKUP_ASYNC_EX*)data->context)->resolveDone = true;
+			ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
+			buffEvent = ex->object;
+			
+			bufferevent_write(buffEvent, "cln", 3);
+			ex->resolveDone = true;
+		} else {
+			assert(false);
+			return;
 		}
 		if (data->error != DNS_DOES_NOT_EXIST)
 			Log(LOG_LEVEL_WARNING, "Failed to lookup spamhaus DNS (%d)", data->error);
-		return;
+		goto end;
 	}
 
-	DNS_LOOKUP_ASYNC_EX *ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
-	struct bufferevent *buffEvent = (struct bufferevent*)ex->object;
+	ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
+	buffEvent = (struct bufferevent*)ex->object;
 
 	uint8_t addrData = ((uint8_t*)(data->addr))[3];
 	switch (addrData) {
 		case 2:
-			bufferevent_write(buffEvent, "sbl", 3 * sizeof(char));
+			bufferevent_write(buffEvent, "sbl", 3);
 			break;
 		case 3:
-			bufferevent_write(buffEvent, "css", 3 * sizeof(char));
+			bufferevent_write(buffEvent, "css", 3);
 			break;
 		case 10:
 		case 11:
-			bufferevent_write(buffEvent, "pbl", 3 * sizeof(char));
+			bufferevent_write(buffEvent, "pbl", 3);
 			break;
 		default:
-			bufferevent_write(buffEvent, "xbl", 3 * sizeof(char));
+			bufferevent_write(buffEvent, "xbl", 3);
 	}
 
 end:
-	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
 	BufferEventFreeOnWrite(buffEvent);
 	ex->resolveDone = true;
 }
 
 void HTTP_BLAsyncStage2(struct dns_cb_data *data)
 {
+	DNS_LOOKUP_ASYNC_EX *ex;
+	struct bufferevent *buffEvent;
+	
 	if (data->addr_len <= 0) {
 		if (data->context != NULL) {
-			bufferevent_write((struct bufferevent*)(((DNS_LOOKUP_ASYNC_EX*)data->context)->object), "1\r\nContent-Type: text/html\r\n\r\nl", 31 * sizeof(char));
-			((DNS_LOOKUP_ASYNC_EX*)data->context)->resolveDone = true;
+			ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
+			buffEvent = ex->object;
+			
+			bufferevent_write(buffEvent, "1\r\nContent-Type: text/html\r\n\r\nl", 31);
+			ex->resolveDone = true;
+		} else {
+			assert(false);
+			return;
 		}
 		if (data->error != DNS_DOES_NOT_EXIST)
 			Log(LOG_LEVEL_WARNING, "Failed to lookup HTTP_BL DNS (%d)", data->error);
-		return;
+		goto end;
 	}
 
-	DNS_LOOKUP_ASYNC_EX *ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
-	struct bufferevent *buffEvent = (struct bufferevent*)ex->object;
+	ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
+	buffEvent = (struct bufferevent*)ex->object;
 
-	uint8_t days = ((uint8_t*)(data->addr))[1];
 	uint8_t score = ((uint8_t*)(data->addr))[2];
 	HTTPBL_CROOK_TYPE crookType = ((uint8_t*)(data->addr))[3];
 
 	if (crookType == 0) {
-		bufferevent_write(buffEvent, "1\r\nContent-Type: text/html\r\n\r\nl", 31 * sizeof(char));
+		bufferevent_write(buffEvent, "1\r\nContent-Type: text/html\r\n\r\nl", 31);
 		goto end;
 	}
 
 	char body[8];
-	memset(body, 0, 8 * sizeof(char));
+	memset(body, 0, 8);
 
 	if ((crookType & HTTPBL_CROOK_TYPE_COMMENT_SPAMMER) == HTTPBL_CROOK_TYPE_COMMENT_SPAMMER)
 		strcat(body, "c");
@@ -219,15 +243,14 @@ void HTTP_BLAsyncStage2(struct dns_cb_data *data)
 	strcat(body, sScore);
 
 	char sBodyLen[3];
-	sprintf(sBodyLen, "%d", strlen(body) * sizeof(char));
+	sprintf(sBodyLen, "%zu", strlen(body));
 
-	bufferevent_write(buffEvent, sBodyLen, strlen(sBodyLen) * sizeof(char));
-	bufferevent_write(buffEvent, "\r\nContent-Type: text/html\r\n\r\n", 29 * sizeof(char));
-	bufferevent_write(buffEvent, body, strlen(body) * sizeof(char));
+	bufferevent_write(buffEvent, sBodyLen, strlen(sBodyLen));
+	bufferevent_write(buffEvent, "\r\nContent-Type: text/html\r\n\r\n", 29);
+	bufferevent_write(buffEvent, body, strlen(body));
 
 end:
-	bufferevent_flush(buffEvent, EV_WRITE, BEV_FINISHED);
-	bufferevent_free(buffEvent);
+	BufferEventFreeOnWrite(buffEvent);
 	ex->resolveDone = true;
 }
 
@@ -254,16 +277,15 @@ void SpamhausZENAsync(IPv6Map *In, struct bufferevent *BuffEvent)
 			strcat((char*)(name), "zen.spamhaus.org");
 		}
 
-		DNSResolveAsync(BuffEvent, name, false, SpamhausZENAsyncStage2);
+		DNSResolveAsync(BuffEvent, name, false, SpamhausZENAsyncStage2, NULL);
 	} free(name);
 }
 
 void HTTP_BLAsync(IPv6Map *In, char *AccessKey, struct bufferevent *BuffEvent)
 {
 	if (AccessKey[0] == 0x00) {
-		bufferevent_write(BuffEvent, "1\r\nContent-Type: text/html\r\n\r\nN", 31 * sizeof(char));
-		bufferevent_flush(BuffEvent, EV_WRITE, BEV_FINISHED);
-		bufferevent_free(BuffEvent);
+		bufferevent_write(BuffEvent, "1\r\nContent-Type: text/html\r\n\r\nN", 31);
+		BufferEventFreeOnWrite(BuffEvent);
 		return;
 	}
 
@@ -288,7 +310,7 @@ void HTTP_BLAsync(IPv6Map *In, char *AccessKey, struct bufferevent *BuffEvent)
 			strcat((char*)(name), ".dnsbl.httpbl.org");
 		}
 
-		DNSResolveAsync(BuffEvent, name, false, HTTP_BLAsyncStage2);
+		DNSResolveAsync(BuffEvent, name, false, HTTP_BLAsyncStage2, NULL);
 	} free(name);
 }
 

@@ -48,7 +48,7 @@ char *WinAppData;
 double GetUnixTimestampMilliseconds();
 char *GetHost(IP_TYPE Preffered, bool SSL);
 MEM_OUT char *FormatTime(uint64_t TimeMs);
-bool MemEqual(uint8_t *A, uint8_t *B, size_t Size);
+bool MemEqual(void *A, void *B, size_t Size);
 bool StrReplaceOrig(char **In, char *Search, char *Replace);
 char *StrReplaceToNew(char *In, char *Search, char *Replace);
 MEM_OUT bool HTTPFindHeader(char *In, char *Buff, char **Out, char **StartIndex, char **EndIndex);

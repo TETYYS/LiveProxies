@@ -15,7 +15,7 @@ MEM_OUT char *PBKDF2_HMAC_SHA_512(char *In, size_t InLen)
 
 	RAND_bytes(salt, SALT_LEN);
 
-	return PBKDF2_HMAC_SHA_512Ex(In, InLen, salt, SALT_LEN, ITERATIONS);
+	return PBKDF2_HMAC_SHA_512Ex(In, InLen, (char*)salt, SALT_LEN, ITERATIONS);
 }
 
 MEM_OUT char *PBKDF2_HMAC_SHA_512Ex(char *In, size_t InLen, char *Salt, size_t SaltLen, size_t Iterations)
@@ -24,10 +24,10 @@ MEM_OUT char *PBKDF2_HMAC_SHA_512Ex(char *In, size_t InLen, char *Salt, size_t S
 	size_t pbkdf2b64Len, saltb64Len;
 	uint8_t pbkdf2[512 / 8];
 
-	PKCS5_PBKDF2_HMAC(In, InLen, Salt, SaltLen, Iterations, EVP_sha512(), 512 / 8, pbkdf2);
+	PKCS5_PBKDF2_HMAC(In, InLen, (const unsigned char*)Salt, SaltLen, Iterations, EVP_sha512(), 512 / 8, pbkdf2);
 	pbkdf2b64Len = Base64Encode(pbkdf2, 512 / 8, &pbkdf2b64); {
-		saltb64Len = Base64Encode(Salt, SaltLen, &saltb64); {
-			ret = malloc((INTEGER_VISIBLE_SIZE(ITERATIONS) + saltb64Len + pbkdf2b64Len + 2) * sizeof(char) /* $ */ + 1 /* NULL */);
+		saltb64Len = Base64Encode((const unsigned char*)Salt, SaltLen, &saltb64); {
+			ret = malloc(INTEGER_VISIBLE_SIZE(ITERATIONS) + saltb64Len + pbkdf2b64Len + 2 /* $ */ + 1 /* NULL */);
 			sprintf(ret, "%d$%s$%s", ITERATIONS, saltb64, pbkdf2b64);
 		} free(saltb64);
 	} free(pbkdf2b64);

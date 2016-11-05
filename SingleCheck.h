@@ -17,7 +17,7 @@ typedef enum _HTTPBL_CROOK_TYPE {
 	HTTPBL_CROOK_TYPE_SUSPICIOUS = 1,
 	HTTPBL_CROOK_TYPE_HARVESTER = 2,
 	HTTPBL_CROOK_TYPE_COMMENT_SPAMMER = 4,
-	HTTPBL_CROOK_TYPE_CLEAN = HTTPBL_CROOK_TYPE_COMMENT_SPAMMER | HTTPBL_CROOK_TYPE_HARVESTER | HTTPBL_CROOK_TYPE_SUSPICIOUS + 1
+	HTTPBL_CROOK_TYPE_CLEAN = (HTTPBL_CROOK_TYPE_COMMENT_SPAMMER | HTTPBL_CROOK_TYPE_HARVESTER | HTTPBL_CROOK_TYPE_SUSPICIOUS) + 1
 } HTTPBL_CROOK_TYPE;
 
 typedef struct _HTTPBL_ANSWER {
@@ -32,4 +32,4 @@ SPAMHAUS_ZEN_ANSWER SpamhausZEN(IPv6Map *In);
 void HTTP_BL(IPv6Map *In, char *AccessKey, HTTPBL_ANSWER OUT *Out);
 void SpamhausZENAsync(IPv6Map *In, struct bufferevent *BuffEvent);
 void HTTP_BLAsync(IPv6Map *In, char *AccessKey, struct bufferevent *BuffEvent);
-void PageRequest(PROXY *In, void *FinishedCallback, char *Page, void *Ex);
+void PageRequest(PROXY *In, void *FinishedCallback, char *Page, char *PostData, bool GetResponse, void *Ex);

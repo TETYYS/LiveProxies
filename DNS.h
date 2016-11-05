@@ -2,15 +2,19 @@
 
 #include "tadns.h"
 #include <stdbool.h>
-#include <stddef.h>
 
 typedef struct _DNS_LOOKUP_ASYNC_EX {
-	struct bufferevent *object;
+	void *object;
 	struct event *evDNS;
 	struct dns *dnsCtx;
 	bool resolveDone;
 	dns_callback_t fxDone;
+	void *fxFreed;
+	bool ipv6;
 } DNS_LOOKUP_ASYNC_EX;
+
+typedef void(*FxDnsFreed)(struct _DNS_LOOKUP_ASYNC_EX*);
+
 
 typedef enum _DNS_RR_TYPE {
 	DNS_RR_TYPE_A = 1, //			a host address
@@ -95,7 +99,6 @@ typedef enum _DNS_RR_TYPE {
 	DNS_RR_TYPE_TA = 32768, //		DNSSEC Trust Authorities
 	DNS_RR_TYPE_DLV = 32769, //		DNSSEC Lookaside Validation
 	DNS_RR_TYPE_Reserved = 65535, //?
-
 } DNS_RR_TYPE;
 
 typedef enum _DNS_CLASS {
@@ -112,4 +115,4 @@ void HTTP_BLAsyncStage2		(struct dns_cb_data *data);
 void SpamhausZENAsyncStage2	(struct dns_cb_data *data);
 void ProxyDNSResolved		(struct dns_cb_data *data);
 
-void DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_callback_t fxDone);
+DNS_LOOKUP_ASYNC_EX *DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_callback_t fxDone, FxDnsFreed fxFreed);

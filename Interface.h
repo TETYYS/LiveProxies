@@ -3,6 +3,8 @@
 #include "CPH_Threads.h"
 #include <event2/bufferevent.h>
 #include "IPv6Map.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 #define HTTP_AUTHORIZATION_REALM "Live Proxies interface - private access"
 #define SIZE_RND_VERIFY 64
@@ -45,6 +47,12 @@ typedef struct _AUTH_LOCAL {
 	const char *password;
 } AUTH_LOCAL;
 
+typedef struct _UPROXY_ADD_PROCESS_POST_PARAMS {
+	char *Buff;
+	size_t BuffLen;
+	bool ReceivedAllData;
+} UPROXY_ADD_PROCESS_POST_PARAMS;
+
 pthread_mutex_t AuthWebLock;
 AUTH_WEB **AuthWebList;
 size_t AuthWebCount;
@@ -65,9 +73,10 @@ void InterfaceRawReverseDNS				(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawRecheck				(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawHttpBL					(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawUProxyAdd				(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceRawUProxyAddProcessPost	(struct bufferevent *BuffEvent, UPROXY_ADD_PROCESS_POST_PARAMS *Params);
 void InterfaceTools						(struct bufferevent *BuffEvent, char *Buff);
-void InterfaceRawUProxyAddProcessPost	(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawGetCustomPage			(struct bufferevent *BuffEvent, char *Buff, bool Render);
 void InterfaceSettings					(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceHtmlTemplatesReload		(struct bufferevent *BuffEvent, char *Buff);
 void InterfaceRawGetAllProxies			(struct bufferevent *BuffEvent, char *Buff);
+void InterfaceRawMultiRequest			(struct bufferevent *BuffEvent, char *Buff);

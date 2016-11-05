@@ -6,6 +6,7 @@
 #include "CPH_Threads.h"
 #include <stdbool.h>
 #include <openssl/ossl_typ.h>
+#include "DNS.h"
 
 #define PROXY_IDENTIFIER_LEN 32
 
@@ -47,6 +48,8 @@ typedef struct _PROXY {
 	uint8_t retries;
 	uint32_t successfulChecks;
 	uint32_t failedChecks;
+	
+	int certErr;
 	X509 *invalidCert;
 	uint8_t identifier[PROXY_IDENTIFIER_LEN];
 } PROXY;
@@ -148,8 +151,14 @@ typedef struct _UNCHECKED_PROXY {
 	X509 *invalidCert;
 
 	char *pageTarget;
+	char *pageTargetPostData;
+	bool getResponse;
 	SingleCheckCallback singleCheckCallback;
 	void *singleCheckCallbackExtraData;
+	
+	IP_TYPE dnsResolveInProgress;
+	DNS_LOOKUP_ASYNC_EX **dnsLookups;
+	size_t dnsLookupsCount;
 } UNCHECKED_PROXY;
 
 UNCHECKED_PROXY	**UncheckedProxies;

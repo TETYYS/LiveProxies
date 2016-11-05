@@ -40,6 +40,11 @@ function WSTextChange(e, text, updateTime)
 	console.log("pushed orig color " + color);
 }
 
+function getUint64(Bs, Offset) {
+	return (Bs.getUint32(Offset) << 32) |
+		Bs.getUint32(Offset + 4);
+}
+
 function IntToBin(Int, bytes) {
 	var bin = "";
 	for (var x = 0;x < bytes;x++) {
@@ -164,7 +169,6 @@ function WSInitialize(subscriptions, cookieName, fxMessage)
 	};
 } 
 
-function WSPull(subscription, current) {
-	console.log("payload len: " + ('P' + IntToBin(subscription, 4) + current).length);
-	wsConn.send('P' + IntToBin(subscription, 4) + current, { binary: true });
-}
+/*function WSPull(subscription) {
+	wsConn.send('P' + IntToBin(subscription, 4), { binary: true });
+}*/

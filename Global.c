@@ -11,6 +11,9 @@
 #include <event2/bufferevent.h>
 #include <event2/buffer.h>
 #include <assert.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
 
 double GetUnixTimestampMilliseconds()
 {
@@ -34,7 +37,7 @@ char *GetHost(IP_TYPE Preffered, bool SSL)
 
 MEM_OUT char *FormatTime(uint64_t TimeMs)
 {
-	char *timeBuff = zalloc(20 * sizeof(char) + 1);
+	char *timeBuff = zalloc(20 + 1);
 
 	struct tm *timeinfo;
 	time_t timeRaw = TimeMs / 1000;
@@ -45,49 +48,44 @@ MEM_OUT char *FormatTime(uint64_t TimeMs)
 	return timeBuff;
 }
 
-bool MemEqual(uint8_t *A, uint8_t *B, size_t Size)
+bool MemEqual(void *A, void *B, size_t Size)
 {
-	while (--Size) {
-		if (*A != *B)
-			return false;
-		A++;
-		B++;
-	}
-	return true;
+	return memcmp(A, B, Size) == 0;
 }
 
 char *StrReplaceToNew(char *In, char *Search, char *Replace)
 {
 	char *ret;
-	char *searchOffset = strstr(In, Search);
+	char *search = strstr(In, Search);
+	size_t lSideLen = search - In;
 
-	if (searchOffset == NULL || *Replace == 0x00)
+	if (search == NULL || Replace[0] == '\0')
 		return NULL;
 
 	size_t searchLen = strlen(Search);
 	size_t origLen = strlen(In);
 	size_t replaceLen = strlen(Replace);
 
-	ret = malloc((origLen - searchLen + replaceLen) * sizeof(char) + 1);
+	ret = malloc((origLen - searchLen + replaceLen) * (sizeof(char) + 1));
 
 	// Copy left side
-	if (searchOffset != In)
-		memcpy(ret, In, searchOffset - In);
+	if (search != In)
+		memcpy(ret, In, lSideLen);
 
 	// Copy replacement
-	memcpy(ret + (searchOffset - In), Replace, replaceLen * sizeof(char));
+	memcpy(ret + lSideLen, Replace, replaceLen);
 
 	// Copy right side
-	if (searchOffset + (searchLen * sizeof(char)) != (In + (origLen * sizeof(char)))) {
-		size_t replaceLenBytes = (replaceLen * sizeof(char));
-		memcpy(ret + (searchOffset - In) + replaceLenBytes,
-			   searchOffset + (searchLen * sizeof(char)),
-			   In + (origLen * sizeof(char)) - searchOffset - (searchLen * sizeof(char)));
+	if (search + (searchLen) != (In + origLen)) {
+		memcpy(ret + lSideLen + replaceLen,
+			   search + searchLen,
+			   In + (origLen) - search - searchLen);
 	}
-	ret[(origLen - searchLen + replaceLen) * sizeof(char)] = 0x00;
+	ret[(origLen - searchLen + replaceLen)] = L'\0';
 
 	if (strstr(ret, Search) != NULL)
 		StrReplaceOrig(&ret, Search, Replace);
+
 	return ret;
 }
 
@@ -102,63 +100,30 @@ bool StrReplaceOrig(char **In, char *Search, char *Replace)
 	size_t searchLen = strlen(Search);
 	size_t origLen = strlen(*In);
 	size_t replaceLen = strlen(Replace);
+
 	size_t origToReplaceEndLen = (origLen - searchLen + replaceLen);
 
-
 	if (replaceLen > searchLen) {
-		// In: Test test {TEST} test
-		// Search: {TEST}
-		// Replace:TEST!!!
+		*In = realloc(*In, origToReplaceEndLen + 1);
+		search = strstr(*In, Search); // Re-search string
 
-		*In = realloc(*In, origToReplaceEndLen * sizeof(char) + 1); // Extend string to fit replacement
-		//  -> Test test {TEST} testX
+		char *rightSide = search + searchLen;
+		size_t rightSideLen = ((*In + origLen) - rightSide);
 
-		char *rightSide = *In + searchOffset + (searchLen * sizeof(char));
-		size_t rightSideLen = ((*In + (origLen * sizeof(char))) - rightSide) / sizeof(char);
+		memmove(search + replaceLen, rightSide, rightSideLen);
+		memcpy(*In + searchOffset, Replace, replaceLen);
+		(*In)[origToReplaceEndLen] = '\0';
+	} else if (replaceLen == searchLen)
+		memcpy(*In + searchOffset, Replace, replaceLen);
+	else if (replaceLen < searchLen) {
+		char *rightSide = search + searchLen;
+		size_t rightSideLen = ((*In + origLen) - rightSide);
 
-		char *cpyTemp = malloc(rightSideLen); {
-			memcpy(cpyTemp, rightSide, rightSideLen);
-			memcpy(*In + searchOffset + (replaceLen * sizeof(char)), cpyTemp, rightSideLen);
-		} free(cpyTemp);
-		//  -> Test test {TEST}  test
+		memmove(search + replaceLen, rightSide, rightSideLen);
+		*In = realloc(*In, origToReplaceEndLen * (sizeof(char) + 1));
 
-		memcpy(*In + searchOffset, Replace, replaceLen * sizeof(char));
-		(*In)[origToReplaceEndLen * sizeof(char)] = 0x00;
-		//  -> Test test TEST!!! test
-	} else if (replaceLen == searchLen) {
-		// In: Test test {TEST} test
-		// Search: {TEST}
-		// Replace:TEST!!
-
-		memcpy(*In + searchOffset, Replace, replaceLen * sizeof(char));
-		//  -> Test test TEST!! test
-	} else if (replaceLen < searchLen) {
-		// In: Test test {TEST} test
-		// Search: {TEST}
-		// Replace:TEST!
-
-		char *rightSide = *In + searchOffset + (searchLen * sizeof(char));
-		size_t rightSideLen = ((*In + (origLen * sizeof(char))) - rightSide) / sizeof(char);
-
-		char *cpyTemp = malloc(rightSideLen); {
-			memcpy(cpyTemp, rightSide, rightSideLen);
-			memcpy(*In + searchOffset + (replaceLen * sizeof(char)), cpyTemp, rightSideLen);
-		} free(cpyTemp);
-		//  -> Test test {TEST testt
-
-		*In = realloc(*In, origToReplaceEndLen * sizeof(char) + 1); // Shorten string to make RAM happy
-		//  -> Test test {TEST test
-
-		memcpy(*In + searchOffset, Replace, replaceLen * sizeof(char));
-		(*In)[origToReplaceEndLen * sizeof(char)] = 0x00;
-		//  -> Test test TEST! test
-	} else {
-		// what
-#if defined _WIN32 || defined _WIN64
-		DebugBreak();
-#else
-		assert(false);
-#endif
+		memcpy(*In + searchOffset, Replace, replaceLen);
+		(*In)[origToReplaceEndLen] = '\0';
 	}
 
 	if (strstr(*In, Search) != NULL)

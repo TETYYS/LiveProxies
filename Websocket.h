@@ -63,5 +63,5 @@ void WebsocketUnfinishedPacketTimeout(struct bufferevent *BuffEvent, short Event
 void WebsocketClientTimeout(struct bufferevent *BuffEvent, short Event, void *Ctx);
 void WebsocketClientPing(evutil_socket_t fd, short Event, void *BuffEvent);
 
-void WebsocketClientsNotify(void *Message, size_t MessageLen, uint32_t Command);
+void WebsocketClientsNotify(void *Message, size_t MessageLen, uint32_t Command, bool ForceSend);
 void WebsocketClientsNotifySingle(struct bufferevent *BuffEvent, void *Message, size_t MessageLen, uint32_t Command);
