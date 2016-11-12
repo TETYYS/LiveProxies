@@ -4,11 +4,11 @@ Latest Version: **1.0.0** (release) [![Travis-CI](https://api.travis-ci.org/TETY
 LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 
 ## Download:
- - Windows: [x86](https://github.com/TETYYS/LiveProxies/raw/devel/bin/win32_mingw/LiveProxies.1.0.0.x86.7z)
+ - Windows (untested, outdated): [x86](https://github.com/TETYYS/LiveProxies/raw/devel/bin/win32_mingw/LiveProxies.1.0.0.x86.7z)
  - Linux: [Compile from source](https://github.com/TETYYS/LiveProxies.git)
 
 ## Features
- - Utilizes Python scripts, manual addition, urls and static text files to get proxy lists
+ - Utilizes any scripts, manual addition, urls and static text files to get proxy lists
  - Analyzes proxy output headers and determines proxy anonymity being:
  - - When proxy reveals correct IP behind the proxy - **transparent**
  - - When proxy modifies or adds any kind of headers - **anonymous**
@@ -66,9 +66,40 @@ Push requests welcome. See TODO list.
 ## TODO
  - Daemon mode
  - Custom SOCKS5 UDP requests
- - Check and fix unicode
- - vasprintf for windows on stock HTML mode
- - Suggesstions?
+
+## Screenshots
+
+Two (5.6k and 350 prxs) proxy sources check timeline with 60000 ms global timeout and AcceptableSequentialFails 1. Second proxy source is added at 11:00 and checked completely at 12:08. First proxy source is added at 10:41 and checked completely 11:48
+[1](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/1.png)
+
+Tools
+[2](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/2.png)
+
+Checked proxies
+[3](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/3.png)
+
+Unchecked proxies
+[4](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/4.png)
+
+Home
+[5](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/5.png)
+
+Bonus screenshots:
+
+Most anonymous proxy (found in the wild)
+[6](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/6.png)
+
+Smash-on-keyboard reverse DNS (found in the wild)
+[7](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/7.png)
+
+Public proxy hosted by Google - no blacklist entries (found in the wild)
+[8](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/8.png)
+
+Most evil proxy (found in the wild)
+[9](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/9.png)
+
+Long run with AcceptableSequentialFails = 1
+[10](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/10.png)
 
 [libmaxminddb]:https://github.com/maxmind/libmaxminddb
 [madns]:https://github.com/tiago4orion/madns

@@ -36,10 +36,20 @@
 #endif
 #include <math.h>
 #include <fcntl.h>
+#include <signal.h>
+
 #include "CPH_Threads.h"
 
 #include <curl/curl.h>
 #include <maxminddb.h>
+
+void SigPipeHandler(int signum) {
+	// Come on now, this is proxy checker we're talking about
+	
+	Log(LOG_LEVEL_DEBUG, "Caught signal SIGPIPE %d\n", signum);
+	
+	// Ignore SIGPIPE
+}
 
 static char *StdinDynamic()
 {
@@ -203,6 +213,8 @@ int main(int argc, char** argv)
 #endif
 	AuthWebList = NULL;
 
+	signal(SIGPIPE, SigPipeHandler);
+	
 	pthread_mutex_init(&AuthWebLock, NULL);
 	pthread_mutex_init(&WebSocketUnfinishedPacketsLock, NULL);
 	pthread_mutex_init(&WebSocketSubscribedClientsLock, NULL);
