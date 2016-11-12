@@ -18,7 +18,7 @@ LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
  - Spamhaus, Project Honey Pot and StopForumSpam blacklist checks
  - Invalid or modified SSL certificate detection
  - <sub><sup>Custom requests to pages from interface</sup></sub>
- - Multi custom requests from all checked proxies
+ - <sub><sup>Multi custom requests from all checked proxies</sup></sub>
 
 ## Get it running
 If you still haven't installed [depencencies](#dependencies):
@@ -69,37 +69,51 @@ Push requests welcome. See TODO list.
 
 ## Screenshots
 
-Two (5.6k and 350 prxs) proxy sources check timeline with 60000 ms global timeout and AcceptableSequentialFails 1. Second proxy source is added at 11:00 and checked completely at 12:08. First proxy source is added at 10:41 and checked completely 11:48
-[1](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/1.png)
+Two (5.6k and 350 prxs) proxy sources check timeline with 60000 ms global timeout and AcceptableSequentialFails 1.
+
+Second proxy source is added at 11:00 and checked completely at 12:08.
+
+First proxy source is added at 10:41 and checked completely 11:48
+
+![1](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/1.png)
 
 Tools
-[2](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/2.png)
+
+![2](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/2.png)
 
 Checked proxies
-[3](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/3.png)
+
+![3](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/3.png)
 
 Unchecked proxies
-[4](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/4.png)
+
+![4](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/4.png)
 
 Home
-[5](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/5.png)
 
-Bonus screenshots:
+![5](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/5.png)
+
+### Bonus screenshots:
 
 Most anonymous proxy (found in the wild)
-[6](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/6.png)
+
+![6](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/6.png)
 
 Smash-on-keyboard reverse DNS (found in the wild)
-[7](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/7.png)
+
+![7](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/7.png)
 
 Public proxy hosted by Google - no blacklist entries (found in the wild)
-[8](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/8.png)
+
+![8](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/8.png)
 
 Most evil proxy (found in the wild)
-[9](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/9.png)
+
+![9](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/9.png)
 
 Long run with AcceptableSequentialFails = 1
-[10](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/10.png)
+
+![10](https://github.com/TETYYS/LiveProxies/raw/devel/screenshots/10.png)
 
 [libmaxminddb]:https://github.com/maxmind/libmaxminddb
 [madns]:https://github.com/tiago4orion/madns
