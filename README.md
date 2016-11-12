@@ -1,5 +1,5 @@
 # LiveProxies
-Latest Version: **1.0.0** (release) [![Travis-CI](https://api.travis-ci.org/TETYYS/LiveProxies.svg)](https://travis-ci.org/TETYYS/LiveProxies/)
+Latest Version: **1.0.1** (release) [![Travis-CI](https://api.travis-ci.org/TETYYS/LiveProxies.svg)](https://travis-ci.org/TETYYS/LiveProxies/)
 
 LiveProxies is a [high-performance](perf/perf.md) asynchronous proxy checker.
 

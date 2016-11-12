@@ -14,7 +14,7 @@
 	#define WINDOWS_LOCAL_HTML_PATH ".\\html"
 #endif
 
-#define VERSION "1.0.0"
+#define VERSION "1.0.1"
 #define OUT
 #define MEM_OUT
 
