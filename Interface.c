@@ -206,9 +206,8 @@ endCookie:
 										goto end; // Auth expired
 									}
 								} else {
-									if (AuthWebList[x]->expiry < (GetUnixTimestampMilliseconds() / 1000)) {
+									if (AuthWebList[x]->expiry < (GetUnixTimestampMilliseconds() / 1000))
 										AuthWebRemove(x);
-									}
 								}
 							}
 
@@ -597,7 +596,7 @@ void InterfaceRawReverseDNS(struct bufferevent *BuffEvent, char *Buff)
 		return;
 	}
 
-	char *rDNS = ReverseDNS(proxy->ip);
+	char *rDNS = ReverseDNS(proxy->ip); // TODO: async?
 	if (rDNS == NULL) {
 		evbuffer_add(headers, "3", 1); // To Content-Length
 		evbuffer_add(body, "N/A", 3);
@@ -659,7 +658,6 @@ static void InterfaceRawRecheckStage2(UNCHECKED_PROXY *UProxy)
 	evbuffer_free(body);
 
 	BufferEventFreeOnWrite(buffEvent);
-	return;
 }
 
 void InterfaceRawRecheck(struct bufferevent *BuffEvent, char *Buff)
@@ -966,7 +964,7 @@ static bool InterfaceRawGetCustomPageStage2(UNCHECKED_PROXY *UProxy, UPROXY_CUST
 {
 	Log(LOG_LEVEL_DEBUG, "CustomPage stage 2");
 	struct bufferevent *buffEvent = (struct bufferevent*)UProxy->singleCheckCallbackExtraData;
-
+	
 	if (!UProxy->checkSuccess) {
 		bufferevent_write(buffEvent, "HTTP/1.1 504 Gateway Timeout\r\nContent-Length: 24\r\nContent-Type: text/html\r\n\r\nProxy connection failure", 101);
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);
@@ -1012,8 +1010,6 @@ static bool InterfaceRawGetCustomPageStage2(UNCHECKED_PROXY *UProxy, UPROXY_CUST
 	} free(data);
 	bufferevent_write(buffEvent, "\r\n", 2);
 
-	pthread_mutex_unlock(&(UProxy->processing));
-
 	if (Stage == UPROXY_CUSTOM_PAGE_STAGE_END) {
 		struct evbuffer *foot = evbuffer_new(); {
 			HTML_TEMPALTE_TABLE_INFO tableInfo;
@@ -1055,7 +1051,6 @@ static bool InterfaceRawGetCustomPageStage2Render(UNCHECKED_PROXY *UProxy, UPROX
 	}
 
 	bufferevent_write_buffer(buffEvent, bufferevent_get_input(UProxy->assocBufferEvent));
-	pthread_mutex_unlock(&(UProxy->processing));
 
 	if (Stage == UPROXY_CUSTOM_PAGE_STAGE_END) {
 		Log(LOG_LEVEL_DEBUG, "BuffEvent free %p", buffEvent);

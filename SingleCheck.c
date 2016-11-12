@@ -348,14 +348,11 @@ SPAMHAUS_ZEN_ANSWER SpamhausZEN(IPv6Map *In)
 	switch (data) {
 		case 2:
 			return SPAMHAUS_ZEN_ANSWER_SBL;
-			break;
 		case 3:
 			return SPAMHAUS_ZEN_ANSWER_CSS;
-			break;
 		case 10:
 		case 11:
 			return SPAMHAUS_ZEN_ANSWER_PBL;
-			break;
 		default:
 			return SPAMHAUS_ZEN_ANSWER_XBL;
 	}

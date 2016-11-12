@@ -137,7 +137,7 @@ typedef struct _UNCHECKED_PROXY {
 	// Universal stages - 5, 6, 7, 8
 	UPROXY_STAGE stage;
 
-	// This one blocks EVWrite called timeout event in case WServer is processing UProxy while EVWrite timeout event tries to free it
+	// This one blocks EVWrite called timeout event in case the Server is processing UProxy while EVWrite timeout event tries to free it
 	pthread_mutex_t processing;
 
 	struct event *timeout;

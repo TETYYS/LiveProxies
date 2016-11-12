@@ -2,14 +2,18 @@
 
 #include "tadns.h"
 #include <stdbool.h>
+#include "CPH_Threads.h"
 
 typedef struct _DNS_LOOKUP_ASYNC_EX {
 	void *object;
 	struct event *evDNS;
 	struct dns *dnsCtx;
-	bool resolveDone;
+	
+	pthread_mutex_t preDoneLock;
 	dns_callback_t fxDone;
 	void *fxFreed;
+	
+	bool resolveDone;
 	bool ipv6;
 } DNS_LOOKUP_ASYNC_EX;
 

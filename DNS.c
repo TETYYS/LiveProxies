@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include "ProxyRequest.h"
 #include "Config.h"
+#include "CPH_Threads.h"
 
 static void DNSResolveCallError(DNS_LOOKUP_ASYNC_EX *Ex, enum dns_error Error)
 {
@@ -24,7 +25,7 @@ static void DNSResolveCallError(DNS_LOOKUP_ASYNC_EX *Ex, enum dns_error Error)
 static void DNSResolveLevEventToDNSProcess(evutil_socket_t fd, short what, void *arg)
 {
 	DNS_LOOKUP_ASYNC_EX *ex = (DNS_LOOKUP_ASYNC_EX*)arg;
-	Log(LOG_LEVEL_DEBUG, "DNS process WHAT %d", what);
+	Log(LOG_LEVEL_DEBUG, "DNS process WHAT %d ipv6? %s", what, ex->ipv6 ? "ye" : "nah");
 	if (what == EV_TIMEOUT) {
 		DNSResolveCallError(ex, DNS_TIMEOUT);
 		goto free;
@@ -35,7 +36,7 @@ static void DNSResolveLevEventToDNSProcess(evutil_socket_t fd, short what, void 
 	if (ex->resolveDone)
 		goto free;
 
-	Log(LOG_LEVEL_DEBUG, "DNS process WHAT %d END", what);
+	Log(LOG_LEVEL_DEBUG, "DNS process WHAT %d END ipv6? %s", what, ex->ipv6 ? "ye" : "nah");
 
 	return;
 free:
@@ -44,7 +45,21 @@ free:
 	event_free(ex->evDNS);
 	if (ex->fxFreed != NULL)
 		((FxDnsFreed)ex->fxFreed)(ex);
+	
+	pthread_mutex_destroy(&(ex->preDoneLock));
 	free(ex);
+}
+
+void DNSDone(struct dns_cb_data *Data)
+{
+	DNS_LOOKUP_ASYNC_EX *ex = (DNS_LOOKUP_ASYNC_EX*)Data->context;
+	Log(LOG_LEVEL_DEBUG, "Waiting for preDoneLock...");
+	pthread_mutex_lock(&(ex->preDoneLock)); {
+		Log(LOG_LEVEL_DEBUG, "PRE CALL");
+		ex->fxDone(Data);
+		Log(LOG_LEVEL_DEBUG, "POST CALL");
+	} pthread_mutex_unlock(&(ex->preDoneLock));
+	Log(LOG_LEVEL_DEBUG, "Unlocked preDoneLock");
 }
 
 DNS_LOOKUP_ASYNC_EX *DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_callback_t fxDone, FxDnsFreed fxFree)
@@ -55,6 +70,7 @@ DNS_LOOKUP_ASYNC_EX *DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_call
 	ex->evDNS = NULL;
 	ex->resolveDone = false;
 	ex->fxDone = fxDone;
+	pthread_mutex_init(&(ex->preDoneLock), NULL);
 	ex->fxFreed = fxFree;
 	ex->ipv6 = IPv6;
 	Log(LOG_LEVEL_DEBUG, "DNSResolveAsync EX: obj %p fx %p", Ex, fxDone);
@@ -69,7 +85,7 @@ DNS_LOOKUP_ASYNC_EX *DNSResolveAsync(void *Ex, char *Domain, bool IPv6, dns_call
 	ex->dnsCtx = dnsCtx;
 	Log(LOG_LEVEL_DEBUG, "DNSResolveAsync EX: ctx %p", dnsCtx);
 
-	dns_queue(dnsCtx, ex, Domain, IPv6 ? DNS_RR_TYPE_AAAA : DNS_RR_TYPE_A, fxDone);
+	dns_queue(dnsCtx, ex, Domain, IPv6 ? DNS_RR_TYPE_AAAA : DNS_RR_TYPE_A, DNSDone);
 
 	Log(LOG_LEVEL_DEBUG, "DNS FD %d", dns_get_fd(dnsCtx));
 

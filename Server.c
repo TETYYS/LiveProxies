@@ -73,28 +73,6 @@ static const char *GetCountryByIPv6Map(IPv6Map *In)
 	}
 }
 
-void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...)
-{
-	char *body;
-	char *all;
-
-	va_list args;
-	va_start(args, Format); {
-		exit(1); // TODO: MINGW
-		//vasprintf(&body, Format, args);
-	} va_end(args);
-	size_t bodyLen = strlen(body);
-
-	char hex[8];
-	sprintf(hex, "%zx", bodyLen);
-
-	all = malloc((strlen(hex) + 2 + bodyLen + 2) + 1); {
-		sprintf(all, "%s\r\n%s\r\n", hex, body);
-		bufferevent_write(BuffEvent, all, strlen(hex) + 2 + bodyLen + 2);
-	} free(all);
-	free(body);
-}
-
 static void ProxyCheckLanding(struct bufferevent *BuffEvent, char **Buff)
 {
 	// Loose proxy is automatically free'd by EVWrite called timeout
@@ -486,8 +464,6 @@ void ServerRead(struct bufferevent *BuffEvent, void *Ctx)
 
 	free(buff);
 }
-
-int sslCreated = 0;
 
 static void ServerAccept(struct evconnlistener *List, evutil_socket_t Fd, struct sockaddr *Address, int Socklen, void *Ctx)
 {

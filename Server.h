@@ -28,6 +28,4 @@ void ServerUDP4();
 void ServerRead(struct bufferevent *BuffEvent, void *Ctx);
 void ServerEvent(struct bufferevent *BuffEvent, short Event, void *Ctx);
 
-void SendChunkPrintf(struct bufferevent *BuffEvent, char *Format, ...);
-
 int SSLVerifyCallback(int preverify_ok, X509_STORE_CTX *ctx);

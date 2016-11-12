@@ -205,7 +205,6 @@ static SOCKS5_RET_STATUS SOCKS5(SOCKS_TYPE Type, uint16_t *Port, UNCHECKED_PROXY
 			evbuffer_remove(bufferevent_get_input(UProxy->assocBufferEvent), data, 2);
 			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 1 data[1]: %d", data[1]);
 			return data[1] == 0x00;
-			break;
 		}
 		case UPROXY_STAGE_SOCKS5_MAIN_PACKET:
 		{
@@ -222,21 +221,18 @@ static SOCKS5_RET_STATUS SOCKS5(SOCKS_TYPE Type, uint16_t *Port, UNCHECKED_PROXY
 			uint8_t *buff;
 			if (UProxy->pageTarget != NULL && SOCKS5ResolveDomainsRemotely)	{
 				Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 2 Domain");
-				uint8_t tBuff[5 + domainLen + sizeof(uint16_t)];
-				buff = tBuff;
+				buff = alloca(5 + domainLen + sizeof(uint16_t));
 			} else {
 				if (ipType == IPV4) {
 					Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 2 IPV4");
-					uint8_t tBuff[4 + IPV4_SIZE + sizeof(uint16_t)];
-					buff = tBuff;
+					buff = alloca(4 + IPV4_SIZE + sizeof(uint16_t));
 				} else {
 					Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 2 IPV6");
-					uint8_t tBuff[4 + IPV6_SIZE + sizeof(uint16_t)];
-					buff = tBuff;
+					buff = alloca(4 + IPV6_SIZE + sizeof(uint16_t));
 				}
 			}
 			
-			size_t portOffset = 0;
+			size_t portOffset;
 			
 			buff[0] = 0x05; // again?
 			buff[1] = Type;
@@ -258,7 +254,7 @@ static SOCKS5_RET_STATUS SOCKS5(SOCKS_TYPE Type, uint16_t *Port, UNCHECKED_PROXY
 				}
 				*((uint16_t*)&(buff[4 + portOffset])) = Type != SOCKS_TYPE_UDP_ASSOCIATE ? htons(*Port) : 0;
 			}
-
+			
 			Log(LOG_LEVEL_DEBUG, "portOffset %d", portOffset);
 			
 			bufferevent_write(UProxy->assocBufferEvent, buff, 4 + portOffset + sizeof(uint16_t));
@@ -268,53 +264,58 @@ static SOCKS5_RET_STATUS SOCKS5(SOCKS_TYPE Type, uint16_t *Port, UNCHECKED_PROXY
 		}
 		case UPROXY_STAGE_SOCKS5_RESPONSE:
 		{
-			IP_TYPE ipType = GetIPType(UProxy->ip); // Prefered
-
-			if (ipType == IPV4 && UProxy->targetIPv4 == NULL)
-				ipType = IPV6;
-			if (ipType == IPV6 && UProxy->targetIPv6 == NULL)
-				ipType = IPV4;
-			// -> Real
-			
 			bufferevent_setwatermark(UProxy->assocBufferEvent, EV_READ, 1, 0);
 			size_t len = evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent));
-			uint8_t *data;
-			size_t domainLen = 0, dataLen;
-			if (UProxy->pageTarget != NULL && SOCKS5ResolveDomainsRemotely) {
-				domainLen = strlen(Domain);
-				uint8_t tBuff[5 + domainLen + sizeof(uint16_t)];
-				data = tBuff;
-				dataLen = 5 + domainLen + sizeof(uint16_t);
-			} else {
-				if (ipType == IPV4) {
-					uint8_t tBuff[4 + IPV4_SIZE + sizeof(uint16_t)];
-					data = tBuff;
-					dataLen = 4 + IPV4_SIZE + sizeof(uint16_t);
-				} else {
-					uint8_t tBuff[4 + IPV6_SIZE + sizeof(uint16_t)];
-					data = tBuff;
-					dataLen = 4 + IPV6_SIZE + sizeof(uint16_t);
-				}
+			
+			if (len < 4) {
+				Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 data len failure 1");
+				return false;
 			}
+			
+			uint8_t header[4];
+			
+			evbuffer_remove(bufferevent_get_input(UProxy->assocBufferEvent), header, 4);
+			size_t addressType = header[3];
+			
+			Log(LOG_LEVEL_DEBUG, "data[1] %x", header[1]);
+			
+			if (header[1] == 0x08 || header[1] == 0x02) {
+				Log(LOG_LEVEL_DEBUG, "ipType %s", addressType == 0x01 ? "SOCKS5_RET_STATUS_IPV4_FAILED" : "SOCKS5_RET_STATUS_IPV6_FAILED");
+				return addressType == 0x01 ? SOCKS5_RET_STATUS_IPV4_FAILED : SOCKS5_RET_STATUS_IPV6_FAILED; // Recoverable failure, tries to connect with different address type.
+			}
+			
+			size_t domainLen, dataLen;
+			if (addressType == 0x03) {
+				evbuffer_remove(bufferevent_get_input(UProxy->assocBufferEvent), header, 1);
+				domainLen = header[0];
+				dataLen = domainLen + sizeof(uint16_t);
+			} else if (addressType == 0x01) {
+				dataLen = IPV4_SIZE + sizeof(uint16_t);
+			} else if (addressType == 0x04) {
+				dataLen = IPV6_SIZE + sizeof(uint16_t);
+			} else {
+				Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 malformed packet");
+				return false;
+			}
+			
+			uint8_t data[dataLen];
+			len = evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent));
 			
 			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 data len: %d", len);
-			/*if (len != dataLen)
-				return false;*/
 
-			evbuffer_remove(bufferevent_get_input(UProxy->assocBufferEvent), data, dataLen);
-
-			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 data[1]: %d", data[1]);
-			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 port: %d", ntohs(*((uint16_t*)&(data[8]))));
-			*Port = ntohs(*((uint16_t*)&(data[8])));
-
-			Log(LOG_LEVEL_DEBUG, "data[1] %x", data[1]);
-
-			if (data[1] == 0x08) {
-				// Address type not supported
-				return ipType == IPV4 ? SOCKS5_RET_STATUS_IPV4_FAILED : SOCKS5_RET_STATUS_IPV6_FAILED; // Recoverable failure, tries to connect with different address type.
+			if (len != dataLen) {
+				Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 data len failure 2");
+				return false;
 			}
 			
-			return data[1] == 0x00;
+			evbuffer_remove(bufferevent_get_input(UProxy->assocBufferEvent), data, dataLen);
+
+			memcpy(Port, &(data[dataLen - 2]), 2);
+			*Port = ntohs(*Port);
+			
+			Log(LOG_LEVEL_DEBUG, "SOCKS5: Stage 3 port: %d", *Port);
+			
+			return true;
 		}
 		default: {
 			assert(false);
@@ -328,6 +329,10 @@ void ProxyDNSReResolved(struct dns_cb_data *data)
 {
 	DNS_LOOKUP_ASYNC_EX *ex = data->context;
 	UNCHECKED_PROXY *newProxy = ex->object;
+	
+	Log(LOG_LEVEL_DEBUG, "ProxyDNSReResolved");
+	pthread_mutex_lock(&(newProxy->processing));
+	
 	if (data->addr_len <= 0) {
 		// Secondary address type failed, delete proxy
 		UProxyFree(newProxy);
@@ -344,14 +349,13 @@ void ProxyDNSReResolved(struct dns_cb_data *data)
 			Log(LOG_LEVEL_DEBUG, "ProxyDNSReResolved IPv4 %s", ip);
 		} free(ip);
 #endif
-	}
-	else if (ex->ipv6) {
+	} else if (ex->ipv6) {
 		newProxy->targetIPv6 = malloc(sizeof(IPv6Map));
 		memcpy(newProxy->targetIPv6->Data, data->addr, IPV6_SIZE);
 
 #if DEBUG
 		char *ip = IPv6MapToString2(newProxy->targetIPv6); {
-			Log(LOG_LEVEL_DEBUG, "ProxyDNSResolved IPv6 %s", ip);
+			Log(LOG_LEVEL_DEBUG, "ProxyDNSReResolved IPv6 %s", ip);
 		} free(ip);
 #endif
 	} else {
@@ -361,6 +365,8 @@ void ProxyDNSReResolved(struct dns_cb_data *data)
 	
 	UProxyAdd(newProxy);
 	RequestAsync(newProxy);
+	
+	pthread_mutex_unlock(&(newProxy->processing));
 }
 
 void ProxyDNSResolved(struct dns_cb_data *data)
@@ -368,6 +374,8 @@ void ProxyDNSResolved(struct dns_cb_data *data)
 	DNS_LOOKUP_ASYNC_EX *ex = (DNS_LOOKUP_ASYNC_EX*)data->context;
 	UNCHECKED_PROXY *UProxy = (UNCHECKED_PROXY*)ex->object;
 
+	pthread_mutex_lock(&(UProxy->processing));
+	
 	if (!ex->ipv6)
 		UProxy->dnsResolveInProgress &= ~IPV4;
 	
@@ -375,6 +383,8 @@ void ProxyDNSResolved(struct dns_cb_data *data)
 		UProxy->dnsResolveInProgress &= ~IPV6;
 	
 	if (data->addr_len > 0) {
+		bool firstResolve = UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL;
+		
 		if (!ex->ipv6 && UProxy->targetIPv4 == NULL) {
 			UProxy->targetIPv4 = zalloc(sizeof(IPv6Map));
 			memcpy(&(UProxy->targetIPv4->Data[3]), data->addr, IPV4_SIZE);
@@ -397,11 +407,13 @@ void ProxyDNSResolved(struct dns_cb_data *data)
 #endif
 		}
 
-		Log(LOG_LEVEL_DEBUG, "ProxyDNSResolved -> ProxyHandleData CONNECT");
-		ProxyHandleData(UProxy, EV_TYPE_CONNECT);
-	}
-	
-	if (UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL && UProxy->dnsResolveInProgress == 0) {
+		if (firstResolve) {
+			Log(LOG_LEVEL_DEBUG, "ProxyDNSResolved -> ProxyHandleData CONNECT");
+			pthread_mutex_unlock(&(UProxy->processing));
+			ProxyHandleData(UProxy, EV_TYPE_CONNECT);
+		} else
+			pthread_mutex_unlock(&(UProxy->processing));
+	} else if (UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL && UProxy->dnsResolveInProgress == 0) {
 		bufferevent_setcb(UProxy->assocBufferEvent, NULL, NULL, NULL, NULL);
 		if (UProxy->timeout != NULL)
 			event_active(UProxy->timeout, EV_TIMEOUT, 0);
@@ -412,15 +424,20 @@ void ProxyDNSResolved(struct dns_cb_data *data)
 		}
 		if (data->error != DNS_DOES_NOT_EXIST)
 			Log(LOG_LEVEL_WARNING, "Failed to lookup CPage DNS");
-	}
+		
+		pthread_mutex_unlock(&(UProxy->processing));
+	} else
+		pthread_mutex_unlock(&(UProxy->processing));
 	
-	if (UProxy->dnsResolveInProgress == 0)
-		ex->resolveDone = true;
+	ex->resolveDone = true;
 }
 
 static void ProxyDNSFreed(DNS_LOOKUP_ASYNC_EX *Ex)
 {
 	UNCHECKED_PROXY *UProxy = Ex->object;
+	Log(LOG_LEVEL_DEBUG, "DNS FREEEEEEEEEEEEEEEEEEEEEEED! IPv6? %s", Ex->ipv6 ? "ye" : "nah");
+	
+	pthread_mutex_lock(&(UProxy->processing));
 	
 	for (size_t x = 0; x < UProxy->dnsLookupsCount; x++) {
 		if (UProxy->dnsLookups[x] == Ex) {
@@ -431,6 +448,8 @@ static void ProxyDNSFreed(DNS_LOOKUP_ASYNC_EX *Ex)
 				free(UProxy->dnsLookups);
 				UProxy->dnsLookups = NULL;
 			}
+			
+			pthread_mutex_unlock(&(UProxy->processing));
 			return;
 		}
 	}
@@ -441,18 +460,16 @@ static void ProxyDNSResolve(UNCHECKED_PROXY *UProxy, char *Domain)
 	if (UProxy->pageTarget == NULL)
 		return;
 
-	UProxy->dnsResolveInProgress = IPV4/* | IPV6*/;
+	UProxy->dnsResolveInProgress = IPV4 | IPV6;
 	UProxy->dnsLookups = malloc(sizeof(DNS_LOOKUP_ASYNC_EX*) * 2);
-	/*UProxy->dnsLookups[0] = DNSResolveAsync(UProxy, Domain, true, ProxyDNSResolved, ProxyDNSFreed);
+	UProxy->dnsLookups[0] = DNSResolveAsync(UProxy, Domain, true, ProxyDNSResolved, ProxyDNSFreed);
 	if (UProxy->dnsLookups[0] != NULL)
-		UProxy->dnsLookupsCount++;*/
+		UProxy->dnsLookupsCount++;
+	msleep(1500);
 	UProxy->dnsLookups[UProxy->dnsLookupsCount] = DNSResolveAsync(UProxy, Domain, false, ProxyDNSResolved, ProxyDNSFreed);
 	if (UProxy->dnsLookups[UProxy->dnsLookupsCount] != NULL)
 		UProxy->dnsLookupsCount++;
 }
-
-int sslCreated2 = 0;
-size_t bts = 0;
 
 static MEM_OUT char *ProxyParseUrl(UNCHECKED_PROXY *UProxy, bool OnlyDomain, bool IncludePort, OUT char **Path)
 {
@@ -508,9 +525,12 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 {
 	Log(LOG_LEVEL_DEBUG, "ProxyHandleData: Proxy %s (%d), stage %d EVType %s", ProxyGetTypeString(UProxy->type), UProxy->type, UProxy->stage, EVType == EV_TYPE_READ ? "EV_TYPE_READ" : (EVType == EV_TYPE_WRITE ? "EV_TYPE_WRITE" : "EV_TYPE_CONNECT"));
 	char *reqString;
-#define EVTYPE_CASE(x) if (EVType != x) return;
-#define EVTYPE_CASE_NOT(x) if (EVType == x) return;
+#define EVTYPE_CASE(x) if (EVType != x) { pthread_mutex_unlock(&(UProxy->processing)); Log(LOG_LEVEL_DEBUG, "PROCESSING UNLOCK!CASE"); return; }
+#define EVTYPE_CASE_NOT(x) if (EVType == x) { pthread_mutex_unlock(&(UProxy->processing)); Log(LOG_LEVEL_DEBUG, "PROCESSING UNLOCK!CASE NOT"); return; }
 
+	Log(LOG_LEVEL_DEBUG, "PROCESSING LOCK!");
+	pthread_mutex_lock(&(UProxy->processing));
+	
 	switch (UProxy->type) {
 		case PROXY_TYPE_HTTP: {
 			// Initial plain HTTP stage, go straight to sending HTTP request
@@ -620,6 +640,9 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 							if (UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL) {
 								ProxyDNSResolve(UProxy, domain);
 								free(domain);
+								
+								Log(LOG_LEVEL_DEBUG, "PROCESSING UNLOCK!1");
+								pthread_mutex_unlock(&(UProxy->processing));
 								return;
 							} else {
 								SOCKS4(SOCKS_TYPE_CONNECT, UProxy);
@@ -664,7 +687,12 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 					if (SOCKS5(0, NULL, UProxy, NULL)) {
 						Log(LOG_LEVEL_DEBUG, "SOCKS5 advance to stage 2");
 						
-						/* IPv4 and IPv6 null check for if when contacted SOCKS5 proxy rejected first IP type and system re-requests with other one.
+						Log(LOG_LEVEL_DEBUG, "UPROXY_STAGE_INITIAL_RESPONSE: UProxy->pageTarget != NULL: %s", UProxy->pageTarget != NULL ? "true" : "false");
+						Log(LOG_LEVEL_DEBUG, "!SOCKS5ResolveDomainsRemotely: %s", !SOCKS5ResolveDomainsRemotely ? "true" : "false");
+						Log(LOG_LEVEL_DEBUG, "UProxy->targetIPv4 == NULL: %s", UProxy->targetIPv4 == NULL ? "true" : "false");
+						Log(LOG_LEVEL_DEBUG, "UProxy->targetIPv6 == NULL: %s", UProxy->targetIPv6 == NULL ? "true" : "false");
+						/* 
+						 * IPv4 and IPv6 null check for if when contacted SOCKS5 proxy rejected first IP type and system re-requests with other one.
 						 * In this case targetIPv4 or targetIPv6 will be already filled in.
 						 */
 						if (UProxy->pageTarget != NULL && !SOCKS5ResolveDomainsRemotely && UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL) {
@@ -678,10 +706,15 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 								ProxyDNSResolve(UProxy, domain);
 								Log(LOG_LEVEL_DEBUG, "SOCKS5 stage 2 pending resolve");
 							} free(domain);
+							
+							Log(LOG_LEVEL_DEBUG, "PROCESSING UNLOCK!2");
+							pthread_mutex_unlock(&(UProxy->processing));
 							return;
 						} else
 							UProxy->stage = UPROXY_STAGE_SOCKS5_MAIN_PACKET;
 						
+						Log(LOG_LEVEL_DEBUG, "UPROXY_STAGE_SOCKS5_MAIN_PACKET: UProxy->pageTarget != NULL: %s", UProxy->pageTarget != NULL ? "true" : "false");
+						Log(LOG_LEVEL_DEBUG, "SOCKS5ResolveDomainsRemotely: %s", SOCKS5ResolveDomainsRemotely ? "true" : "false");
 						// Case described above in comments doesn't happen if domains are resolved remotely
 						if (UProxy->pageTarget != NULL && SOCKS5ResolveDomainsRemotely) {
 							char *domain = ProxyParseUrl(UProxy, false, false, NULL); {
@@ -785,66 +818,101 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 						 * Recoverable failure. This may happen when a IPv6/4 address is fed to SOCKS5 proxy but it doesn't support it.
 						 * Wait for IPv4/6 and request again.
 						 */
-						bool found = false;
-						for (size_t x = 0;x < UProxy->dnsLookupsCount;x++) {
-							// Scoop out the lookup from array so the system doesn't free it
+						Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure %s", socksRet == SOCKS5_RET_STATUS_IPV6_FAILED ? "SOCKS5_RET_STATUS_IPV6_FAILED" : "SOCKS5_RET_STATUS_IPV4_FAILED");
+						Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure lookups %d", UProxy->dnsLookupsCount);
+						Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure lookups IPv4 %p", UProxy->targetIPv4);
+						Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure lookups IPv6 %p", UProxy->targetIPv6);
+					
+						
+						// Empty the failed target so that system wouldn't try to pass it to SOCKS5 proxy again
+						if (socksRet == SOCKS5_RET_STATUS_IPV6_FAILED)
+							UProxy->targetIPv6 = NULL;
+						else
+							UProxy->targetIPv4 = NULL;
+						
+						Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure lookups IPv4 %p", UProxy->targetIPv4);
+						Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure lookups IPv6 %p", UProxy->targetIPv6);
+						
+						// Find any existing lookups
+						ssize_t fLookup = -1;
+						for (size_t x = 0; x < UProxy->dnsLookupsCount; x++) {
+							if ((!UProxy->dnsLookups[x]->ipv6 && socksRet == SOCKS5_RET_STATUS_IPV6_FAILED) ||
+								(UProxy->dnsLookups[x]->ipv6 && socksRet == SOCKS5_RET_STATUS_IPV4_FAILED))
+								fLookup = x;
+						}
+						
+						if (fLookup == -1 && UProxy->targetIPv4 == NULL && UProxy->targetIPv6 == NULL) {
+							Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure just became unrecoverable");
+							// Screwed
+							goto fail;
+						}
+						
+						// Duplicate uproxy
+						IPv6Map *prxIp = malloc(sizeof(IPv6Map));
+						memcpy(prxIp, UProxy->ip, sizeof(IPv6Map));
+						UNCHECKED_PROXY *newProxy = AllocUProxy(prxIp, UProxy->port, UProxy->type, NULL, UProxy->associatedProxy);
+						newProxy->targetPort = UProxy->targetPort;
+						
+						DNS_LOOKUP_ASYNC_EX *curLookup = NULL;
+						
+						if (fLookup != -1) {
+							Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure lookups fLookup != -1");
+							curLookup = UProxy->dnsLookups[fLookup];
+						
+							pthread_mutex_lock(&(curLookup->preDoneLock));
+						} else {
+							Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure lookups socksRet %s", socksRet == SOCKS5_RET_STATUS_IPV6_FAILED ? "SOCKS5_RET_STATUS_IPV6_FAILED" : "SOCKS5_RET_STATUS_IPV4_FAILED");
 							
-							if ((UProxy->dnsLookups[x]->ipv6 && socksRet == SOCKS5_RET_STATUS_IPV6_FAILED) ||
-								(!UProxy->dnsLookups[x]->ipv6 && socksRet == SOCKS5_RET_STATUS_IPV4_FAILED))
-								found = true;
-							
-							if (found) {
-								DNS_LOOKUP_ASYNC_EX *curLookup = UProxy->dnsLookups[x];
-								UProxy->dnsLookupsCount--;
-								if (UProxy->dnsLookupsCount > 0)
-									UProxy->dnsLookups[x] = UProxy->dnsLookups[UProxy->dnsLookupsCount];
-								else
-									free(UProxy->dnsLookups);
-								
-								// Empty the failed target so that system wouldn't try to pass it to SOCKS5 proxy again
-								if (curLookup->ipv6)
-									UProxy->targetIPv6 = NULL;
-								else
-									UProxy->targetIPv4 = NULL;
-								
-								// Duplicate uproxy
-								IPv6Map *prxIp = malloc(sizeof(IPv6Map));
-								memcpy(prxIp, UProxy->ip, sizeof(IPv6Map));
-								UNCHECKED_PROXY *newProxy = AllocUProxy(prxIp, UProxy->port, UProxy->type, NULL, UProxy->associatedProxy);
-								newProxy->targetPort = UProxy->targetPort;
-								if (curLookup->ipv6 && UProxy->targetIPv4 != NULL) {
-									newProxy->targetIPv4 = malloc(sizeof(IPv6Map));
-									memcpy(newProxy->targetIPv4, UProxy->targetIPv4, sizeof(IPv6Map));
-								}
-									
-								if (!curLookup->ipv6 && UProxy->targetIPv6 != NULL) {
-									newProxy->targetIPv6 = malloc(sizeof(IPv6Map));
-									memcpy(newProxy->targetIPv6, UProxy->targetIPv6, sizeof(IPv6Map));
-								}
-								
-								if (UProxy->pageTarget != NULL) {
-									newProxy->pageTarget = malloc(strlen(UProxy->pageTarget) + 1);
-									strcpy(newProxy->pageTarget, UProxy->pageTarget);
-								}
-								
-								newProxy->getResponse = UProxy->getResponse;
-								newProxy->singleCheckCallback = UProxy->singleCheckCallback;
-								newProxy->singleCheckCallbackExtraData = UProxy->singleCheckCallbackExtraData;
-								
-								if (UProxy->targetIPv6 != NULL || UProxy->targetIPv4 != NULL) {
-									// New proxy will have already resolved IPv4/6
-									UProxyAdd(newProxy);
-									RequestAsync(newProxy);
-								} else {
-									curLookup->object = newProxy;
-									curLookup->fxDone = ProxyDNSReResolved;
-								}
-								
-								goto fail; // Free old proxy
+							if (socksRet == SOCKS5_RET_STATUS_IPV6_FAILED) {
+								newProxy->targetIPv4 = zalloc(sizeof(IPv6Map));
+								memcpy(newProxy->targetIPv4, UProxy->targetIPv4, sizeof(IPv6Map));
+								Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure lookups copied IPv4");
+							} else {
+								newProxy->targetIPv6 = malloc(sizeof(IPv6Map));
+								memcpy(newProxy->targetIPv6, UProxy->targetIPv6, sizeof(IPv6Map));
+								Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure copied IPv6");
 							}
 						}
+								
+						if (UProxy->pageTarget != NULL) {
+							newProxy->pageTarget = malloc(strlen(UProxy->pageTarget) + 1);
+							strcpy(newProxy->pageTarget, UProxy->pageTarget);
+						}
+								
+						newProxy->getResponse = UProxy->getResponse;
+						newProxy->singleCheckCallback = UProxy->singleCheckCallback;
+						newProxy->singleCheckCallbackExtraData = UProxy->singleCheckCallbackExtraData;
+								
+						if (UProxy->targetIPv6 != NULL || UProxy->targetIPv4 != NULL) {
+							// New proxy will have already resolved IPv4/6
+							UProxyAdd(newProxy);
+							RequestAsync(newProxy);
+							Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure lookups added new proxy");
+						} else {
+							// Scoop out current DNS lookup from the array so ProxyFree doesn't free it
+							UProxy->dnsLookupsCount--;
+							if (UProxy->dnsLookupsCount > 0) {
+								UProxy->dnsLookups[fLookup] = UProxy->dnsLookups[UProxy->dnsLookupsCount];
+							} else {
+								free(UProxy->dnsLookups);
+								UProxy->dnsLookups = NULL;
+							}
+							
+							curLookup->object = newProxy;
+							curLookup->fxDone = ProxyDNSReResolved;
+							Log(LOG_LEVEL_DEBUG, "SOCKS5 ip recoverable failure redirected fxDone callback");
+						}
+						
+						if (fLookup != -1) {
+							Log(LOG_LEVEL_DEBUG, "UNLOCK preDoneLock!!!");
+							pthread_mutex_unlock(&(curLookup->preDoneLock));
+						}
+						
+						UProxy->getResponse = false; // Prevent CPage final stage from being launched as if UProxy failed
+						goto fail; // Free old proxy silently
 					} else
 						goto fail;
+					
 					break;
 				}
 				default: {
@@ -868,19 +936,9 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 			bufferevent_setfd(UProxy->assocBufferEvent, -1);
 			bufferevent_free(UProxy->assocBufferEvent);
 			UProxy->assocBufferEvent = sslBuffEvent;
-			
-			/*test = bufferevent_openssl_filter_new(levRequestBase,
-																	  UProxy->assocBufferEvent,
-																	  SSL_new(RequestBaseSSLCTX),
-																	  BUFFEREVENT_SSL_CONNECTING,
-																	  BEV_OPT_CLOSE_ON_FREE | BEV_OPT_THREADSAFE);*/
-			Log(LOG_LEVEL_DEBUG, "SSL2 created %d", ++sslCreated2);
-			/*UProxy->assocBufferEvent = test;
-			bufferevent_openssl_set_allow_dirty_shutdown(UProxy->assocBufferEvent, false);*/
 
 			if (UProxy->assocBufferEvent != NULL) {
 				bufferevent_setcb(UProxy->assocBufferEvent, (bufferevent_data_cb)EVRead, (bufferevent_data_cb)EVWrite, (bufferevent_event_cb)EVEvent, UProxy);
-				//bufferevent_set_timeouts(UProxy->assocBufferEvent, &GlobalTimeoutTV, &GlobalTimeoutTV);
 				bufferevent_enable(UProxy->assocBufferEvent, EV_READ | EV_WRITE);
 			} else {
 				Log(LOG_LEVEL_DEBUG, "SSL BuffEvent fail");
@@ -999,6 +1057,9 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 			if (UProxy->pageTarget != NULL && UProxy->getResponse) {
 				if (evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)) == 0) {
 					Log(LOG_LEVEL_DEBUG, "ProxyHandleData stage 8 / 9 DROP");
+					
+					Log(LOG_LEVEL_DEBUG, "PROCESSING UNLOCK!3");
+					pthread_mutex_unlock(&(UProxy->processing));
 					return;
 				}
 				// ????
@@ -1006,11 +1067,8 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 #if DEBUG
 				char testBuff[evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent))];
 				evbuffer_copyout(bufferevent_get_input(UProxy->assocBufferEvent), &testBuff, evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)));
-				bts += evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent));
-				Log(LOG_LEVEL_DEBUG, "BTS %d", bts);
 				Log(LOG_LEVEL_DEBUG, "In buffer: %s (%d)", testBuff, evbuffer_get_length(bufferevent_get_input(UProxy->assocBufferEvent)));
 #endif
-				pthread_mutex_lock(&(UProxy->processing));
 				((SingleCheckCallbackCPage)UProxy->singleCheckCallback)(UProxy, UProxy->stage == UPROXY_STAGE_HTTP_RESPONSE ? UPROXY_CUSTOM_PAGE_STAGE_INITIAL_PACKET : UPROXY_CUSTOM_PAGE_STAGE_DDL_PAGE);
 				UProxy->stage = UPROXY_STAGE_HTTP_DDL_PAGE;
 				// EOF is called out as an error to RequestFree
@@ -1022,6 +1080,9 @@ void ProxyHandleData(UNCHECKED_PROXY *UProxy, PROXY_HANDLE_DATA_EV_TYPE EVType)
 		}
 	}
 
+	Log(LOG_LEVEL_DEBUG, "PROCESSING UNLOCK!FINAL");
+	pthread_mutex_unlock(&(UProxy->processing));
+	
 #undef EVTYPE_CASE
 #undef EVTYPE_CASE_NOT
 
@@ -1031,6 +1092,9 @@ fail:
 	bufferevent_setcb(UProxy->assocBufferEvent, NULL, NULL, NULL, NULL);
 	if (UProxy->timeout != NULL)
 		event_active(UProxy->timeout, EV_TIMEOUT, 0);
+	
+	Log(LOG_LEVEL_DEBUG, "PROCESSING UNLOCK!FAIL FINAL");
+	pthread_mutex_unlock(&(UProxy->processing));
 }
 
 void EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_PROXY *UProxy)
@@ -1041,9 +1105,9 @@ void EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_PROXY *UPr
 		UProxy->checkSuccess = true;
 
 	if (Event == BEV_EVENT_CONNECTED) {
-		char *ip = IPv6MapToString(UProxy->ip); {
+		//char *ip = IPv6MapToString(UProxy->ip); {
 			//Log(LOG_LEVEL_DEBUG, "EVEvent: event connected %s (size %d)", ip, SizeUncheckedProxies);
-		} free(ip);
+		//} free(ip);
 
 		ProxyHandleData(UProxy, EV_TYPE_CONNECT);
 	} else {
@@ -1051,9 +1115,9 @@ void EVEvent(struct bufferevent *BuffEvent, uint16_t Event, UNCHECKED_PROXY *UPr
 			//Log(LOG_LEVEL_DEBUG, "SSL stage %d error %02x -> %d", UProxy->stage, Event, bufferevent_get_openssl_error(BuffEvent));
 
 #if DEBUG
-		char *ip = IPv6MapToString(UProxy->ip); {
+		//char *ip = IPv6MapToString(UProxy->ip); {
 			//Log(LOG_LEVEL_DEBUG, "EVEvent: event timeout / fail %s", ip);
-		} free(ip);
+		//} free(ip);
 		//Log(LOG_LEVEL_DEBUG, "EVEvent: BuffEvent: %08x event %02x", BuffEvent, Event);
 #endif
 		RequestFree(bufferevent_getfd(BuffEvent), Event, UProxy);
