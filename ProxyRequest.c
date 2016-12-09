@@ -159,8 +159,8 @@ static SOCKS5_RET_STATUS SOCKS5(SOCKS_TYPE Type, uint16_t *Port, UNCHECKED_PROXY
 	0x00: No authentication
 	0x01: GSSAPI
 	0x02: Username/Password
-	0x03–0x7F: methods assigned by IANA
-	0x80–0xFE: methods reserved for private use
+	0x03â€“0x7F: methods assigned by IANA
+	0x80â€“0xFE: methods reserved for private use
 
 	+----+-----+-------+------+----------+----------+
 	|VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
@@ -465,7 +465,7 @@ static void ProxyDNSResolve(UNCHECKED_PROXY *UProxy, char *Domain)
 	UProxy->dnsLookups[0] = DNSResolveAsync(UProxy, Domain, true, ProxyDNSResolved, ProxyDNSFreed);
 	if (UProxy->dnsLookups[0] != NULL)
 		UProxy->dnsLookupsCount++;
-	msleep(1500);
+	
 	UProxy->dnsLookups[UProxy->dnsLookupsCount] = DNSResolveAsync(UProxy, Domain, false, ProxyDNSResolved, ProxyDNSFreed);
 	if (UProxy->dnsLookups[UProxy->dnsLookupsCount] != NULL)
 		UProxy->dnsLookupsCount++;
